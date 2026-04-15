@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical" android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <TextView
+        android:id="@+id/txt_name_inbox"
+        android:layout_margin="15dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Nangial"
+        android:textSize="18dp"/>
+
+    <TextView
+        android:visibility="gone"
+        android:id="@+id/txt_unreadmessage_inbox"
+        android:layout_marginLeft="10dp"
+        android:layout_marginRight="10dp"
+        android:layout_marginBottom="10dp"
+        android:textColor="#88a903"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Nangial Khan"
+        android:textSize="15sp"/>
+
+    <TextView
+        android:visibility="gone"
+        android:id="@+id/txt_id_inbox"
+        android:layout_marginLeft="10dp"
+        android:layout_marginRight="10dp"
+        android:layout_marginBottom="10dp"
+        android:textColor="#88a903"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Nangial Khan"
+        android:textSize="15sp"/>
+
+    <TextView
+        android:visibility="gone"
+        android:id="@+id/txt_playerid_inbox"
+        android:layout_marginLeft="10dp"
+        android:layout_marginRight="10dp"
+        android:layout_marginBottom="10dp"
+        android:textColor="#88a903"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Nangial Khan"
+        android:textSize="15sp"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0.5dp"
+        android:background="#4c4c4c"/>
+
+</LinearLayout>

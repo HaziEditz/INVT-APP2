@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/activity_job_view"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="com.khybertech.taxi360driver.JobView.JobView">
+
+    <android.support.design.widget.CoordinatorLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+        <android.support.design.widget.AppBarLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+            <android.support.v7.widget.Toolbar
+                app:layout_scrollFlags="enterAlways"
+                app:titleTextColor="#fff"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:background="?attr/colorPrimary"
+                android:theme="?attr/actionBarTheme"
+                android:minHeight="?attr/actionBarSize"
+                android:id="@+id/toolbar_jobview"
+                app:title=""/>
+            <android.support.design.widget.TabLayout
+                android:id="@+id/tablayout_jobview"
+                android:layout_width="match_parent"
+                android:background="@drawable/gridcell"
+                android:backgroundTint="@color/colorGridCells"
+                android:layout_height="72dp"
+                app:tabMode="fixed"
+                app:tabMaxWidth="0dp"
+                app:tabGravity="fill"/>
+        </android.support.design.widget.AppBarLayout>
+        <android.support.v4.view.ViewPager
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:id="@+id/viewpager_jobview"
+            app:layout_behavior="@string/appbar_scrolling_view_behavior"/>
+
+        <android.support.design.widget.FloatingActionButton
+            android:id="@+id/btn_backbtn"
+            android:visibility="visible"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|left"
+            android:layout_marginBottom="70dp"
+            android:layout_marginLeft="16dp"
+            android:tint="#fff"
+            app:backgroundTint="@color/colorPrimaryDark"
+            app:srcCompat="@drawable/back_icon" />
+
+    </android.support.design.widget.CoordinatorLayout>
+</RelativeLayout>

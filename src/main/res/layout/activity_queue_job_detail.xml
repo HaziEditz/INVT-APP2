@@ -1,0 +1,492 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="com.khybertech.taxi360driver.JobView.QueueJobDetail"
+   >
+
+    <android.support.v7.widget.Toolbar
+        app:titleTextColor="#fff"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorPrimary"
+        android:minHeight="?attr/actionBarSize"
+        android:id="@+id/toolbar_queue_job_detail" />
+
+    <LinearLayout
+        android:visibility="visible"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="50dp"
+        android:orientation="vertical"
+        >
+        <LinearLayout
+            android:id="@+id/loadingbarqueue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_below="@id/toolbar_chat_conversation"
+            android:gravity="center"
+            >
+            <ProgressBar
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                />
+
+        </LinearLayout>
+
+        <include layout="@layout/queuejobdetail_cardview"/>
+
+    </LinearLayout>
+
+    <ScrollView
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_centerVertical="true"
+        android:layout_alignParentStart="true">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Booking Id:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_booking_id"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Passenger Name:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_passenger_name"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Passenger Contact:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_passenger_id"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Company Discount:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_company_discount"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Driver Discount:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_driver_discount"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Payment Type:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_payment_type"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Booking Date:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_booking_date"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Booking Time:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_booking_time"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Pick Address:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_pick_addr"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Pick Lat Long:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_pick_latlong"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Drop Address:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_drop_addr"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Drop Lat Long:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_drop_latlong"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Estimated Time:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_estimated_time"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Estimated Distance:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_estimated_distance"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Passengers:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_passengers"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Bags:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_bags"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Wheel Chairs:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_wheelchairs"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+            <LinearLayout
+                android:padding="15dp"
+                android:weightSum="2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <TextView
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Booking Status:"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <TextView
+                    android:id="@+id/txt_queuejob_booking_status"
+                    android:textColor="#fff"
+                    android:textSize="18dp"
+                    android:layout_weight="1"
+                    android:text="Amad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </LinearLayout>
+
+
+    </ScrollView>
+
+    <LinearLayout
+        android:layout_alignParentBottom="true"
+        android:id="@+id/layout_1_fragment_current"
+        android:layout_width="match_parent"
+        android:orientation="horizontal"
+        android:weightSum="3"
+        android:layout_height="wrap_content">
+        <Button
+            android:id="@+id/btn_active_queuejobdetail"
+            android:background="@drawable/button_square"
+            android:shadowRadius="20"
+            android:textColor="#fff"
+            android:backgroundTint="#88a903"
+            android:layout_weight="1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ARRIVED"/>
+        <Button
+            android:id="@+id/btn_cancel_queuejobdetail"
+            android:background="@drawable/button_square"
+            android:textColor="#fff"
+            android:backgroundTint="#e8692b"
+            android:layout_weight="1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CANCEL"/>
+        <Button
+            android:id="@+id/btn_notavailable_queuejobdetail"
+            android:background="@drawable/button_square"
+            android:textColor="#fff"
+            android:backgroundTint="#ef9e11"
+            android:layout_weight="1"
+            android:lines="1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="NOT AVAILABLE"/>
+    </LinearLayout>
+</RelativeLayout>

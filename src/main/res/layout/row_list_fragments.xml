@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="utf-8"?>
+<android.support.v7.widget.CardView
+xmlns:android="http://schemas.android.com/apk/res/android"
+android:orientation="vertical"
+xmlns:card_view="http://schemas.android.com/apk/res-auto"
+android:layout_width="match_parent"
+android:layout_height="wrap_content"
+android:foreground="?android:attr/selectableItemBackground"
+card_view:cardCornerRadius="5dp"
+android:id="@+id/card_view12"
+android:layout_marginLeft="15dp"
+android:layout_marginRight="15dp"
+android:layout_marginTop="10dp"
+android:elevation="2dp"
+    >
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:layout_below="@+id/toolbar_MyAccountActivity"
+    android:background="#ffffff"
+    android:orientation="vertical"
+    >
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Ride Info"
+        android:textSize="20dp"
+        android:textColor="#000"
+        android:layout_marginLeft="10dp"
+        android:layout_marginTop="5dp"
+        />
+    <View
+        android:layout_width="wrap_content"
+        android:layout_height="1dp"
+        android:background="#d3d2d2"
+        android:layout_marginTop="10dp"
+        />
+
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginLeft="10dp"
+        android:layout_marginTop="10dp"
+        android:id="@+id/linearLayout_updateProfile_MyAccountActivity">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Passenger Name"
+            android:textColor="#000"
+            android:drawableLeft="@drawable/people"
+            android:drawablePadding="5dp"
+            />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="20dp"
+            android:text="user@email.com"
+            android:textColor="#000"
+            android:id="@+id/txt_list_current_passengername"
+            android:textAppearance="?android:attr/textAppearanceSmall" />
+    </LinearLayout>
+    <View
+        android:layout_width="wrap_content"
+        android:layout_height="1dp"
+        android:background="#d3d2d2"
+        android:layout_marginTop="10dp"
+        />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Contact"
+        android:textColor="#000"
+        android:drawableLeft="@drawable/number"
+        android:drawablePadding="5dp"
+        android:layout_marginLeft="10dp"
+        android:layout_marginTop="10dp"
+        android:id="@+id/txt_list_current_passengercontact"
+        />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Detail >>  "
+        android:textStyle="bold"
+        android:textColor="#ff3f3f3f"
+        android:drawablePadding="-5dp"
+        android:gravity="end"
+        android:textSize="15dp"
+        />
+    <View
+        android:layout_width="wrap_content"
+        android:layout_height="1dp"
+        android:background="#d3d2d2"
+        android:layout_marginBottom="5dp"
+        android:layout_marginTop="10dp"
+        />
+    <TextView
+        android:visibility="gone"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Booking id"
+        android:background="#fff"
+        android:id="@+id/txt_list_current_bookingid"/>
+
+</LinearLayout>
+
+
+</android.support.v7.widget.CardView>
+
+<!--
+<android.support.v7.widget.CardView
+
+xmlns:android="http://schemas.android.com/apk/res/android"
+android:orientation="vertical"
+xmlns:card_view="http://schemas.android.com/apk/res-auto"
+android:id="@+id/card_view12"
+android:layout_width="match_parent"
+android:layout_height="wrap_content"
+android:background="#CCFF0000"
+card_view:cardCornerRadius="5dp"
+android:elevation="10dp"
+android:foreground="?android:attr/selectableItemBackground"
+android:backgroundTint="@color/colorGridCells"
+
+    >
+
+<View
+    android:layout_width="1dp"
+    android:layout_height="100dp"
+    android:layout_marginLeft="101dp"
+    android:layout_gravity="center_vertical"
+    android:background="#60605a" />
+
+<TextView
+
+    android:layout_width="100dp"
+    android:layout_height="100dp"
+    android:background="@drawable/car"
+    android:backgroundTint="#de9312"
+    />
+
+
+<LinearLayout
+    android:layout_weight="2"
+    android:layout_marginLeft="102dp"
+    android:layout_width="match_parent"
+    android:layout_height="100dp"
+    android:orientation="vertical"
+    android:gravity="center_vertical"
+    android:background="#f0f3f3"
+    >
+
+
+
+    <LinearLayout
+        android:id="@+id/layoutExtraInfoMakeAbooking"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="10dp"
+        android:orientation="vertical">
+        <TextView
+            android:id="@+id/txt_list_current_passengername"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:layout_marginRight="2dp"
+            android:drawableLeft="@drawable/people"
+            android:drawableTint="@color/green"
+            android:drawablePadding="10dp"
+
+            android:textColor="#ff3f3f3f"
+            android:textColorHint="#ff3f3f3f"
+            android:background="@android:color/transparent"
+            android:textSize="20dp"
+            android:paddingLeft="15dp"
+            android:hint="Enter Passsenger Name" />
+
+        <TextView
+            android:id="@+id/txt_list_current_passengercontact"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginRight="15dp"
+            android:textSize="20dp"
+            android:textColor="#ff3f3f3f"
+            android:layout_marginTop="10dp"
+            android:textColorHint="#ff3f3f3f"
+            android:drawableLeft="@drawable/number"
+            android:drawablePadding="10dp"
+            android:drawableTint="@color/green"
+            android:background="@android:color/transparent"
+            android:paddingLeft="15dp"
+            android:hint="Enter Passenger number" />
+
+    </LinearLayout>
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Detail >>  "
+        android:textStyle="bold"
+        android:textColor="#ff3f3f3f"
+        android:drawablePadding="-5dp"
+        android:gravity="end"
+        android:textSize="15dp"
+        />
+</LinearLayout>
+<LinearLayout android:visibility="gone"
+    android:paddingTop="25dp"
+    android:paddingLeft="15dp"
+    android:paddingRight="15dp"
+    android:paddingBottom="7dp"
+    android:weightSum="2"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal">
+    <TextView
+        android:textColor="@color/colorPrimary"
+        android:textSize="18dp"
+        android:layout_weight="1"
+        android:text="Passenger Name:"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+    <TextView
+        android:id="@+id/txt_list_current_passengernamebackup"
+        android:textColor="#fff"
+        android:textSize="18dp"
+        android:layout_weight="1"
+        android:text="Amad"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+</LinearLayout>
+
+<LinearLayout
+    android:visibility="gone"
+    android:paddingTop="7dp"
+    android:paddingLeft="15dp"
+    android:paddingRight="15dp"
+    android:paddingBottom="25dp"
+    android:weightSum="2"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal">
+    <TextView
+        android:textColor="@color/colorPrimary"
+        android:textSize="18dp"
+        android:layout_weight="1"
+        android:text="Passenger Contact:"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+    <TextView
+        android:id="@+id/txt_list_current_passengercontactbackup"
+        android:textColor="#fff"
+        android:textSize="18dp"
+        android:layout_weight="1"
+        android:text="Amad"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+</LinearLayout>
+
+
+
+
+
+</android.support.v7.widget.CardView>
+-->

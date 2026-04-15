@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <color name="colorPrimary">#555759</color>
+    <color name="colorPrimaryDark">#555759</color>
+    <color name="colorAccent">#ffb600</color>
+    <color name="colorDarkBackground">#2f2f2f</color>
+    <color name="colorGridCells">#ff495263</color>
+    <color name="green">#ff74a951</color>
+    <color name="signincolor">#ff5b6f78</color>
+    <color name="blue">#ff3e42ad</color>
+    <color name="textColorPrimary">#FFFFFF</color>
+    <color name="windowBackground">#FFFFFF</color>
+    <color name="navigationBarColor">#000000</color>
+
+    <color name="grey_100">#F5F5F5</color>
+    <color name="grey_300">#E0E0E0</color>
+
+
+</resources>
+
+

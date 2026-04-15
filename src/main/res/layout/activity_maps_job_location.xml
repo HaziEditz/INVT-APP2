@@ -1,0 +1,136 @@
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:map="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:orientation="vertical"
+    android:weightSum="10"
+    android:layout_height="match_parent">
+
+
+    <RelativeLayout
+        android:layout_weight="2"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!--visibility gone-->
+    <Button
+        android:visibility="gone"
+        android:layout_alignParentBottom="true"
+        android:id="@+id/btn_completejob_maps_job_location"
+        android:background="@drawable/button_square"
+        android:shadowRadius="20"
+        android:textColor="#fff"
+        android:backgroundTint="#88a903"
+        android:layout_weight="1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="COMPLETE JOB"/>
+
+
+    <fragment
+        android:id="@+id/map"
+        android:name="com.google.android.gms.maps.SupportMapFragment"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        tools:context="com.khybertech.taxi360driver.Maps.MapsActivityJobLocation" />
+
+
+    <RelativeLayout
+        android:id="@+id/relativecard"
+        android:layout_alignParentRight="true"
+        android:background="@drawable/box_with_radius"
+        android:backgroundTint="@color/colorPrimary"
+        android:layout_marginTop="10dp"
+        android:layout_marginRight="10dp"
+        android:layout_marginLeft="10dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="15dp"
+        android:alpha="0.8">
+        <!--this text is the latest in use-->
+        <TextView
+            android:visibility="gone"
+            android:layout_centerHorizontal="true"
+            android:id="@+id/txt_speed"
+            android:layout_below="@+id/txt_current_location"
+            android:textColor="#fff"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@color/colorPrimary"
+            android:text="asdsad"
+            android:textSize="17sp"/>
+
+        <!--old textview-->
+        <TextView
+            android:visibility="gone"
+        android:layout_centerHorizontal="true"
+        android:layout_below="@+id/txt_estimated_time"
+        android:id="@+id/txt_location"
+        android:textColor="#fff"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@color/colorPrimary"
+        android:text="Current Location"
+        android:textSize="17sp"/>
+
+        <TextView
+            android:id="@+id/txt_estimated_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:background="@color/colorPrimary"
+            android:text="0.00"
+            android:textColor="#fff"
+            android:textStyle="bold"
+            android:textSize="30dp" />
+
+        <TextView
+            android:id="@+id/txt_current_location"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentStart="true"
+            android:layout_alignParentTop="true"
+            android:background="@color/colorPrimary"
+            android:text="0.00 km"
+            android:textColor="#fff"
+            android:textStyle="bold"
+            android:textSize="30dp" />
+        <TextView
+            android:visibility="visible"
+            android:text="00.0"
+            android:drawableRight="@drawable/dollar"
+            android:drawablePadding="10dp"
+            android:drawableTint="#fff"
+            android:layout_centerHorizontal="true"
+            android:layout_marginTop="15dp"
+            android:layout_below="@id/txt_current_location"
+            android:id="@+id/txt_fare"
+            android:textColor="#fff"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@color/colorPrimary"
+            android:textSize="30sp"/>
+    </RelativeLayout>
+
+
+
+</RelativeLayout>
+
+<LinearLayout
+    android:layout_weight="8"
+android:layout_alignParentBottom="true"
+android:id="@+id/fragment_container"
+android:layout_width="match_parent"
+android:layout_height="match_parent"
+android:gravity="bottom"
+android:orientation="vertical"
+android:background="@drawable/box_with_radius"
+android:alpha="0.8"
+    >
+
+
+</LinearLayout>
+
+</LinearLayout>

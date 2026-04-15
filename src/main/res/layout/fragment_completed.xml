@@ -1,0 +1,27 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:background="#f4f4f4"
+    android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    tools:context="com.khybertech.taxi360driver.JobView.Fragments.Current">
+
+    <!-- TODO: Update blank fragment layout -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+            <ListView
+                android:id="@+id/lv_fragment_completed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:drawSelectorOnTop="true"
+                android:divider="@null"
+                android:layout_margin="5dp"
+                android:background="#f4f4f4"
+                android:dividerHeight="5dp"
+                 ></ListView>
+
+    </RelativeLayout>
+
+</FrameLayout>

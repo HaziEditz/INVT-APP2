@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/activity_splash_sign_in"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="com.khybertech.taxi360driver.SplashSignIn"
+    android:background="@color/colorDarkBackground">
+
+    <ImageView
+        android:padding="80dp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:src="@mipmap/logo_splash"
+        android:layout_centerInParent="true"/>
+
+    <Button
+        android:id="@+id/btn_splash_signin"
+        android:textColor="#fff"
+        android:text="Sign In"
+        android:layout_marginBottom="20dp"
+        android:background="@drawable/button_signin"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp" />
+
+</RelativeLayout>
