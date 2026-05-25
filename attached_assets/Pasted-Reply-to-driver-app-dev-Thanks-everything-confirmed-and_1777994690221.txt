@@ -1,0 +1,39 @@
+Reply to driver app dev:
+
+Thanks — everything confirmed and matched on our end. Status on each item:
+#1 — completedAt_ISO / completedAt
+All good. Your fallback is covered on our side too.
+#2 — cardNumber in completedJobs and allbookings
+Perfect — the secondary lookup via bookingId is still there as a safety net
+for any edge cases, but won't be needed now that it's written directly.
+#3 — Status capitalisation
+Fixed on our end just now. We now read both Status (capital S) and status
+(lowercase) and compare case-insensitively, so all historical records with
+Status:"Completed" are picked up correctly alongside the new lowercase ones.
+No further changes needed from you.
+#4 — councilId
+No action needed from you on this one. councilId is not a driver-side field —
+it comes from our tmCards/{cardNumber}.councilId record (the TM voucher card
+stores which council issued it). The SA portal already looks this up via the
+card number when it's not on the job record directly. As long as cardNumber
+is on the job (which it now is — confirmed in #2 above), the council subsidy
+calculation will always resolve correctly.
+Summary: all 4 integration bugs are now resolved on both sides.
+The SA portal dashboard and TM subsidy reports will now show accurate totals
+including all historical dispatched trips.
+One last thing to check at your end — please can you do a quick sanity check
+on a few historical allbookings records and confirm:
+- completedAt_ISO is present (or completedAt as fallback)
+- fare is a number (not a string)
+- bookingId links to a record in trips/{cid}
+If any of those are missing on old records, let us know and we'll add handling.
+
+What was just fixed in the SA portal (this session summary):
+
+#	Bug	Fix location	Status
+1	completedAt vs completedAt_ISO field name — all date maths broken	Home.aspx + SA-PlatformHealth	Fixed
+2	TM cardNumber not in completedJobs — voucher lookup fails	Home.aspx (reads trips/{cid} as fallback)	Fixed
+3	Dispatched jobs in allbookings invisible to SA portal	Home.aspx (both paths merged) + SA-PlatformHealth	Fixed
+3b	Status:"Completed" vs status:"completed" capitalisation	Home.aspx + SA-PlatformHealth	Fixed now
+4	Field contract — councilId question	No code change needed — already resolved via tmCards	Closed
+All four revenue-risk issues are closed. No outstanding items.

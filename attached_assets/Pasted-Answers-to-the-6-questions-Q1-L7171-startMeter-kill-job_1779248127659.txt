@@ -1,0 +1,45 @@
+Answers to the 6 questions
+Q1 — L7171 startMeter: kill jobs/ Status='Active' write entirely?
+✅ YES, delete it. Server's state-of-truth reconciler reads online/{cid}/{vid}/current.meterOnAt (server.js:5317 picks up meterOnAt || MeterOnAt) and stamps MeterOnAt + flips BookingStatus to Picking automatically. The jobs/ Active write is pure redundancy. Driver app should:
+
+Write meterOnAt: <ISO> to online/{cid}/{vid}/current ONLY.
+Drop the jobs/ Status='Active' write.
+Drop the rideStatus/{cid}/{bid} = 'OnTrip' write (L7180) — server derives this too.
+Q2 — L4242 vehiclestatus='Assigned' after accept: optimistic or wait?
+✅ Optimistic, on tap. Use 'Picking', not 'Assigned'.
+
+Server convention is vehiclestatus: 'Picking' for an accepted job in progress (server.js:7725, 9101). 'Assigned' isn't in the server's vocabulary — driver app writing 'Assigned' would diverge from what dispatch UI reads. Use 'Picking'.
+Tap → flip local state to Picking immediately + POST command:'accept'. If server returns non-2xx (e.g. version_conflict, forbidden), roll back to previous vehiclestatus. The server's acceptBooking updates ZONE_DRIVERS to Picking too — both writes converge on the same value.
+Q3 — L7642 jobpickup/jobdropoff mirrors: keep for hail, drop for dispatch?
+✅ Keep for hail, drop for dispatch.
+
+Dispatch path: server stamps jobpickup/jobdropoff/JobphoneNo/jobname into online/.../current itself (server.js:6282, 7381, hail-fanout at ~6008 §FIX-HAIL/2). Driver app mirror is redundant.
+Hail path: driver supplies pickup/dropoff because the trip starts at the driver, not from a dispatcher record. Server also writes these on /api/job/create source:hail (§FIX-HAIL/2), but the driver-side write is what seeds the value during the create round-trip. Safe to keep — they'll match.
+TL;DR: drop the dispatch-side mirror. Keep the hail-side mirror.
+Q4 — Ratings (L7458, 7460, 7470): direct write or command:'update'?
+✅ Keep as direct Firebase writes for now. Ratings aren't in /api/job/command's state machine — they're post-trip metadata, not lifecycle. Wrapping them would require adding rating to the updateBooking whitelist and the booking event stream, which is bigger than the 22c scope. Phase 2 candidate. Exception: L7460 writes rating into allbookings/{cid}/{bid} directly — that's fine because it's after the trip is in Completed terminal state; server has already moved on. No conflict.
+
+Q5 — L7559 driver-created bookings (pendingjobs/ set from jobs.tsx): in scope?
+❌ Out of scope for 22c. That's a "driver acts as dispatcher" feature, completely different flow from the lifecycle verbs. Keep direct Firebase writes. Phase 3 candidate — eventually goes through /api/job/create source:'driver' like passenger app uses source:'passenger', but no need to bundle with 22c.
+
+Q6 — L6759, 6885 jobs/ remove on shift teardown: safe to delete?
+✅ YES, delete. Server's _maybeRestoreDriverState + shift-end / disconnect handlers clean abandoned bookings (server.js:7026 zd reset on shift-end, plus the §FIX-GHOST DELETE pattern). If a driver shifts out with an active job, server side will eventually reconcile via the SOT pass.
+
+🚩 SERVER-DEV-EYES — explicit answers
+Line	Decision
+L7171 startMeter jobs/ Active	DELETE — meterOnAt presence stamp is sufficient
+L4242 vehiclestatus='Assigned'	REPLACE with 'Picking', optimistic on tap, roll back on error
+L7642 jobpickup/jobdropoff hail	KEEP for hail only, drop dispatch-side mirror
+L7458 driverRatings	KEEP direct write — phase 2
+L7460 allbookings rating	KEEP direct write — post-terminal, safe
+L7470 passengerRatings	KEEP direct write — phase 2
+L7559 driver-created pendingjobs	OUT OF SCOPE, phase 3
+One thing the audit missed — please add
+The driver app should also read pendingjobs/{cid}/{bid}.updateSeq and allbookings/{cid}/{bid}.updateSeq on cold-start, per the §FIX-CMD/ver-fanout I shipped earlier. That's how the phone seeds ifVersion after a relaunch without replaying bookingEvents. Confirm this read path is on their cold-start checklist.
+
+Net delta from the audit
+REPLACE: 8 sites (5 accept, 1 acceptToQueue, 2 complete, 1 hail-claim, 1 decline, 1 recall, 1 cancel — your counts are right)
+DELETE: 27 sites + the 2 shift-teardown jobs/ removes = 29 sites
+KEEP-presence: 24 (with L4242/4321 changed to 'Picking', and L7642-style mirrors removed for dispatch)
+KEEP-chat/profile/cleanup: 14
+Ship it. The 🚩 list is fully resolved — no more server-side blockers. Let me know if anything else comes up during their 4-day implementation.

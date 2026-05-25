@@ -1,0 +1,246 @@
+Driver App & Dispatch Platform Requirements
+
+We need to prevent:
+
+stuck active jobs
+incomplete trips
+meter freezing
+dispatch mismatch
+drivers blocked from starting new trips when offline
+
+The system must support full offline operation and delayed sync.
+
+1. Make Driver App Offline-First
+
+Driver app must work without network.
+
+Driver must always be able to:
+
+accept trip
+start trip
+run meter
+stop meter
+complete trip
+add payment
+close trip
+start another trip
+
+even when:
+
+internet is disconnected
+weak signal
+backend timeout
+websocket disconnected
+server unavailable
+2. Save Everything Locally First
+
+All trip actions must save immediately to local database before API calls.
+
+Use:
+
+SQLite / Room / Realm / CoreData
+
+Every trip event should store locally:
+
+{
+  "job_id": "12345",
+  "status": "COMPLETED_LOCAL",
+  "fare": 52.40,
+  "distance": 14.2,
+  "payment_type": "cash",
+  "sync_status": "PENDING"
+}
+
+The app must not depend on live API response to complete a job.
+
+3. Add Proper Job States
+
+Need separate:
+
+local trip state
+server sync state
+
+Example states:
+
+DISPATCHED
+ACCEPTED
+ARRIVED
+STARTED
+COMPLETED_LOCAL
+SYNC_PENDING
+COMPLETED_SERVER
+CLOSED
+
+A completed local trip must NOT reopen as active.
+
+4. Add Offline Sync Queue
+
+Need background sync system.
+
+Queue actions like:
+
+START_TRIP
+METER_UPDATE
+COMPLETE_JOB
+PAYMENT
+CLOSE_JOB
+
+When internet returns:
+
+retry automatically
+sync pending jobs
+confirm with backend
+mark synced
+
+Do not delete local data until backend confirms.
+
+5. Fix “Stuck Active Job” Logic
+
+If:
+
+trip completed locally
+but server did not receive completion
+
+Then app should show:
+
+Completed - waiting for sync
+
+NOT:
+
+active trip
+running meter
+
+On app restart:
+
+recover local completed job
+retry sync automatically
+6. Allow New Trip Even If Previous Job Not Synced
+
+Driver must still be able to start another ride.
+
+Old completed jobs should sync later in background.
+
+Do NOT block drivers because of pending sync.
+
+7. Add Crash Recovery
+
+If app crashes or phone restarts:
+
+restore active trip from local database
+restore meter
+restore fare
+restore elapsed time
+
+No trip data should be lost.
+
+8. Store GPS & Meter Data Offline
+
+While offline store:
+
+GPS points
+timestamps
+fare updates
+waiting time
+tolls
+stops
+
+Then upload later when internet returns.
+
+9. Add Idempotent APIs
+
+Need duplicate protection.
+
+Every action should include unique UUID/action_id.
+
+Example:
+
+complete_job(
+  job_id,
+  action_id
+)
+
+Server must ignore duplicates safely.
+
+This prevents:
+
+double completed trips
+duplicate charges
+duplicate closures
+10. Backend Must Accept Delayed Sync
+
+Backend APIs must support:
+
+offline uploads
+delayed timestamps
+replayed events
+
+Trip may sync:
+
+minutes later
+hours later
+
+and still close correctly.
+
+11. Add Automatic Retry System
+
+Retry pending sync:
+
+when internet reconnects
+app opens
+user logs in
+periodic background worker
+
+Use exponential retry:
+
+5 sec
+15 sec
+30 sec
+1 min
+5 min
+12. Add Driver UI Sync Status
+
+Show statuses clearly:
+
+✓ Trip Completed
+⟳ Waiting for Network
+✓ Synced Successfully
+
+Drivers should know trip is safe locally.
+
+13. Recommended Architecture
+
+Need:
+
+Driver App
+→ Local Database
+→ Offline Sync Queue
+→ REST API
+→ Dispatch Backend
+
+Realtime websocket should NOT be the only trip system.
+
+14. Main Goal
+
+The device should be the source of truth during active trips.
+
+Backend becomes source of truth after successful sync.
+
+This will eliminate:
+
+stuck active jobs
+lost fares
+meter issues
+dispatch mismatches
+network-related failures
+15. Priority Features to Implement First
+
+Priority order:
+
+Local trip storage
+Offline completion
+Sync queue
+Crash recovery
+Pending sync retry
+Idempotent APIs
+GPS buffering
+Full audit/event logs

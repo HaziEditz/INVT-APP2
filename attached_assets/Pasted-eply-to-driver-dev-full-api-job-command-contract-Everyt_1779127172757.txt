@@ -1,0 +1,193 @@
+eply to driver dev — full /api/job/command contract.
+
+Everything below is live in production right now — including clientRequestId dedup, accept verb, ifVersion on every command, full ~30-field complete payload, and structured error codes. Test against the dev URL today; nothing in this contract is "spec only".
+
+URL
+POST /api/job/command
+
+Same host as /api/driver/active-bookings. No /v1/ versioning — backward-safe additive changes only.
+
+Headers
+Header	Required when	Notes
+Content-Type: application/json	Always	
+X-User-Key: <driver.passforlink>	by:"driver"	Server matches against ZONE_DRIVERS and derives driverId + companyId. Client cannot spoof.
+X-Admin-Key: $BW_ADMIN_KEY	by:"passenger", by:"website"	Server-to-server only. Do NOT ship this in the driver app.
+Cookie: BW_SID=…	by:"dispatcher"	Browser session.
+Idempotency-Key: <uuid>	Optional everywhere	Alternative to clientRequestId in body. Same semantics.
+Request body
+{
+  "bookingId": 12345,                    // required, integer
+  "command":   "accept",                 // required, see verb list below
+  "by":        "driver",                 // required: dispatcher|driver|passenger|website
+  "ifVersion": 7,                        // optional integer — see "Optimistic concurrency"
+  "clientRequestId": "uuid-v4",          // optional string — see "Idempotent retries"
+  "payload": { /* verb-specific, see below */ }
+}
+
+ifSeq is accepted as a synonym for ifVersion (legacy). Use ifVersion.
+
+Verb list
+command	Allowed by	Purpose	Payload
+accept	driver	Driver confirms an offered booking. Stamps DriverAcceptedAt, bumps version.	{} (none — driver derived from X-User-Key)
+cancel	driver, dispatcher, passenger, website	Hard-cancel the booking (terminal). For driver = "decline an offer" OR "cancel after accept".	{ reason?: string }
+recall	driver, dispatcher	Driver returns an Assigned booking to Pending. Job stays alive.	{ reason?: string }
+update	dispatcher, passenger, website	Edit booking fields.	{ changes: { PickAddress: "...", Notes: "..." } }
+assign	dispatcher, passenger	Assign job to a specific driver/vehicle.	{ driverId: "42", vehicleId: "7" }
+complete	driver	Finalise trip. Moves to closedJobStore.	full schema below
+Decline an offer = cancel with by:"driver" and payload:{reason:"declined"}.
+Driver cancel after accept = cancel with by:"driver" and payload:{reason:"cancelled_by_driver"}.
+
+acknowledge_arrival and start_meter are NOT command-API verbs — stay as direct writes to online/{cid}/{vid}/current per Q4. Don't move them.
+
+Full complete payload
+{
+  "fare": 24.50,
+  "distance": 8.2,
+  "duration": 720,                       // seconds
+  "tariffId": "TARIFF_NIGHT",
+  "tariffName": "Night rate",
+  "tariffChangedAt": "2026-05-25T22:00:00.000Z",
+  "waitingCost": 4.50,
+  "waitingTimeMinutes": 3,
+  "extras": [ { "code": "WHEELCHAIR", "amount": 5.00 } ],
+  "extrasTotal": 5.00,
+  "voucherCode": "PROMO10",
+  "voucherDiscount": -2.50,
+  "tmVoucher": { "code": "...", "value": 10.00 },
+  "accClientId": "ACC-1234",
+  "accApprovalNo": "AP-9999",
+  "accClaimNo": "CL-7777",
+  "paymentMethod": "Card",
+  "paymentSplit": [
+    { "method": "Card",  "amount": 20.00, "stripeChargeId": "ch_..." },
+    { "method": "Cash",  "amount": 4.50 }
+  ],
+  "stripeChargeId": "ch_abc123",
+  "stripePaymentIntentId": "pi_abc123",
+  "startTime": "2026-05-25T22:00:00.000Z",
+  "endTime":   "2026-05-25T22:12:00.000Z",
+  "pickupLat":  -41.28, "pickupLng": 174.78,
+  "dropLat":    -41.30, "dropLng":   174.80,
+  "finalDropAddress": "actual drop if driver deviated",
+  "driverComments": "passenger asked for receipt",
+  "meterReading":   "0123456",
+  "fixedPrice": false,
+  "fixedPriceReason": "",
+  "gst": 3.20, "tipAmount": 2.00, "tollFee": 0, "parkingFee": 0
+}
+
+All fields optional except fare (recommended) and distance (recommended). Unknown fields are silently ignored — feel free to add more later, server will whitelist them in a follow-up.
+
+Success response shape
+Every successful response includes version (post-mutation) and a booking echo so you can roll-forward optimistic state:
+
+{
+  "ok": true,
+  "idempotent": false,
+  "status": "Assigned",
+  "version": 8,
+  "booking": {
+    "bookingId": 12345,
+    "status": "Assigned",
+    "version": 8,
+    "updatedAt": 1716624000000,
+    "driverId": "42",
+    "vehicleId": "7",
+    "passengerName": "Jane",
+    "passengerPhone": "+64...",
+    "pickupAddress": "...",
+    "dropAddress": "...",
+    "fare": 24.50,
+    "distance": 8.2,
+    "paymentMethod": "Card",
+    "notes": "",
+    "bookingSource": "Website Booking"
+  }
+}
+
+On retry-with-same-clientRequestId, you get the same response with an additional "dedup": true flag. Use that as a hint that this isn't a fresh state event — your local UI should already be reconciled.
+
+Error response shape
+Always { ok: false, error_code, error, ... }. The HTTP status code is informative but switch on error_code, not status — codes are stable across versions, statuses may broaden.
+
+error_code	HTTP	Meaning	Driver-side reaction
+bad_request	400	Missing/invalid bookingId, command, or by	Bug in client. Do not retry.
+auth_failed	401	X-User-Key not recognised or expired	Force re-login.
+forbidden	403	Cross-tenant, or accept-as-wrong-driver	Surface as "this booking isn't yours". Do not retry.
+not_found	404	bookingId doesn't exist	Drop from local cache.
+invalid_transition	409	State machine refused (e.g. trying to complete a Pending job)	Re-read via GET /api/driver/active-bookings; response includes currentStatus + booking echo.
+version_conflict	409	ifVersion doesn't match server's current updateSeq	Roll forward to currentVersion in response, re-submit with new ifVersion.
+already_terminal	410	Booking already Completed/Cancelled in closedJobStore	Drop from local active list. Response carries the final booking echo.
+server_error	500	Unexpected — exception caught by handler	Retry with exponential backoff (same clientRequestId).
+version_conflict and invalid_transition both return the current booking object so you can reconcile without a separate GET.
+
+Optimistic concurrency (ifVersion)
+Optional but strongly recommended for complete, update, cancel, recall. Skip it on accept (the offer-version race is benign — last accept wins).
+
+If omitted, server applies the mutation unconditionally. If included and the server's current updateSeq differs, the response is:
+
+{
+  "ok": false,
+  "stale": true,
+  "error_code": "version_conflict",
+  "error": "version mismatch (sent 6, current 8)",
+  "currentVersion": 8,
+  "booking": { ... }   // full current state for roll-forward
+}
+
+Idempotent retries (clientRequestId)
+Generate a UUID per user action (Accept tap → 1 UUID, Complete tap → 1 UUID). Send it on the first POST AND every retry of that same action. The server caches the full response for 10 minutes keyed by (by, bookingId, command, clientRequestId).
+
+Same UUID, retry within 10 min → same response + dedup:true flag. No double-mutation.
+Same UUID, retry after 10 min → re-processed. State-based idempotency (already-Assigned, already-Completed) still protects you, but the response may differ.
+Different UUIDs for the same action → server treats as separate commands. Don't do this.
+Auth/bad_request errors are not cached — those should re-evaluate on retry.
+
+Offline retry / .info/connected reconnect
+Your AsyncStorage queue should:
+
+Persist (method, url, headers, body) tuples on .info/connected → false.
+On reconnect, replay in order with the original clientRequestId.
+Treat dedup:true as success.
+On version_conflict, the queued action is stale — drop it, roll-forward to server version, surface a toast if user-visible (e.g. "your edit didn't apply because the booking changed — refreshed").
+On already_terminal, drop silently — the booking is gone.
+Worked examples
+# Accept — driver app
+POST /api/job/command
+X-User-Key: <passforlink>
+{
+  "bookingId": 12345,
+  "command": "accept",
+  "by": "driver",
+  "clientRequestId": "550e8400-e29b-41d4-a716-446655440000"
+}
+# Decline — driver app
+POST /api/job/command
+X-User-Key: <passforlink>
+{
+  "bookingId": 12345,
+  "command": "cancel",
+  "by": "driver",
+  "payload": { "reason": "declined" },
+  "clientRequestId": "550e8400-..."
+}
+# Complete — driver app with version lock
+POST /api/job/command
+X-User-Key: <passforlink>
+{
+  "bookingId": 12345,
+  "command": "complete",
+  "by": "driver",
+  "ifVersion": 8,
+  "clientRequestId": "550e8400-...",
+  "payload": {
+    "fare": 24.50, "distance": 8.2, "duration": 720,
+    "paymentMethod": "Card",
+    "paymentSplit": [{"method":"Card","amount":24.50,"stripeChargeId":"ch_..."}],
+    "tariffId": "TARIFF_NIGHT",
+    "waitingCost": 4.50, "waitingTimeMinutes": 3
+  }
+}
+
+Cutover plan — agreed
+Mon 25 May AM: you publish 22c, soak Mon PM + Tue on the two test phones. Wed AM: I flip dispatch's offer writes to per-bookingId children if soak is clean. If anything's off, we hold at 22bp + the new /api/job/command exposed but unused — zero rollback risk on my side because none of this changes existing dispatch behaviour, it only adds the new front door.

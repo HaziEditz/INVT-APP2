@@ -1,0 +1,33 @@
+Driver app audit — cross-check results
+Fixed immediately (passenger app bug found during review)
+Passenger star rating was silently dropped. The ride-complete screen collects a 1–5 star rating and calls completeRide(rating, tip), but that function was ignoring the rating argument entirely — it only wrote finalFare and paymentStatus. The rating was only saved to the passenger's own local trip history, never to any shared Firebase path the driver app or SA portal could read.
+
+Fixed now. On trip completion, the passenger app now writes:
+
+passengerRating + passengerRatedAt → Firestore allbookings/{cid}/rides/{jobId} (patched onto the booking record)
+passengerRating, passengerRatedAt, passengerId, driverName → RTDB driverRatings/{cid}/{jobId} via update() (so it merges with whatever the driver app wrote there, never overwrites it)
+passengerRating + passengerRatedAt → RTDB allbookings/{cid}/{jobId} (same booking mirror)
+What the driver app confirmed — all checks out
+Item	Result
+GPS writes to online/{cid}/{vid}/current	✅ Structure matches what's expected
+All payment types handled at trip completion	✅ cash, card, wallet, account, business_account, acc — all present
+ACC tripsUsed increment path	✅ Correct Firebase path, transaction-safe
+Cancellation writes to allbookings/{cid}/{bookingId}	✅ Passenger app listens there — will catch it
+Freight POD at freightOrders/{cid}/{bookingId}	ℹ️ Passenger freight is demo-only, noted for future build
+Rating modal at driverRatings/{cid}/{jobId}	✅ Passenger app now writes passengerRating to same doc
+Two open questions to send back to the driver dev
+1. Driver live location — how does it reach the passenger?
+
+The driver app pushes GPS to online/{cid}/{vid}/current. The passenger app reads DriverLat/DriverLng from the booking record at allbookings/{cid}/{jobId}. Those paths don't overlap — there's no direct connection between them. The passenger's tracking dot only moves if something (presumably the dispatcher) copies the driver's coordinates from online/ into the booking record's DriverLat/DriverLng fields on every GPS cycle.
+
+Ask the driver dev: Does the dispatcher copy online/{cid}/{vid}/current lat/lng into allbookings/{cid}/{jobId} as DriverLat / DriverLng? If nothing is doing that copy, the passenger tracking map will show the driver as frozen at their position when the job was accepted.
+
+2. TM voucher field name mismatch
+
+The passenger app writes tmVoucherNumbers (a flat array, e.g. ["1234567"]) and tmPassengers[0].cardNumber. The driver app triggers TM mode by reading extras.tmVoucherNo (a single string). The passenger app never writes that field.
+
+If the dispatcher copies tmVoucherNumbers[0] → extras.tmVoucherNo at assignment time, it works fine and there's nothing to fix. If it doesn't, the driver's meter never activates TM mode for any booking.
+
+Ask the driver dev: Does the dispatcher set extras.tmVoucherNo from tmVoucherNumbers[0] at job assignment, or does the driver app need to add a fallback read from tmVoucherNumbers[0] directly?
+
+The checklist (BOOKING_AUDIT_CHECKLIST.md) has been updated with all of this — section 5 has the full driver-audit cross-check table and both open questions, so whoever sends the follow-up to the driver team has it all in one place.

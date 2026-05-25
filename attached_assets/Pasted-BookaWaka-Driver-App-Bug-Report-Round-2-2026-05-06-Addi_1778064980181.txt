@@ -1,0 +1,28 @@
+BookaWaka — Driver App Bug Report Round 2 (2026-05-06)
+Additional bugs found during continued E2E testing. Please fix and confirm.
+
+CRITICAL
+BUG R6 — False "network error / check your connection" when starting a hail trip Driver gets a network error popup when starting a hail trip even with full connectivity. Root cause: the app calls POST /api/job/create to get a job ID at trip start. If that call fails or times out, the error shown is a generic "check connection" message even when the device has internet. Fix:
+
+Retry the /api/job/create call 3× before giving up
+Only show "check connection" if the device genuinely has no internet (check navigator.onLine or equivalent)
+If the SA portal returns an error, show the actual error, not a connection message
+BUG R7 — Meter stops working if network drops mid-trip If connectivity drops during a hail trip, the meter stops. Driver cannot complete the trip. Required behaviour: the meter must run entirely on-device (local timer + GPS). Network is only needed at trip END to submit the completed record. The meter must never depend on Firebase or any network call to keep running. Fix: decouple meter logic from all network writes. Run meter with a local interval timer. GPS tracking stored locally. Only write to Firebase when the trip ends.
+
+BUG R8 — Completed offline trips not uploading after reconnection Trips completed while offline are not syncing to Firebase when the driver reconnects. Firebase shows no record of these trips at all — they are stuck on the device. Fix: write completed trip to local storage first, then attempt Firebase write. On reconnect, flush the local queue. Show driver a "syncing..." indicator while uploading. Retry up to 3 times on failure, then alert driver if sync still fails.
+
+BUG R10 — TM tariff not resetting between trips Three consecutive Driver 2 trips all recorded tariffId: "5" (Total Mobility tariff) regardless of payment type — including cash hail trips and a food delivery. The tariff from one trip carries over to the next. Firebase evidence: hail-1778049377344 (cash food), hail-1778047760181 (TM), hail-1778046818612 (cash hail) — all show tariffId: "5". Fix: always reset tariff to the company default taxi tariff when a new hail trip is started. Never carry tariff state between trips.
+
+BUG R11 — Card payment not working in driver app hail flow When passenger selects card payment at end of hail trip, payment does not process. SA portal Stripe keys are confirmed set. To collect card payment:
+
+Call GET /api/payment-config?cid={companyId} on the SA portal to get the Stripe publishable key
+Use Stripe SDK with that key to collect card details and confirm payment
+Write cardPayment: true, paymentMethod: "card" to the completed trip record
+HIGH
+BUG R4 (updated) — Double messages + messages not writing to driverMsg/{companyId} Firebase shows driverMsg/620611 is null — driver app is NOT writing to driverMsg/{companyId} at all. Instead, messages are being written to BOTH notification/D002 AND notification/TAXI02. The backward-compat relay then copies D002 → TAXI02, so dispatch sees every message twice. Fix:
+
+Write driver messages ONLY to driverMsg/{companyId} (e.g. driverMsg/620611)
+Include fields: from, driverId, vehicleId, senderName, text, timestamp
+Remove all message writes from notification/ — that path is for incoming job offers only
+MEDIUM
+BUG R9 — Food job incorrectly available as hail Driver completed a food delivery as a hail trip (bookingType: "food", source: "hail"). Food jobs must only come through dispatch. Hail is always taxi only. Fix: remove food and freight from the hail job type selector. Hail = taxi only, always.

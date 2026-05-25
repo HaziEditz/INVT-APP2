@@ -1,0 +1,64 @@
+Reply to driver dev — 5 questions answered.
+
+Good push-back. You're right that 22bp covers more than I gave you credit for, and you're right that the dev-team task map I sent reads more ambitious than what's actually built. Let me clear up exactly what's mandatory vs. nice-to-have so you don't waste a sprint.
+
+Q1 → No. bookingEvents is NOT the new sole source of truth.
+
+The architecture is layered, not either/or:
+
+jobs/{cid}/{vid}/{drv}/{bookingId} (G2) — your live working state. Offers, edits, terminals. This is what you subscribe to with onChildAdded/Changed/Removed. Keep it.
+bookingEvents/{cid}/{bookingId} — the rich audit + granular diff stream. Tells you what specifically changed (PickupChanged vs FareChanged vs StopAdded) so you can update the relevant card field without re-reading the whole node. Optional — you only need this if you want field-granular UI updates instead of a full re-read on every change.
+online/{cid}/{vid}/current — driver presence/location. Owned by the driver app. No change.
+§6a's "deferred to a future polish OTA" still stands for the granular field-diff polish. The base lifecycle (offer/edit/cancel/complete) is fully served by G2's eventType on the jobs/ child.
+
+Q2 → No. G2 is NOT obsolete. Ship it.
+
+Subscribe to jobs/{cid}/{vid}/{drv} parent, get onChildAdded/Changed/Removed per booking, read eventType off the snapshot for terminal reason. That's the full base contract. bookingEvents subscription is a phase-2 polish, not a replacement.
+
+Q3 → Full event-type contract.
+
+Two surfaces, different shapes:
+
+Public 6-value enum (on jobs/{cid}/{vid}/{drv}/{bookingId}.eventType and notification/{drv}.eventType) — this is what you switch on:
+
+new_offer — offer arrived (onChildAdded)
+updated — any field changed (onChildChanged → re-read the node)
+cancelled — cancelled by passenger/dispatcher/timeout (onChildRemoved)
+recalled — driver previously accepted, dispatch returned to pending (onChildRemoved)
+completed — trip finished (onChildRemoved)
+reassigned — currently not emitted by dispatch; reserved for future. Treat as cancelled if you see it.
+Accept/Decline are driver→server only, NOT replayed back on this stream. You drive those.
+
+In-trip lifecycle (OnTheWay/Arrived/MeterOn) — those are driver-owned writes to online/{cid}/{vid}/current today. Not bookingEvents. Keep that.
+
+Rich audit stream shape (bookingEvents/{cid}/{bookingId}/{push-id}) — phase-2 only:
+
+{ type, seq, by, at, diff: { fieldName: { from, to } } }
+
+Types currently emitted: OfferSent, BookingCancelled, BookingRecalled, BookingCompleted, PickupChanged, DropoffChanged, StopAdded, PassengerNoteChanged, PassengerInfoChanged, FareChanged, ScheduleChanged, JobUpdated. Each event is a delta, not a snapshot — to get current state, re-read the jobs/ child or call GET /api/driver/active-bookings.
+
+Q4 → "No local override" — narrower than you read it.
+
+Three cases:
+
+(a) Make Me Available → stays a direct write to online/{cid}/{vid}/current.vehiclestatus = 'Available'. Presence is yours. No change.
+(b) Decline offer → POST to API. Use the new POST /api/job/command with {command:'cancel', by:'driver', payload:{reason:'declined'}}. Stop writing DriverDeclined to jobs/ (per C1 Option A you signed off on last round).
+(c) Complete trip → POST to API. Use POST /api/job/command with {command:'complete', by:'driver', payload:{fare, distance}}. This shipped today on dispatch side — idempotent, version-locked, emits the right events. You can stop writing completedJobs/ directly. (Legacy /api/syncOfflineTrip still works for the offline-replay edge case.)
+The rule is: lifecycle state mutations → API. Presence/location → Firebase direct. Not "API for everything".
+
+Q5 → Optimistic UI. Strongly.
+
+Tap Accept → flip local state immediately → POST in background → if server returns non-2xx, roll back with a toast. Same for Decline. 500ms blank stares would absolutely cause driver rage and I won't ship that.
+
+"No local override" means don't write Firebase paths the server owns (jobs/, bookingEvents/, pendingjobs/, allbookings/). It does NOT mean "no local UI state". Drivers should see instant feedback; the server is the eventual source of truth via the version field — if your local optimistic state has a lower version than what comes back from the server, roll forward to the server version.
+
+Net OTA scope:
+
+This is NOT a 5–7 day rearchitecture. It's:
+
+Wire your existing G2 listener to call POST /api/job/command for accept/decline/complete instead of writing Firebase. (1–2 days)
+Optimistic local update + rollback-on-error. (1 day)
+Drop the dormant direct-Firebase-write paths for jobs/ / completedJobs/. (0.5 day)
+Phase-2 bookingEvents granular subscription is a separate, optional, future OTA. Skip it for now.
+
+Call this 22c, ship in 3–4 days dev + 1 day soak. 22bp stays in prod.

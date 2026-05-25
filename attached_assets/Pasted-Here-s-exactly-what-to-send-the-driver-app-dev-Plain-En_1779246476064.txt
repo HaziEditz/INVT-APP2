@@ -1,0 +1,65 @@
+Here's exactly what to send the driver-app dev. Plain English on top, the exact contract underneath so they have everything they need.
+
+What I need from the driver-app cutover (22c)
+Stop writing booking state directly to Firebase. Send every lifecycle action through one server endpoint instead. Keep direct Firebase writes ONLY for presence (driver location, online/offline, vehiclestatus). Everything that changes a booking — Accept, Decline, Arrived, MeterOn, Complete, Cancel — goes through POST /api/job/command.
+
+The endpoint
+POST https://<server>/api/job/command
+Headers:
+  Content-Type: application/json
+  X-User-Key: <driver's passforlink / userKey value>
+Body:
+  {
+    "bookingId":      "<the booking ID>",
+    "command":        "accept" | "cancel" | "complete" | "update",
+    "by":             "driver",
+    "ifVersion":      <last known updateSeq, optional but recommended>,
+    "clientRequestId":"<UUID generated locally on each tap>",
+    "payload":        { ...verb-specific, see below }
+  }
+
+The server figures out the driverId and companyId from the X-User-Key header. The phone does not send driverId — that's how I block spoofing.
+
+Replace these driver-app actions
+Today the driver app does	Change it to
+Write DriverAccepted: true to Firebase	command:"accept"
+Write DriverDeclined: true to Firebase	command:"cancel", payload {reason:"declined"}
+Write to completedJobs/	command:"complete", payload with fare/distance/payment
+"Cancel after accept" Firebase write	command:"cancel", payload {reason:"<driver's reason>"} — server decides recall vs close based on status
+Anything that touches BookingStatus in Firebase	Remove. Server owns booking status.
+KEEP writing directly to Firebase (presence only)
+online/{cid}/{vid}/current — location, heading, vehiclestatus (Available/Busy/Away), OnTheWayAt, ArrivedAt, MeterOnAt timestamps
+Driver's own profile node
+Anything under /driverMsg/ (chat)
+That's it. Booking nodes (jobs/, pendingjobs/, allbookings/, notification/) become read-only to the driver app.
+
+Arrived / OnTheWay / MeterOn
+This is what bit you on the ride that broke. These three are NOT lifecycle changes (the booking stays Assigned/Picking). They're presence stamps. The driver app should:
+
+Stamp the timestamp into online/{cid}/{vid}/current (onTheWayAt, arrivedAt, meterOnAt) — direct Firebase write, fine.
+Do NOT write anything to jobs/{cid}/{vid}/{drv}/{bid} for these events.
+Do NOT change BookingStatus on the phone for these events.
+The server already reads those timestamps from presence and reconciles them into the booking. The "press Arrived → ghost cancel re-offer loop" you saw happened because the old driver app was also writing to the booking node, and the server's listener treated that write as a state change.
+
+Idempotency rules the driver-app dev MUST implement
+Generate a fresh clientRequestId (UUID) on every user tap. If the phone retries the same tap (lost network, app re-mount), send the SAME clientRequestId. Server returns {dedup:true} and you treat it as success.
+Optimistic UI: flip the button state locally on tap, POST in the background, roll back if the response is non-2xx.
+Always send ifVersion = the booking's updateSeq you last received. If you get error_code:"version_conflict", the server includes the current version in the response — update your local copy from that and don't retry the same action.
+Handle these error codes
+error_code	What the app does
+auth_failed	Force re-login
+forbidden	Drop the action, this isn't your booking
+not_found	Drop from local cache
+invalid_transition	Re-read state from server, don't retry
+version_conflict	Roll forward to currentVersion in response
+already_terminal	Drop from active list silently — the booking is done
+server_error	Retry with backoff, SAME clientRequestId
+Offline queue
+When .info/connected flips to false, persist every command locally in order. When it reconnects, replay them in order with their original clientRequestId. Duplicates get dedup:true and you can drop them. Conflicts get version_conflict and you roll forward.
+
+Done means
+After the cutover I expect to see in the server logs: every accept / cancel / complete / decline coming through [/api/job/command] log lines, and ZERO direct Firebase writes from the driver app to jobs/ or notification/ or anything touching BookingStatus. That's the signal it's clean.
+
+Effort estimate to give them: 3–4 days of dev + 1 day soak test. If the driver-app dev pushes back saying that's a lot, the answer is: every bug we've spent the last two weeks on lives in the "driver app and server disagree" gap. Closing that gap once eliminates the whole class.
+
+Forward that as-is to the driver-app dev. If they have questions about the exact JSON shape of any payload (complete has ~30 optional fields for fare/tariff/voucher/ACC/splits/etc), tell them to ask and I'll send the field list.

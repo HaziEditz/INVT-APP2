@@ -1,0 +1,30 @@
+What just shipped (verified)
+
+Runtime stamping for every syncOfflineTrip POST, both live and late-merge paths:
+
+appVersion → AppVersion (the native app version)
+runtimeVersion → RuntimeVersion (Expo runtime, separate field now)
+groupId → AppBuild (EAS update group)
+channel → Channel (production/staging/etc.)
+platform → Platform
+Pre-22bg payloads (with only runtimeVersion) still populate AppVersion as a fallback so nothing regresses.
+Late-merge stays fill-if-empty so an earlier truth never gets clobbered.
+Driver row +N badge tooltip is now dynamic — shows "3 queued job(s) lined up" instead of the hard-coded "1 queued job lined up". Works for taxi (1) and food/freight (N).
+
+Gap the architect caught — multi-queue visibility on dispatch
+
+The driver-app dev wrote food/freight queues to driverQueue/{cid}/{did}/queuedMulti/{bookingId} in Firebase. But our dispatch console builds $scope.queuedJobs from the [GetQueuedJobs] poll, which reads our server's jobStore — not Firebase. So unless the driver app also calls our [QueueJob] REST endpoint for each multi-queue job, those jobs will be invisible in the dispatch UI: no amber Pre-Queue strip, no +N badge, no row in the queued panel.
+
+The Firebase listener at driverQueue/{cid} does fire on queuedMulti writes, but all it does is trigger a [GetQueuedJobs] refresh — which still reads jobStore, which still doesn't know about those jobs.
+
+One question for the driver-app dev — paste this back to them:
+
+Quick clarification on OTA-22bg multi-queue: for food / freight jobs that you now write to driverQueue/{cid}/{did}/queuedMulti/{bookingId}, does the driver app also call our REST [QueueJob] endpoint (the one that writes BookingStatus='Queued' to the dispatch jobStore), or are those jobs Firebase-only?
+
+Our dispatch queued-jobs list is built from the dispatch server's jobStore, not Firebase. If the driver app skips the REST call for multi-queue, the food/freight queued jobs won't show up on the dispatcher's screen — no amber strip, no +N badge. Two ways to close this:
+
+Driver app also calls [QueueJob] for every multi-queue add (server already allows multi-queue for food/freight as of last update). Cleanest — one source of truth.
+Dispatch ingests queuedMulti from Firebase and mirrors into jobStore. We'll do this if option 1 isn't on the table.
+Let us know which you'd prefer.
+
+Once they answer, I'll either confirm everything works as-is (option 1) or wire the Firebase → jobStore bridge (option 2). Holding off on building option 2 speculatively since option 1 may already be how their acceptJobToQueue flow works in OTA-22bg.

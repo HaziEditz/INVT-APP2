@@ -1,0 +1,14 @@
+Reply you can paste back to HQ
+Three answers for you, plus one correction:
+
+Correction: §FIX-L is a race-condition merger, not a Firebase scanner. It only merges late /api/syncOfflineTrip POSTs into already-closed records — it doesn't walk allbookings looking for trips that never POSTed at all. So today's silent-window trips won't auto-rehydrate on our side. We'll either build a one-shot rehydrator on dispatch or leave them as Firebase-only (decision pending on this end). Either way, no action needed from you for the lost batch.
+
+1. Meter-pause window separate from pickup/dropoff. Yes please — pipe MeterOnAt/MeterOffAt from the meter's own start/stop refs, not mirrored from pickup/dropoff. We want pickup→dropoff to mean wheels-rolling-with-customer end-to-end, and MeterOnAt→MeterOffAt to mean meter-was-charging. Disputes about "why was I charged for the wait" need both numbers visible. Not blocking, can ride a future OTA.
+
+2. Food/freight intermediate taps. Freight yes — add "Mark Loaded" at origin and "Mark Unloaded" at destination. That gives us LoadedAt/UnloadedAt/WaitingAtPickupMin/WaitingAtDropoffMin per the field list, and freight disputes about loading time are the most common ones we see. Food no for now — the order-ready time is in the food platform's data and adding a tap is friction on the driver. Defer to a later release if operators ask.
+
+3. AsyncStorage retry queue for the sync POST. Yes, please do 22bj. Today's incident is exactly the failure mode this prevents. Same pattern as the Firebase write retry queue: queue on non-2xx / network error / timeout, drain on app foreground + periodic + on next successful POST. Combined with the Sentry breadcrumb you just shipped, that gives us "either it gets through, or we know within seconds why it didn't" — which is the bar we need for dispute-resolution-grade audit. Highest priority of the three.
+
+Also confirming the new PickupTime/DropoffTime/MeterOnAt/MeterOffAt/TotalTime/JobDuration fields render correctly in the closed-job panel — dispatch is wired for all six.
+
+No other open items from this side. Ball's back in your court for 22bj.

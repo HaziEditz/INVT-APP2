@@ -1,0 +1,147 @@
+Driver App Developer Brief — Offline Trip Handling
+1. Presence (Is the driver connected?)
+What to build:
+When the driver logs in and goes online, write to Firebase:
+
+/presence/{companyId}/{driverId}
+{
+  online: true,
+  lastSeen: <timestamp>
+}
+
+Register an onDisconnect() handler immediately after — Firebase will automatically write this when the phone loses connection:
+
+/presence/{companyId}/{driverId}
+{
+  online: false,
+  lastSeen: <timestamp when disconnect was detected>
+}
+
+Also send a heartbeat every 30 seconds while the driver is active — update lastSeen with the current timestamp. This lets the dispatcher know how long ago the driver was last reachable.
+
+Why: The dispatch console reads this node to show an OFFLINE badge on the driver's card. Without this, the dispatcher has no idea the driver has lost signal.
+
+2. Local Trip Journal (the core of offline reliability)
+What to build:
+Every single action the driver takes during a trip must be saved to local device storage first, before any network call is made. Use SQLite (Android) or CoreData (iOS), or a simple JSON file in app storage.
+
+The journal is append-only — never overwrite, always add a new row/entry.
+
+Every event to record:
+
+Event	When to write it
+Accepted	Driver taps Accept on the job offer
+EnRoute	Driver starts driving to pickup
+Arrived	Driver taps "I've Arrived"
+PickedUp	Driver taps "Passenger On Board"
+MeterOn	Meter/timer starts
+MeterOff	Meter/timer stops
+Completed	Driver taps "Job Done"
+Cancelled	Driver taps "Cancel Job"
+PositionUpdate	Every GPS ping while on trip (optional, for route)
+Each entry must include:
+
+{
+  "jobId": 1052026001,
+  "companyId": 620611,
+  "driverId": "D001",
+  "vehicleId": "TAXI01",
+  "eventType": "Completed",
+  "timestamp": "2026-05-01T00:27:00+12:00",
+  "lat": -46.4294,
+  "lng": 168.3728,
+  "synced": false
+}
+
+Why: Firebase's offline queue for a single field is last-write-wins. If you write Picking → Busy → Available to the same vehiclestatus field while offline, only Available arrives at the server. The local journal is the only reliable record.
+
+3. Trip Summary Record
+When the driver taps "Job Done" (or Cancelled), save a complete trip summary to local storage alongside the journal:
+
+{
+  "jobId": 1052026001,
+  "companyId": 620611,
+  "driverId": "D001",
+  "vehicleId": "TAXI01",
+  "passengerName": "John Smith",
+  "pickupAddress": "14 Elston Ln W, Invercargill",
+  "dropoffAddress": "Queens Park, Invercargill",
+  "pickupTime": "2026-05-01T00:15:00+12:00",
+  "dropoffTime": "2026-05-01T00:27:00+12:00",
+  "duration_mins": 12,
+  "distance_km": 7.2,
+  "fare": {
+    "base": 3.50,
+    "distanceCharge": 10.80,
+    "timeCharge": 2.40,
+    "extras": 0,
+    "total": 18.40,
+    "currency": "NZD"
+  },
+  "payment": {
+    "method": "Cash",
+    "received": 20.00,
+    "change": 1.60,
+    "cardLast4": null,
+    "receiptNo": "RCP-20260501-001"
+  },
+  "status": "Completed",
+  "completedOffline": true,
+  "synced": false
+}
+
+Why: This is the payment record. Without it, there is no way to reconcile what the driver collected versus what the system shows. TM, account clients, company reporting — all depend on this.
+
+4. Upload on Reconnect
+When the phone comes back online, the driver app must immediately check for any unsynced journal entries and trip summaries and send them to the server.
+
+The upload call:
+
+POST /api/syncOfflineTrip
+Content-Type: application/json
+{
+  "jobId": 1052026001,
+  "companyId": 620611,
+  "driverId": "D001",
+  "vehicleId": "TAXI01",
+  "adminKey": "<api key>",
+  "events": [ ...all journal entries for this job... ],
+  "tripSummary": { ...the trip summary record above... }
+}
+
+The server will:
+
+Validate the jobId belongs to this driver
+Run all status transitions in the correct order
+Save all fare and payment data into the job record
+Mark the job as Completed and close it
+Respond with confirmation
+After confirmation: mark the local journal and trip summary as synced: true. Keep them on device for 30 days for the driver's own reference (receipt history).
+
+If the upload fails: retry every 60 seconds until it succeeds. Show the driver a small indicator: "1 trip pending upload". Never delete unsent records.
+
+5. Status Writes to Firebase — Change the approach
+Currently the driver app writes vehiclestatus to a single field in Firebase. This needs to change slightly:
+
+Keep writing vehiclestatus to Firebase for real-time status display on the dispatch board (this part works fine when online).
+
+Add writing to a status event log node in Firebase instead of (or in addition to) overwriting the single field. Use Firebase's push() which creates a unique timestamped key each time:
+
+/driverEvents/{companyId}/{driverId}/
+  -Nabc123: { status: "Picking",   timestamp: ..., jobId: ... }
+  -Nabc456: { status: "Busy",      timestamp: ..., jobId: ... }
+  -Nabc789: { status: "Available", timestamp: ..., jobId: ... }
+
+This way, even if the phone goes offline and reconnects, all three events survive as separate entries (push keys are unique). The dispatch console reads the log and the server processes each event in order.
+
+Summary for the Dev
+Tell them:
+
+We need 5 things:
+
+Firebase onDisconnect() presence — write online: false + lastSeen when the phone loses connection, and update lastSeen every 30 seconds while active.
+Local trip journal — save every trip event (Accept, Arrived, PickedUp, MeterOn, MeterOff, Completed, Cancelled) to device storage before any network call.
+Trip summary record — save the full fare breakdown, payment details, times and distances locally when the trip ends.
+Reconnect upload — when the phone comes back online, POST the journal + trip summary to /api/syncOfflineTrip on our server. Retry until confirmed. Keep a "pending upload" indicator for the driver.
+Firebase event log — use push() for status events instead of overwriting a single vehiclestatus field, so offline events are not lost.
+Once you confirm that the driver app developer understands and agrees to this spec, let me know and I will build the server-side endpoint (/api/syncOfflineTrip), the offline presence badge on the dispatch board, and the Force Complete manual override — so everything is ready when the driver app ships the changes.

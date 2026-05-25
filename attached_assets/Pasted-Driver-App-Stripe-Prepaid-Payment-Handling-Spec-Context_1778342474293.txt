@@ -1,0 +1,57 @@
+Driver App — Stripe / Prepaid Payment Handling Spec
+Context: Dispatch console writes payment info to Firebase for every offered/assigned job. Driver app must read these fields and adjust the in-trip and end-of-trip flow accordingly. Applies to all 4 service types the system supports: taxi, food, freight, tm (taximeter / hail).
+
+1. Where to read the fields
+For every job offered to the driver, read these fields from either:
+
+/notification/{driverId} — written when the offer is sent
+/jobDetails/{bookingId} — full mirror, also written on offer
+Required fields (treat case-insensitively, and accept either capitalisation):
+
+Field	Type	Possible values
+paymentMethod	string	"cash", "card", "eftpos", "account", "voucher", ""
+paymentStatus	string	"paid", "completed", "pending", ""
+paymentType	string	optional — secondary tag, may be empty
+prepaid	bool	true / false (legacy, treat same as paymentStatus="paid")
+serviceType	string	"taxi", "food", "freight", "tm"
+A job is prepaid when:
+
+paymentStatus.toLowerCase() in ("paid", "completed")
+   OR  prepaid === true
+
+2. UI rules — by service type
+Service type	If prepaid (paymentStatus = "paid")	If unpaid
+taxi	Show green "💳 PAID — Card" badge on offer + active screens. Suppress "Collect fare" prompt at trip-end. Auto-mark trip Completed without payment dialog.	Existing behaviour — show fare amount + "Collect cash/card from passenger" at end of trip.
+food	Same as taxi. Restaurant order is already paid — driver only delivers. Show "Order prepaid — no collection needed".	Show "Collect $X on delivery" (COD orders).
+freight	Same as taxi. Show "Freight prepaid". Suppress payment collection.	Show "Collect $X on delivery / signature required".
+tm (hail/taximeter)	Rare — usually cash. If paymentStatus="paid", treat as prepaid and skip meter-end payment screen.	Default — driver runs meter, collects at end.
+3. End-of-trip flow
+When driver presses Complete:
+
+if (paymentStatus in ("paid","completed") || prepaid === true) {
+    // Skip payment dialog entirely
+    markJobCompleted(bookingId);
+    show "Trip complete — already paid via " + paymentMethod;
+} else {
+    // Existing flow — show fare, payment method picker, collect, then complete
+    showCollectionDialog(...);
+}
+
+4. Visual badges (recommended)
+On offer screen / active job card, show a small pill next to fare:
+
+paymentStatus="paid" + paymentMethod="card" → 🟢 PAID • Card
+paymentStatus="paid" + paymentMethod="account" → 🔵 PAID • Account
+paymentStatus="paid" + prepaid=true → 🟢 PREPAID
+Empty / unpaid → no badge (or grey "Cash on completion")
+5. Stripe webhook race (edge case)
+A web-booked job may be offered before Stripe webhook fires. In that brief window paymentStatus may be empty even though the passenger entered card details. The dispatch console will push an updated paymentStatus="paid" to the same Firebase paths once the webhook arrives. Driver app should subscribe to changes on /jobDetails/{bookingId} (not just read once on offer) so the badge flips to PAID when the webhook lands mid-trip.
+
+6. Test cases to run
+Web booking, card payment → driver gets job → badge says PAID → complete → no collection dialog
+Web booking, cash → driver gets job → no badge → complete → cash collection dialog as today
+Console-created account job → paymentMethod="account" → badge says ACCOUNT → no collection dialog
+Food order, prepaid via website → same as #1, with food-specific copy
+Freight, prepaid → same as #1, with freight-specific copy
+Race test: offer a card job 2 seconds after creation (before webhook) → badge initially absent → badge appears after webhook → still no collection dialog at completion
+That's everything they need. The dispatch console side is already correct — no changes needed here.

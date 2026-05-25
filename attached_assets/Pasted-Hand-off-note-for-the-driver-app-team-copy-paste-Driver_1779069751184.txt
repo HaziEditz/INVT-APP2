@@ -1,0 +1,25 @@
+Hand-off note for the driver-app team (copy-paste)
+📋 Driver app — re-offer popup not firing on previously-seen BookingId
+
+Scenario:
+
+Driver accepts job X. Dispatcher takes the job from driver → No One. Driver app shows "job cancelled" toast (correct).
+Dispatcher manually re-sends the same job X back to the same driver.
+Dispatch server writes a fresh jobs/{cid}/{vid}/{drvId} node with Status: 'Offered' and a new offeredAt timestamp.
+Firebase listener on the driver app fires (we can confirm — the server's [§FIX-AcceptTrace/jobsListener] log shows the node was written).
+Driver phone never shows the accept popup. 27 seconds later the server fires *** 27s NO-RESPONSE *** and bounces the job back to No One.
+Diagnosis: the driver app is deduplicating offered jobs by BookingId alone. Because BookingId 6112605181 was already on screen earlier (and dismissed/cancelled), the app marks it as "seen" and ignores subsequent Firebase writes for the same BookingId — even when offeredAt is a brand new timestamp.
+
+Fix required (driver app):
+
+Dedup on the tuple (BookingId, offeredAt), not just BookingId. Each fresh Firebase Offered write carries a new offeredAt Unix-ms — treat that as a different offer.
+When the app receives a recall/cancel signal (Firebase Offered node deleted, or Status: 'Cancelled'), clear that BookingId from the seen-cache so a re-offer can fire later.
+Belt-and-braces: when a new Offered arrives, force the popup to render even if the local UI thinks it's "already showing" — race conditions during the cancel→re-offer window can leave UI state stale.
+Where to look: the Firebase listener that watches jobs/{cid}/{vehicleId}/{driverId} and decides whether to show the accept popup. The dedup/seen-cache logic that gates the popup. Look for any check like if (seenBookingIds.has(bookingId)) return; — that's the offending line.
+
+Verification once fixed:
+
+Accept a job → dispatcher takes to No One → app shows cancel (existing behaviour).
+Dispatcher manually re-offers same BookingId → popup MUST appear immediately with the new pickup details.
+Driver taps Accept → job moves to Assigned (existing behaviour).
+Server side is done. Logs confirm the Firebase write is correct; only the app's render gate is blocking.

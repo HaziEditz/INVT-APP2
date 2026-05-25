@@ -1,0 +1,27 @@
+<resources>
+    <!--
+    TODO: Before you run your application, you need a Google Maps API key.
+
+    To get one, follow this link, follow the directions and press "Create" at the end:
+
+    https://console.developers.google.com/flows/enableapi?apiid=maps_android_backend&keyType=CLIENT_SIDE_ANDROID&r=31:FE:77:00:BD:BF:DC:E2:B0:FE:EF:A7:AF:AF:5B:92:EB:22:8D:7B%3Bcom.baserythm.taxi360taxidriver.Maps
+
+    You can also add your credentials to an existing key, using this line:
+    31:FE:77:00:BD:BF:DC:E2:B0:FE:EF:A7:AF:AF:5B:92:EB:22:8D:7B;com.baserythm.taxi360taxidriver.Maps
+
+    Alternatively, follow the directions here:
+    https://developers.google.com/maps/documentation/android/start#get-key
+
+    Once you have your key (it starts with "AIza"), replace the "google_maps_key"
+    string in this file.
+    test1
+    -->  <!--old key was used now changed -->
+    <!--AIzaSyDIlLZDpuufZxEg8EIV25svOsaRj6ng99I-->
+    <!--new key added here -->
+    <string name="google_maps_key" templateMergeStrategy="preserve" translatable="false">AIzaSyDl7rx3aZVHzyfWgBktL98x-rMl-PzlbjE</string>
+    <!--open key in roadmap app on google maps-->
+    <!--AIzaSyAaX0T9Gp8dNWALPEKdoOYkLkplla9eOxI-->
+    <string name="google_map_web_services_key" templateMergeStrategy="preserve">AIzaSyDl7rx3aZVHzyfWgBktL98x-rMl-PzlbjE</string>
+
+
+</resources>

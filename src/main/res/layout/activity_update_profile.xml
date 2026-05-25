@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+
+    android:focusable="true"
+    android:focusableInTouchMode="true"
+    tools:context=".UpdateProfileActivity">
+
+    <android.support.v7.widget.Toolbar
+        android:id="@+id/toolbar_UpdateProfileActivity"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:layout_alignParentTop="true"
+        android:background="@color/colorPrimary"
+        app:titleTextColor="#fff"
+        android:elevation="10dp"/>
+
+       <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@+id/toolbar_UpdateProfileActivity"
+        android:orientation="vertical"
+        >
+
+
+
+        <android.support.v7.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:foreground="?android:attr/selectableItemBackground"
+            app:cardCornerRadius="2dp"
+            android:layout_marginLeft="15dp"
+            android:layout_marginRight="15dp"
+            android:layout_marginTop="10dp"
+            >
+            <TextView
+                android:id="@+id/etxt_email_updateProfile_activity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="5dp"
+                android:drawablePadding="10dp"
+
+                android:layout_gravity="center"
+                android:hint="Name"
+                android:drawableLeft="@drawable/email"
+                android:background="@color/cardview_light_background"
+                android:inputType="textEmailAddress"
+                android:maxLines="1" />
+
+        </android.support.v7.widget.CardView>
+
+        <android.support.v7.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="10dp"
+            android:focusable="true"
+            android:clickable="true"
+            android:layout_marginLeft="15dp"
+            android:layout_marginRight="15dp"
+            android:foreground="?android:attr/selectableItemBackground"
+            app:cardCornerRadius="2dp"
+
+            >
+
+            <TextView
+                android:drawablePadding="10dp"
+                android:id="@+id/etxt_password_updateProfile_activity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="5dp"
+                android:layout_gravity="center"
+                android:hint="Password"
+                android:drawableLeft="@drawable/lock"
+                android:background="@color/cardview_light_background"
+                android:inputType="textPassword"
+                android:maxLines="1" />
+        </android.support.v7.widget.CardView>
+
+        <android.support.v7.widget.CardView
+            android:layout_marginTop="10dp"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:focusable="true"
+            android:clickable="true"
+            app:cardCornerRadius="2dp"
+            android:layout_marginLeft="15dp"
+            android:layout_marginRight="15dp"
+
+            android:elevation="10dp"
+
+            >
+
+
+
+            <TextView
+                android:drawablePadding="10dp"
+                android:id="@+id/etxt_firstName_updateProfile_activity"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/cardview_light_background"
+                android:hint="First Name"
+                android:layout_gravity="center"
+                android:layout_marginLeft="5dp"
+                android:drawableLeft="@drawable/people"
+                android:inputType="textCapSentences"
+                android:maxLines="1" />
+
+        </android.support.v7.widget.CardView>
+
+        <android.support.v7.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="10dp"
+            android:focusable="true"
+            android:clickable="true"
+            android:layout_marginLeft="15dp"
+            android:layout_marginRight="15dp"
+            android:foreground="?android:attr/selectableItemBackground"
+            app:cardCornerRadius="5dp"
+
+            >
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="15dp"
+                    android:layout_marginLeft="5dp"
+                    android:layout_height="15dp"
+                    android:layout_gravity="center"
+                    android:drawableLeft="@drawable/world"
+                    />
+
+                <TextView
+                    android:id="@+id/spinner_country_updateProfile_activity"
+                    android:layout_width="match_parent"
+                    android:layout_marginLeft="5dp"
+                    android:layout_height="wrap_content" />
+
+            </LinearLayout>
+        </android.support.v7.widget.CardView>
+
+
+        <android.support.v7.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="10dp"
+
+            android:focusable="true"
+            android:clickable="true"
+            android:layout_marginLeft="15dp"
+            android:layout_marginRight="15dp"
+
+
+            android:foreground="?android:attr/selectableItemBackground"
+            app:cardCornerRadius="5dp"
+
+            >
+
+            <TextView
+                android:drawablePadding="10dp"
+                android:id="@+id/etxt_phoneNo_updateProfile_activity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="5dp"
+                android:layout_gravity="center"
+                android:drawableLeft="@drawable/contact"
+                android:hint="Phone Number"
+
+                android:background="@color/cardview_light_background"
+                android:inputType="number"
+                android:maxLines="1" />
+
+
+        </android.support.v7.widget.CardView>
+
+    <LinearLayout
+        android:background="?attr/colorControlHighlight"
+        android:layout_width="match_parent"
+        android:gravity="bottom"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+        <Button
+            android:id="@+id/btn_confirm_updateProfile_activity"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:background="@color/green"
+            android:text="Go back"
+            android:textColor="#ffff"
+            android:textSize="25dp" />
+
+
+        </LinearLayout>
+
+
+
+    </LinearLayout>
+
+
+
+
+</RelativeLayout>

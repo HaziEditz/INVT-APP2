@@ -1,0 +1,32 @@
+What to add to the driver-app message
+Append this to the message I drafted earlier:
+
+Trip duration / "Ride Time" fields for the closed-job audit panel
+
+The dispatch console wants to show end-customers (and disputes) a single "pickup → drop-off" duration for every closed trip across all service types (taxi hail, taxi booking, food delivery, freight). Today's payload from D002 includes TotalTime and JobDuration, which is great — please keep sending those on every completed trip, for every service type, in the /api/syncOfflineTrip POST. Specifically:
+
+Required fields on the trip-close payload:
+
+TotalTime — string "mm:ss" (or "hh:mm:ss" for trips ≥ 1 hour). This is the total pickup → drop-off elapsed time. Currently sent for taxi hail — please make sure it's also sent for taxi booked jobs, food deliveries, and freight.
+JobDuration — numeric, decimal minutes of the same pickup → drop-off span (e.g. 13.86). Kept as a backup in case the formatted string is missing.
+PickupTime (ISO 8601 UTC) — exact moment the driver tapped "Picked Up" / meter-on / collection. Currently we only see ActiveAt (which seems to coincide with meter-on for hail, but is ambiguous for booked rides where ActiveAt is set on accept). Please send a dedicated PickupTime field so it's unambiguous.
+DropoffTime (ISO 8601 UTC) — exact moment the driver tapped "Drop Off" / meter-off / delivered. We currently lean on JobCompleteTime, but for food/freight the "completed" stamp may include post-drop admin time (payment, signature, photo) — please separate the actual drop-off moment.
+MeterOnAt / MeterOffAt (ISO 8601 UTC, taxi only) — the meter-running window. For taxi this is usually the same as pickup/dropoff, but during disputes the meter timestamps are the source of truth for fare calculation.
+Service-type-specific extras (optional but very useful for disputes):
+Food: OrderReadyAt (restaurant handover), DeliveryAt (drop-off at customer).
+Freight: LoadedAt (load complete at origin), UnloadedAt (delivery complete at destination), WaitingAtPickupMin, WaitingAtDropoffMin.
+All timestamps must be ISO 8601 in UTC with a Z suffix, e.g. "2026-05-17T00:31:13.036Z", so the dispatch (NZ Pacific/Auckland) renders them correctly.
+
+The dispatch UI will prefer your TotalTime/JobDuration and fall back to deriving from these timestamps. If we derive it, the panel labels the value (derived) — please treat that label as a bug report and make sure the explicit duration field is sent.
+
+Combined with the missing /api/syncOfflineTrip POSTs reported above, the priority is:
+
+Restore the sync POST for today's missing hail trips (highest priority — owner panel ≠ dispatch right now).
+Standardise duration + lifecycle timestamps across all four service types per the field list above.
+Add the Sentry breadcrumb on syncOfflineTrip failure I mentioned earlier so silent regressions surface.
+Recap of where we are
+Fare math — fixed dispatch-side; "Ride Cost" now reconciles with Total (§FIX-FARE).
+Ride Time row — added to fare panel; derives from timestamps if driver doesn't send it (§FIX-RIDETIME).
+Missing hail trips since 12:45pm NZ — driver-app side; message ready to forward.
+Driver-app payload contract — listed above with required fields per service type.
+Just say "send it" when you've forwarded the message, or paste the dev's reply back here and we'll continue.

@@ -1,0 +1,48 @@
+Questions for the driver-app team — about Firebase and offline behaviour
+
+1. Reading an assigned job
+When a new dispatched job is offered to the driver, which Firebase node does the app actually read the job details from?
+
+jobs/{companyId}/{vehicleId}/{driverId} (current assumption)
+online/{companyId}/{vehicleId}/current
+notification/{driverId}
+something else?
+The dispatch writes to all three. Which one is the source of truth on your side?
+
+2. Caching the job locally
+Once the app has read an assignment, does it keep a local copy on the phone (SQLite / shared prefs / in-memory)? If yes, what happens during the trip if the Firebase node disappears or changes — does the app re-read Firebase, or does it ignore Firebase from that point on and trust its local copy until completion?
+
+3. Going offline mid-trip
+If the driver loses signal after accepting but before completing, the trip continues offline. When signal returns:
+
+Does the app push the completion straight to our POST /api/syncOfflineTrip endpoint?
+Does it also write anything back to Firebase (e.g. jobs/{cid}/{vid}/{drv})?
+Does it expect those Firebase nodes to still exist when it comes back, or is it fine with them being already cleared by the dispatch?
+This is the key question for the fix we're considering: dispatch clearing the Firebase nodes the moment a job is marked Completed/Cancelled. If the offline app re-reads those nodes when it reconnects, that would break offline sync — but if it only POSTs to /api/syncOfflineTrip and never reads Firebase again, we're safe.
+
+4. Driver-cancel from app (status field)
+When the driver presses Cancel on an Assigned/Picking job in the app, which fields does the app currently write back?
+We can see it clears jobs/{cid}/{vid}/{drv}, jobpickup, jobdropoff, and jobCount — but it leaves vehiclestatus = "Assigned". Is that intentional, or a bug on the app side? (The dispatch console has been working around it; would be cleaner if the app set vehiclestatus = "Available" itself on cancel.)
+
+5. Hail / street-pickup ID
+When the driver starts a Hail (Busy with no job assigned), does the app generate the new job ID itself, or wait for the server to mint one? If the app generates one, what's the format?
+
+6. Duplicate job IDs
+If our server (or Firebase) hands the app two trips with the same job ID on the same day (e.g. due to a counter reset after a restart), what does the app do? Does it:
+
+Overwrite the first record with the second?
+Reject the second?
+Process both as separate trips internally and only the latest one survives?
+This matters because we have evidence the dispatch's ID counter can recycle numbers after a server restart, and we want to know how the app reacts.
+
+7. Pickup address on a re-opened app
+If the driver kills the app and re-opens it while a previously-dispatched job is still cached locally, does the app re-read the pickup from Firebase, or show the cached address? (Today's complaint: driver was 4 km from the pickup but the app showed the original "165 Inglewood Road". We want to know whether the app pulled that from its local cache or from a Firebase node that wasn't cleared.)
+
+8. Vehicle status on completion
+When the driver completes a trip (online or offline-then-synced), does the app itself write vehiclestatus = "Available" to online/{cid}/{vid}/current, or does it rely on the dispatch / server to do it?
+
+Once you have their answers, send them back and I'll tell you:
+
+which of the two fixes is safe to ship,
+whether either of them needs adjusting to fit the app's actual behaviour, and
+whether there's a small driver-app change that would help (so you can take that to your superadmin together).

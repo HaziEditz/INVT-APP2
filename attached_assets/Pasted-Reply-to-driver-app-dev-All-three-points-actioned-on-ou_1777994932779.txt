@@ -1,0 +1,32 @@
+Reply to driver app dev:
+
+All three points actioned on our end:
+completedAt_ISO / CompletedAt_ISO
+Fixed. SA portal now reads: completedAt_ISO → CompletedAt_ISO → completedAt
+in that order, everywhere — taxi today count, TM month stats, and the
+Platform Health matrix. All historical dispatched records will resolve
+correctly via the CompletedAt_ISO fallback.
+fare / FinalFare
+Fixed. SA portal now reads: fare → FinalFare → meterFare in that order.
+All historical dispatched revenue will be picked up via FinalFare.
+trips/{cid} lookup — TM only
+Understood and confirmed. The lookup already only runs inside the
+paymentType === "total_mobility" block so a missing trips/{cid} entry
+for cash/card jobs is handled silently with no effect.
+That closes everything from our side. The SA portal will now correctly
+count and value all dispatched jobs — both historical and going forward —
+across today's taxi dashboard, the monthly TM subsidy report, and the
+Platform Health matrix.
+No further action needed from you unless you hit something unexpected.
+Thanks for being thorough with the field contract — it caught everything.
+
+Running tally of every fix made across this whole exchange:
+
+#	What was wrong	What was fixed	Where
+1a	completedAt (display string) used for date maths	Read completedAt_ISO first	Home.aspx, SA-PlatformHealth
+1b	CompletedAt_ISO (PascalCase) on historical dispatched records	Added as middle fallback	Home.aspx, SA-PlatformHealth
+2	cardNumber missing from completedJobs	Read trips/{cid}/{bookingId}.cardNumber as fallback	Home.aspx TM stats
+3a	Dispatched jobs in allbookings invisible to SA portal	Both paths now read and merged	Home.aspx, SA-PlatformHealth
+3b	Status:"Completed" (capital S+C) not matched by filter	Case-insensitive status check on both status and Status fields	Home.aspx, SA-PlatformHealth
+4	FinalFare (PascalCase) on historical dispatched records	Added as fare fallback before meterFare	Home.aspx
+All integration bugs between the driver app and the SA portal are now resolved. Revenue figures on the dashboard and TM subsidy totals will now include all historical dispatched trips correctly.

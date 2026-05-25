@@ -1,0 +1,25 @@
+ubject: Three fixes needed in driver app — dispatcher cannot recover stuck jobs
+
+Hi team,
+
+We've identified three issues in the driver app that are blocking the dispatch console from working correctly. Dispatcher's only workaround right now is asking the driver to log out and log back in, which isn't acceptable in production.
+
+1. Offer dedup is too aggressive (HIGH PRIORITY)
+Symptom: When dispatch console offers the same job to the same driver a second time (e.g. after the dispatcher takes the job to "No One" and re-offers it), the popup never fires on the driver phone. Logout/login fixes it temporarily.
+
+Cause: Driver app dedups incoming offers by bookingId alone and remembers the ID for the whole session. The second write to jobs/{companyId}/{vehicleId}/{driverId} with the same bookingId is silently dropped.
+
+Fix: Dedup by bookingId + offeredAt (or bookingId + jobBookingSrc.timestamp), not bookingId alone. Every fresh offer from the dispatch server carries a new offeredAt timestamp under the jobs/... node. Same bookingId + new offeredAt = treat as a brand-new offer and fire the popup. Same bookingId + same offeredAt = legitimate Firebase echo, ignore.
+
+This is the main bug. It blocks all dispatcher-driven re-offers.
+
+2. Presence heartbeat only writes on login
+Symptom: Driver leaves app idle for a while, taps "Available", but dispatch console doesn't see them as Available — auto-dispatch skips them.
+
+Cause: Driver app writes online/{companyId}/{vehicleId}/current only at login. If the Firebase connection drops or the value goes stale, dispatch console's driver list never refreshes.
+
+Fix: Write online/{companyId}/{vehicleId}/current with { status: 'Available', timestamp: ServerValue.TIMESTAMP, ... } on every "Available" status tap, not just on login. Also re-write it on .onConnect() reconnect events.
+
+3. Show jobBookingSrc field on the offer popup
+Request, not bug: When the popup fires, please display jobBookingSrc (or whatever field carries the booking source — Phone, Web, App, Re-offer, etc.) so drivers know whether it's a fresh offer or a re-offer from dispatch. Helps drivers triage in busy periods.
+

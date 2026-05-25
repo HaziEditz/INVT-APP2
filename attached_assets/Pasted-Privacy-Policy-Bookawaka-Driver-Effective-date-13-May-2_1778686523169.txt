@@ -1,0 +1,81 @@
+Privacy Policy — Bookawaka Driver
+Effective date: 13 May 2026 Last updated: 13 May 2026
+
+Bookawaka Driver ("we", "our", "us", "the app") is a workforce application provided to licensed taxi and ride-share drivers operating under companies subscribed to the Bookawaka SaaS dispatch platform. This Privacy Policy explains what information the app collects, why it is collected, how it is used, and the rights you have over your data.
+
+By installing or using the Bookawaka Driver app you agree to the collection and use of information in accordance with this policy.
+
+Who we are
+The app is published by Bookawaka and operated together with the taxi company that has issued you driver credentials. Your taxi company is the data controller for trip, shift, vehicle and identity information. Bookawaka acts as a data processor on their behalf.
+Contact: info@bookawaka.com
+
+Information we collect
+2.1 Information you give us
+Driver username, PIN and authentication tokens
+Driver name, contact phone (provided by your taxi company)
+Vehicle assignment (e.g. "Taxi02")
+2.2 Information collected automatically while you use the app
+Precise location (GPS) — collected continuously while you are signed in and on shift, including in the background, to display your vehicle on the dispatch map, match you to nearby jobs, calculate fare distance, and provide turn-by-turn navigation. Background location stops when you end your shift or sign out.
+Trip data — pickup and drop-off coordinates and addresses, distance travelled, duration, fare, payment method, passenger contact details (where supplied by the booking source), driver and vehicle identifiers.
+Shift and compliance data — shift start/end times, breaks, hours worked (used for New Zealand work-time compliance).
+Device information — device model, operating system version, app version, crash logs and performance metrics (via Sentry) for diagnostics.
+Network state — online/offline status, to queue trips for later upload.
+2.3 Camera
+The app uses the device camera only when you tap to take a photo (e.g. to attach a damage or receipt photo to a trip or message). The camera is never accessed silently or in the background.
+2.4 Payment information
+Card payments are processed by Stripe. The app sends card details directly to Stripe and receives back only a transaction reference. The Bookawaka Driver app does not store full card numbers, CVCs, or expiry dates.
+
+How we use the information
+Dispatch jobs to you and accept/reject offers in real time
+Calculate fares, mileage, time and applicable subsidies (e.g. Total Mobility)
+Process card payments via Stripe
+Maintain shift and break records for legal compliance
+Provide chat communication with your dispatcher
+Diagnose crashes and performance issues
+Comply with legal obligations of your taxi company
+Legal basis (where applicable)
+Performance of a contract between you and your taxi company (your employment / contractor relationship)
+Legitimate interests in operating a safe, accountable taxi service
+Consent, where required (e.g. for background location — you may revoke this in your device settings)
+Legal obligation (work-time records, tax records)
+Sharing your information
+We share your data only with:
+Your taxi company (the dispatch operator)
+Google Firebase (real-time database hosting — Google LLC)
+Stripe (card payment processing — Stripe Inc.)
+OpenStreetMap / Nominatim / OSRM (map tiles, geocoding and routing — anonymous lookups only)
+Sentry (crash and performance diagnostics — Functional Software Inc.)
+Government authorities, where legally required
+We do not sell your personal information to third parties. We do not use your data for advertising.
+
+Data retention
+Live job data is held while a trip is active.
+Completed trip records are retained by your taxi company for as long as required by law (typically 7 years for tax purposes in New Zealand).
+Crash diagnostic data is retained by Sentry for 90 days.
+You may request deletion of your driver account by contacting your taxi company.
+Your rights
+Depending on the country you operate in (e.g. NZ Privacy Act 2020, GDPR for EU users), you may have the right to:
+Access the personal information we hold about you
+Request correction of inaccurate information
+Request deletion of your information (subject to legal retention)
+Withdraw consent for background location
+Lodge a complaint with your local privacy regulator (e.g. Office of the Privacy Commissioner — privacy.org.nz)
+To exercise any of these rights, contact your taxi company or email info@bookawaka.com.
+
+Children
+The Bookawaka Driver app is intended for adult licensed drivers only. It is not directed at children under 18 and we do not knowingly collect data from children.
+Security
+We protect your information using:
+TLS encryption for all network traffic
+Firebase Authentication with secure tokens
+Stripe PCI-DSS compliant payment processing
+Encrypted local storage (Expo SecureStore) for sensitive credentials
+No system is 100% secure. We will notify affected users and the appropriate authority of any qualifying data breach in accordance with applicable law.
+
+International transfers
+Firebase, Stripe and Sentry servers are located outside New Zealand (primarily United States and European Union). Where data is transferred internationally, we rely on the standard contractual clauses and security commitments those providers make.
+Changes to this policy
+We may update this policy from time to time. Material changes will be notified to you in-app or via your taxi company. The "Last updated" date at the top reflects the current version.
+Contact
+Email: info@bookawaka.com Postal: Bookawaka, c/- your taxi company
+© 2026 Bookawaka. All rights reserved.

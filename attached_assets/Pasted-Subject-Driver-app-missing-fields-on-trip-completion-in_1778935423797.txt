@@ -1,0 +1,40 @@
+Subject: Driver app — missing fields on trip completion in allbookings/{cid}/{bookingId}
+
+Hi team,
+
+We've finished the dispatch-side fix that pulls trip-completion data back from Firebase into the closed-job history view. It is working correctly for dispatcher-booked jobs — fare, distance, addresses, timeline all show. But two clear gaps remain on the driver-app side. We have log evidence for both.
+
+Test cases (company 620611, vehicle TAXI02, driver D002):
+
+Job #	Source	Fields driver app wrote to allbookings on completion
+6112605172	Dispatch Console	Full set ✅ (fare/distance/payment all present)
+6112605173	Hail (street pickup)	Only completedAt_ISO + cashPayment ❌
+6112605171	Hail	Only 2 fields ❌
+Issue 1 — Hail trips: driver app writes almost nothing on completion
+
+For a Hail trip, when the driver completes the ride, please write the same field set to allbookings/{cid}/{bookingId} that dispatcher trips already get. Specifically, every Hail completion must write:
+
+Fare breakdown: TotalFare, FareBase, FareTime, FareDistance, FareExtras, WaitingCost, WaitingTime, FinalFare, RideCost, DriverCost, currency
+Distance / time: JobDistance, EstimatedDistance, TotalTime, duration
+Addresses (resolved, not raw "Hail Pickup …"): PickAddress, DropAddress, PickLatLng, DropLatLng
+Timeline: OfferedAt, AssignedAt, ActiveAt, ArrivedAt, PickedUpAt, CompletedAt, JobCompleteTime
+Payment: PaymentStatus, PaymentType, paymentMethod (values: cash / card / account / total_mobility), plus the matching boolean flag (cashPayment / cardPayment / accountPayment), and Recieve_payment
+Status: Status: "Completed" (you're already writing this — keep it)
+PascalCase keys please, to match the dispatcher-booked records.
+
+Issue 2 — Payment method label missing on dispatcher trips too
+
+Even for dispatcher-booked job #6112605172 where fare/distance came through fine, the Payment row on our PDF/detail view was blank. The detail view reads Payment / paymentMethod / PaymentMethod in that order. Please make sure on every completion (both Hail and dispatch) the driver app writes at least one of those three keys with the actual payment method string ("cash", "card", "account", "total_mobility").
+
+Why we can't fix this dispatch-side: the dispatch console has no way to know whether the driver took cash or swiped a card at the end of the trip — only the driver app knows. So this has to be written by the driver app on the "Complete" tap.
+
+Evidence — paste-ready log line from our server:
+
+[§FIX-H/diag] allbookings/620611/6112605173 keys=
+  Status, paymentMethod, PaymentMethod, completedAt_ISO, cashPayment
+
+That's the entire field set found in Firebase for that completed Hail trip. Compare to dispatcher trip #6112605172 which has 90+ fields. The delta is exactly what the driver app needs to start writing on Hail completion.
+
+Let me know when this lands in a build and we'll re-test against the same flow.
+
+Thanks.

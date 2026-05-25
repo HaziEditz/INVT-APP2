@@ -1,0 +1,51 @@
+const palette = {
+  black: '#0A0A0F',
+  darkCard: '#13131F',
+  surface: '#1A1A28',
+  border: '#25253A',
+  taxiYellow: '#F7C948',
+  taxiYellowDark: '#D4A800',
+  white: '#F2F2F7',
+  mutedText: '#8888AA',
+  green: '#22C55E',
+  red: '#EF4444',
+  amber: '#F59E0B',
+  blue: '#3B82F6',
+};
+
+export const colors = {
+  light: {
+    background: palette.black,
+    card: palette.darkCard,
+    surface: palette.surface,
+    border: palette.border,
+    primary: palette.taxiYellow,
+    primaryForeground: palette.black,
+    accent: palette.taxiYellowDark,
+    foreground: palette.white,
+    mutedForeground: palette.mutedText,
+    success: palette.green,
+    error: palette.red,
+    warning: palette.amber,
+    info: palette.blue,
+    radius: 12,
+  },
+  dark: {
+    background: palette.black,
+    card: palette.darkCard,
+    surface: palette.surface,
+    border: palette.border,
+    primary: palette.taxiYellow,
+    primaryForeground: palette.black,
+    accent: palette.taxiYellowDark,
+    foreground: palette.white,
+    mutedForeground: palette.mutedText,
+    success: palette.green,
+    error: palette.red,
+    warning: palette.amber,
+    info: palette.blue,
+    radius: 12,
+  },
+};
+
+export type ColorTheme = typeof colors.light;

@@ -1,0 +1,29 @@
+Subject: Driver app — data we need you to send to dispatch at trip completion
+
+Right now the driver app shows the driver waiting time, tariff changes, payment method, and price adjustments — but none of it reaches the dispatch console. That's why closed jobs look half-empty and why disputes can't be resolved. We need ONE update to the driver app that, at trip completion, sends the data the driver already sees to our backend.
+
+The endpoint is already there — it's the existing /api/syncOfflineTrip POST you use for dispatch-created trips. Two changes:
+
+1. Fire it for hail trips too. Today it only fires for dispatch-assigned trips. Hail trips need to use the same POST.
+
+2. Include these extra fields in every completion POST:
+
+Waiting time — the minutes the driver clocked with the Waiting button, and the dollar amount it added.
+Tariff log — every tariff the driver used on this trip, with a timestamp for each switch. If they started on Standard and flipped to Night mid-trip, we need both entries. (Also write the current tariff ID live to online/{cid}/{vid}/current so we can see it during the active trip, not just at the end.)
+Payment method — exactly which one the driver tapped: cash / card / eftpos / account / Total Mobility / ACC / gift card / split. If split, the breakdown (e.g. $8 cash + $5 card). Plus a flag saying whether it was settled with the driver in the car (so dispatch knows not to show a "Take Payment" button).
+TM voucher number / ACC claim number / gift card code — whichever applies.
+Fixed price flag + custom total — if the driver agreed a flat fare or entered a manual amount at the end, send the override price + the reason (fixed flat fare / manual adjustment / discount / other) + an optional note. We'll show both the meter total and the custom total so any difference is visible for audit.
+Driver notes / trip issue flag — free-text note from the driver, plus a category (none / vomit / damage / no-show / refused / other) for filtering disputes.
+For service-type trips (food, freight, rental, towing) — same idea, but each needs its own extras:
+
+Food: restaurant name, order ref, item count, packaging fee, delivery fee
+Freight: weight, dimensions, item description, recipient name, recipient signature
+Rental: start/end times, odometer start/end, fuel level start/end, damage report
+Towing: towed-vehicle plate/make/model, tow reason, odometer at pickup and dropoff
+What we've already done on our side — you don't need to do anything for the GPS route trail. We're already reading the Lat/Lng your app writes to online/{cid}/{vid}/current every few seconds and stitching it into the route map on the closed-job panel. Just keep writing those coordinates with currentJobId set during active trips like you do today.
+
+Why this matters: without this update, dispatch will never be able to verify a fare dispute, prove a tariff was applied correctly, confirm a passenger paid, or show what really happened on a trip. Everything the driver sees on their screen must reach dispatch or it didn't happen as far as the audit trail is concerned.
+
+The full technical field-name spec is in DRIVER_APP_REQUIREMENTS.md in the repo.
+
+Paste that to your driver-app developer (or HQ contact) as-is. Tell me if you want me to tighten it, add a specific deadline, or rewrite it for a different audience.

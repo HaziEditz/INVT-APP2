@@ -1,0 +1,70 @@
+{
+  "rules": {
+    "Passengerjobs": { "$uid": { ".validate": "$uid!='null'", ".read": "auth != null", ".write": "auth != null" } },
+    "Emergency": {
+      ".read": "auth != null", ".write": "auth != null",
+      "$Companyid": { ".read": "auth != null", ".write": "auth != null",
+        "$driverid": { ".validate": "$driverid!='null'", ".read": "auth != null", ".write": "auth != null" } }
+    },
+    "offered": { ".read": true, ".write": true, "$cartype": { ".read": true, ".write": true } },
+    "chat": { "$driverid": { ".read": true, ".write": true } },
+    "notification": { "$driverid": { ".validate": "$driverid!='null'", ".read": "auth != null", ".write": "auth != null" } },
+    "lastshifttime": { "$driverid": { ".validate": "$driverid!='null'", ".read": "auth != null", ".write": "auth != null" } },
+    "autodisp": { "$driverid": { ".validate": "$driverid!='null'", ".read": "auth != null", ".write": "auth != null" } },
+    "JobDispatching": { "$driverid": { ".validate": "$driverid!='null'", ".read": "auth != null", ".write": "auth != null" } },
+    "DriverEngaged": { "$driverid": { ".validate": "$driverid!='null'", ".read": "auth != null", ".write": "auth != null" } },
+    "passengernumber": { "$uid": { ".validate": "$uid!='null'", ".read": "$uid === auth.uid", ".write": "$uid === auth.uid" } },
+    "links": { ".read": "auth != null", ".write": false },
+    "smscode": { ".read": "auth != null", ".write": false },
+    "appversion": { ".read": "auth != null", ".write": false },
+    "TotalmobileDiscount": { ".read": "auth != null", ".write": false },
+    "online": {
+      ".read": "auth != null", ".write": "auth != null",
+      "$companyid": { ".validate": "$companyid!='null'",
+        "$vehicleid": { ".validate": "$vehicleid!='null'",
+          "$uid": { ".validate": "$uid!='null'", ".write": "$uid === auth.uid" } } }
+    },
+    "joback": {
+      ".read": "auth != null", ".write": "auth != null",
+      "$bookingid": { ".read": "auth != null", ".write": "auth != null",
+        "$driverid": { ".validate": "$driverid!='null'", ".read": "auth != null", ".write": "auth != null" } }
+    },
+    "jobs": {
+      ".read": "auth != null", ".write": "auth != null",
+      "$companyid": { ".validate": "$companyid!='null'",
+        "$vehicleid": { ".validate": "$vehicleid!='null'",
+          "$uid": { ".validate": "$uid!='null'" } } }
+    },
+    "collecteddata": { "$uid": { ".validate": "$uid!='null'", ".read": "$uid === auth.uid", ".write": "$uid === auth.uid" } },
+    "companies": {
+      ".read": "auth != null", ".write": "auth != null",
+      "$companyid": { ".validate": "$companyid!='null'",
+        "onlineAgents": { "$userid": { ".validate": "$userid!='null'", ".read": "auth != null", ".write": "auth != null" } } }
+    },
+    "locationConfig": { ".read": true, ".write": true },
+    "chat_history": {
+      "$chatId": { ".validate": "$chatId!='null'", ".read": "auth != null", ".write": "auth != null",
+        "$messageId": { ".validate": "$messageId!='null'", "senderId": {}, "receiverId": {}, "text": {}, "timestamp": {}, "$other": {} } }
+    },
+    "tariffZones": { ".read": "auth != null", ".write": "auth != null" },
+    "zones": { ".read": "auth != null", ".write": "auth != null" },
+    "drivers": { ".read": "auth != null", ".write": "auth != null" },
+    "vehicles": { ".read": "auth != null", ".write": "auth != null" },
+    "allbookings": { "$companyId": { "$bookingId": { ".read": "auth != null", ".write": "auth != null" } } },
+    "pendingjobs": { "$companyId": { "$bookingId": { ".read": "auth != null", ".write": "auth != null" } } },
+    "ratings": { "$companyId": { "$bookingId": { ".read": "auth != null", ".write": "auth != null" } } },
+    "completedJobs": { "$companyId": { "$bookingId": { ".read": "auth != null", ".write": "auth != null" } } },
+    "jobDetails": {
+      "$bookingId": { ".validate": "$bookingId!='null'", ".read": "auth != null", ".write": "auth != null" }
+    },
+    "driverMsg": {
+      "$companyId": { ".validate": "$companyId!='null'", ".read": "auth != null", ".write": "auth != null",
+        "$msgId": { ".validate": "$msgId!='null'", ".read": "auth != null", ".write": "auth != null" } }
+    },
+    "suspended": {
+      "$companyId": { ".validate": "$companyId!='null'",
+        "$vehicleId": { ".validate": "$vehicleId!='null'", ".read": "auth != null", ".write": "auth != null" } }
+    },
+    "notifications": { "$companyId": { ".read": "auth != null", ".write": "auth != null" } }
+  }
+}

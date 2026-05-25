@@ -1,0 +1,38 @@
+Subject: Driver app — two stacked offer popups need to be consolidated into one
+
+Problem
+When a new job offer arrives, the driver app shows two popups stacked on top of each other:
+
+Front popup: Accept / Reject buttons with full job details.
+Back popup: phone number, passenger name, timer only.
+Only one popup should appear. The back popup must be removed or suppressed.
+
+Cause
+The dispatch console writes the offer to three Firebase nodes (this is intentional and will not change — it is needed for backward compatibility across driver app versions):
+
+/notification/{driverId} — full payload, contains content: "You have offered new Job please view details" plus pickup, dropoff, name, phone, fare, payment, pickupTime, tariff, etc.
+/jobs/{companyId}/{vehicleId}/{driverId} — minimal { BookingId, Status: "Offered", VehicleId, DriverId, offeredAt }.
+/online/{companyId}/{vehicleId}/current — mirrors joboffer, jobpickup, jobdropoff, JobphoneNo, jobname, pickupTime.
+The driver app currently has more than one listener that opens its own popup when any of these nodes fires. Two listeners fire ≈ simultaneously ⇒ two popups.
+
+Required fix in the driver app
+
+Pick one node as the single source of truth for opening the offer popup. Recommended: /notification/{driverId} — it has the full payload and the explicit content trigger field.
+The other two listeners must NOT open their own popup. They are background state-sync only:
+/jobs/{companyId}/{vehicleId}/{driverId} — read Status and BookingId for internal state. Do not open UI.
+/online/{companyId}/{vehicleId}/current — read joboffer / jobpickup / jobdropoff to enrich the offer popup if needed. Do not open UI.
+Add an in-app guard so even if two events arrive close together, only one popup opens for a given BookingId:
+if (openOfferBookingId === incoming.BookingId) return;   // already showing
+openOfferBookingId = incoming.BookingId;
+showOfferPopup(incoming);
+// on close / accept / reject / timeout:
+openOfferBookingId = null;
+
+When the offer popup closes (Accept, Reject, or 27 s timeout), the app must clear its internal openOfferBookingId AND any cached payload from the other two nodes so the next offer is treated as fresh.
+Acceptance criteria
+
+A single offer popup appears per BookingId, with Accept / Reject buttons and full details (pickup, dropoff, name, phone, fare, timer).
+No second popup, no overlay artifact behind it.
+If the driver misses the offer (27 s timeout) and the same job is offered again later, the popup opens cleanly the second time.
+Behaviour is identical whether the app is freshly launched, brought from background, or already foregrounded.
+Do not touch the dispatch console / Firebase write side. The three-node fan-out is required for older fleets still on legacy builds. The fix is entirely inside the driver app's listener / popup orchestration layer.

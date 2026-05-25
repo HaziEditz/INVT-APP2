@@ -1,0 +1,155 @@
+Driver app also needs changes to support the new unified booking lifecycle properly.
+
+Main rule:
+Driver app must handle jobs PER BOOKING, not as one global current-job state.
+
+==================================================
+
+1. Support multiple simultaneous booking states
+   ==================================================
+
+Driver app must support:
+
+* active/current trip
+* queued offers
+* prebook reservations
+* pending future jobs
+
+simultaneously without overwriting each other.
+
+Need separation between:
+
+* Active Trip screen/state
+* Offer Tab items
+* Future reservations/prebooks
+
+==================================================
+2. Booking-specific realtime updates
+====================================
+
+Driver app should process updates per booking:
+
+* JobUpdated
+* PickupChanged
+* DropoffChanged
+* StopAdded
+* PassengerNoteChanged
+* JobCancelled
+* Reassigned
+  etc.
+
+Updating one booking must NOT refresh/reset all driver state.
+
+==================================================
+3. Booking-specific cancellation handling
+=========================================
+
+If a queued/prebook/offer booking is cancelled:
+
+* remove only that booking
+* preserve active trip
+* preserve navigation
+* preserve other offers
+
+If active trip is cancelled:
+
+* clear only that active trip
+* stop navigation for that booking only
+* restore idle/queue UI only if no other active assignments remain
+
+==================================================
+4. Prevent stale job resurrection
+=================================
+
+Driver app should ignore outdated updates using:
+
+* updatedAt timestamps
+* version numbers
+* sequence IDs
+
+Otherwise:
+
+* cancelled jobs can reappear
+* old offer cards can overwrite new state
+* stale Firebase sync can resurrect trips
+
+==================================================
+5. Avoid global screen resets
+=============================
+
+Do NOT fully reload/clear driver session on every update/cancel.
+
+Use targeted updates:
+
+* update only changed booking
+* remove only affected booking
+* preserve active trip state whenever possible
+
+==================================================
+6. Navigation/session preservation
+==================================
+
+If:
+
+* offer booking updated/cancelled
+  while
+* active trip exists
+
+then:
+
+* navigation must continue uninterrupted
+* active pickup/dropoff session must stay alive
+* map state should not reset
+
+==================================================
+7. Driver notification handling
+===============================
+
+Driver app should distinguish:
+
+* new offer
+* updated booking
+* cancelled booking
+* reassigned booking
+* active trip changes
+
+Different event types should trigger different UI behavior.
+
+==================================================
+8. Offline/reconnect safety
+===========================
+
+On reconnect:
+
+* app should rebuild state from booking list
+* not from one global current-job field
+
+Otherwise reconnect may:
+
+* lose offers
+* restore cancelled jobs
+* overwrite active trip state
+
+==================================================
+9. Queue/availability state
+===========================
+
+Driver app should not assume:
+
+* one cancelled booking = driver available
+
+Availability should come from backend assignment state, not inferred locally by the app.
+
+==================================================
+10. Future-safe architecture
+============================
+
+Current system is evolving from:
+
+* one driver = one job
+
+to:
+
+* one driver = active job + future offers/prebooks
+
+Driver app state model needs to evolve too, otherwise lifecycle bugs will continue appearing.

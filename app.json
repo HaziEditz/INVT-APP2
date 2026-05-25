@@ -1,0 +1,119 @@
+{
+  "expo": {
+    "name": "Bookawaka Driver",
+    "slug": "taxi360-driver",
+    "version": "1.5.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "taxi360driver",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#0A0A0F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.bookawaka.driver",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Taxi360 needs your location to track your position for job dispatch.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Taxi360 needs your location in the background so the meter keeps counting time and distance while the screen is off during a fare.",
+        "NSLocationAlwaysUsageDescription": "Taxi360 needs your location in the background so the meter keeps counting time and distance while the screen is off during a fare.",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyCuMXOxpFczqr1VZaE7eEN8qRwokYup_kM"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#0A0A0F"
+      },
+      "package": "com.bookawaka.driver",
+      "softwareKeyboardLayoutMode": "pan",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCuMXOxpFczqr1VZaE7eEN8qRwokYup_kM"
+        }
+      },
+      "statusBar": {
+        "backgroundColor": "#0A0A0F",
+        "translucent": true,
+        "barStyle": "light-content"
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "WAKE_LOCK",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-updates",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Taxi360 needs your location for job dispatch and tracking.",
+          "locationWhenInUsePermission": "Taxi360 needs your location for job dispatch and tracking.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
+        }
+      ],
+      "expo-task-manager",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#1a73e8",
+          "sounds": [],
+          "androidMode": "default",
+          "androidCollapsedTitle": "New Job"
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "bookawaka",
+          "project": "react-native",
+          "url": "https://sentry.io/"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8cf080aa-8fbc-4bce-b653-6c865d1db592",
+      "fallbackToCacheTimeout": 0
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8cf080aa-8fbc-4bce-b653-6c865d1db592"
+      }
+    },
+    "owner": "lovesaf"
+  }
+}

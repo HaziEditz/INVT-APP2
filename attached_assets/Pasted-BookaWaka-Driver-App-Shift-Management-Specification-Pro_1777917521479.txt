@@ -1,0 +1,142 @@
+BookaWaka Driver App — Shift Management Specification
+Project: Invercargill Southland Taxi Limited
+Purpose: This document defines everything the driver app must implement for shift tracking, NZ compliance hour rules, driver notifications, and offline handling. Please implement all sections before the owner dashboard compliance reports can go live.
+
+SECTION 1 — Firebase Data the App Must Write
+1A — Shift Start
+When the driver taps "Start Shift" / "Go Online", write to Firebase:
+
+shiftLogs/{companyId}/{driverId}/{shiftId}/
+  startTime:    "2026-05-04T08:00:00.000Z"   ← ISO 8601 UTC
+  vehicleId:    "TAXI01"
+  status:       "active"
+  driverName:   "Abdullah Gul"
+
+shiftId = Firebase .push() key or a timestamp-based unique string.
+
+1B — Shift End
+When the driver taps "End Shift" / "Go Offline", update the same record:
+
+shiftLogs/{companyId}/{driverId}/{shiftId}/
+  endTime:      "2026-05-04T21:45:00.000Z"   ← ISO 8601 UTC
+  status:       "completed"
+  totalMinutes: 465
+lastshifttime/{driverId}: "2026-05-04T21:45:00.000Z"   ← also update this
+
+1C — Breaks
+Each break must be recorded as a sub-record under the shift:
+
+shiftLogs/{companyId}/{driverId}/{shiftId}/breaks/{breakId}/
+  breakStart:   "2026-05-04T12:00:00.000Z"
+  breakEnd:     "2026-05-04T12:30:00.000Z"
+  breakMinutes: 30
+
+1D — Driver ID Format
+The driver ID used in all Firebase writes must match exactly what is stored in drivers/{companyId} in the database. Currently the driver ID is D001. Confirm with us before using any other format — this must be consistent everywhere.
+
+SECTION 2 — NZ Legal Hour Rules to Enforce
+These are legal requirements under New Zealand Land Transport rules for passenger service drivers. The app must enforce all of them.
+
+Rule	Limit	App Action
+Maximum work per day	14 hours (driving + waiting, including breaks)	Block going online after 14h reached
+Minimum rest after daily shift	10 continuous hours	Block going online until 10h rest is complete
+Maximum work per 7-day rolling period	70 hours total	Block going online after 70h reached
+Minimum rest after 70-hour week	24 continuous hours	Block going online until 24h rest is complete
+How to calculate:
+
+"Work time" = time from shift start to shift end, minus recorded break time
+"7-day rolling period" = sum of all work hours in the last 7 calendar days, not a fixed Mon–Sun week
+Breaks count as rest only if a break record is written — otherwise the full shift duration is counted as work time
+SECTION 3 — In-App Warnings and Messages
+The driver must receive the following messages at the right moments. All times shown to the driver must be in New Zealand local time (NZST/NZDT).
+
+Daily limit warnings:
+When 1 hour of work time remains:
+"⚠️ Warning: 1 hour remaining in your shift. You have worked [X hrs Y mins] today."
+
+When 30 minutes remaining:
+"⚠️ Warning: 30 minutes remaining in your shift."
+
+When 14-hour daily limit is reached:
+"🛑 You have reached your 14-hour daily limit. You must take at least 10 hours rest. Your next shift can start at [TIME on DATE]."
+
+Weekly limit warnings:
+When 5 hours of weekly work time remains:
+"⚠️ You have 5 hours remaining this week (70-hour weekly limit)."
+
+When 70-hour weekly limit is reached:
+"🛑 You have reached your 70-hour weekly limit. You must take 24 hours continuous rest. You can start work again at [TIME on DATE]."
+
+After rest is complete:
+"✅ Your rest period is complete. You are now eligible to start a new shift."
+Live shift display on driver home screen:
+The driver's home screen must always show:
+
+Hours worked today (e.g. "6h 45m")
+Break time taken today (e.g. "30m break")
+Hours worked this week (e.g. "38h 15m / 70h")
+Time remaining before daily limit (e.g. "7h 15m left today")
+Time remaining before weekly limit (e.g. "31h 45m left this week")
+SECTION 4 — Active Ride Rule
+The driver must not be able to end their shift while a ride is in progress.
+
+If driver taps "End Shift" while a ride is active, show:
+"You cannot end your shift while a ride is in progress. Please complete the current ride first."
+
+Once the active ride is marked as completed, the app may prompt:
+"Your last ride is done. Would you like to end your shift now?"
+
+SECTION 5 — Shift Start Blocking
+Before allowing the driver to go online, the app must check:
+
+Daily rest not completed:
+If less than 10 hours have passed since the last shift ended:
+"You need [X hours Y minutes] more rest before your next shift. You can start at [TIME]."
+
+Weekly limit reached, 24-hour rest not completed:
+If the driver has hit 70 hours this week and less than 24 hours have passed since their last shift ended:
+"You have completed your 70-hour weekly limit. You must rest until [TIME on DATE]."
+
+In both cases the "Go Online" / "Start Shift" button must be disabled — not just a warning, the driver must not be able to bypass it.
+
+SECTION 6 — Offline and Network Failure Handling
+This is critical. The app must work correctly even when the driver has no internet connection.
+
+What the app must do offline:
+Store shift data locally first, sync to Firebase when back online.
+
+When the driver taps "Start Shift" with no internet: save the start time to local device storage immediately. Sync to Firebase when connection is restored. Show the driver: "You are offline. Your shift has started and will sync when connected."
+
+When the driver taps "End Shift" with no internet: save the end time and total minutes to local device storage. Sync to Firebase when connection is restored. Show: "You are offline. Your shift end has been saved and will sync when connected."
+
+The shift timer on the home screen must keep running using the local device clock — it must not stop or reset because of lost connection.
+
+All warnings (1 hour left, 30 minutes left, daily/weekly limit reached) must fire correctly using the local device clock, regardless of internet connection.
+
+Sync rules when back online:
+When connection is restored, the app must sync any unsynced shift start/end/break records to Firebase in the correct time order.
+If a shift start or end failed to sync due to a network error, the app must retry automatically in the background — the driver should not have to do anything manually.
+If a shift record was already partially written (e.g. start written but end failed), the app must update the existing Firebase record — not create a duplicate.
+Server downtime:
+If the Firebase server is temporarily down (not the driver's internet, but the server itself), the same offline logic applies — store locally, retry when server is reachable.
+The app must show a status indicator to the driver when it is offline or unable to reach the server.
+What must never happen:
+The shift timer must never stop because of a lost connection
+A shift end must never be lost — if it cannot reach Firebase immediately, it must be saved locally and synced later
+The driver must never be able to start a new shift on the device while a previous shift is still unsynced and unended
+SECTION 7 — Summary of What We Need From Your Side
+Item	Required
+Write shift start to shiftLogs/{cid}/{driverId}/{shiftId}	✅
+Write shift end to same record + update lastshifttime/{driverId}	✅
+Write breaks as sub-records under the shift	✅
+Enforce 14h daily limit + 10h rest rule	✅
+Enforce 70h weekly limit + 24h rest rule	✅
+Show live shift timer and remaining hours on home screen	✅
+Send driver warnings at 1h and 30min before limits	✅
+Block shift end during active ride	✅
+Store shift data locally when offline, sync when back online	✅
+Use consistent driver ID format matching drivers/{cid} in Firebase	✅
+All timestamps written in ISO 8601 UTC format	✅
+Please confirm receipt and let us know your estimated timeline. Once these are in place we will build the owner compliance dashboard on our side.
+
+Copy that entire message and send it to your driver app developer.

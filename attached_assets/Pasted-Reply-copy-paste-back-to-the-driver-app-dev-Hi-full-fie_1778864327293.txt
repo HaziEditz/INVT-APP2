@@ -1,0 +1,53 @@
+Reply (copy-paste back to the driver-app dev)
+Hi — full field map below. Two important context items first:
+
+A. There are TWO trip-detail UIs on the dispatch console, and the dev who screenshot job #6112605163 was looking at the OLD one.
+
+Old modal — #JobsDetailsSection, AngularJS scope showi.*, populated from the SQL stored proc JobDetails (backend ASP.NET, taxitime.co.nz). Field names are the PascalCase SQL column names from the legacy Booking table.
+New modal — #job-detail-popup / ShowJobPopup(jobId), same SQL row PLUS a Firebase enrichment that reads from allbookings/{cid}/{bookingId} first, then falls back to completedJobs/{cid} searched by orderByChild('bookingId').equalTo(jobId) (i.e. push-keyed driver-app writes). This one already shows fare/timeline. If your dev points the dispatcher at "View → New job details" instead of the old PDF button, most of the "missing on screen" complaints disappear.
+B. The PDF is dumb. It's doc.fromHTML($('#JobsDetailsSection').html()) of the old modal — that's why it has no layout and renders mojibake on ppname (jsPDF v1's fromHTML doesn't handle UTF-8). The PDF redesign is on me; you don't need to do anything for it.
+
+Field-by-field source map
+What dispatcher sees	Where it's read	Exact field name(s) (in priority order)
+Fare (total)	New modal jdpBuildFare, both SQL row and Firebase	TotalFare → totalFare → fare → Fare → Cost; if all blank, sums (FareBase|RideCost) + (FareTime|WaitingCost) + FareExtras + DriverCost
+Ride Cost	New modal	FareBase (offline sync) → RideCost
+Waiting Cost	New modal + old modal	FareTime (offline sync) → WaitingCost
+Waiting Time	Old modal	WaitingTime (passed through a format() helper — accepts seconds OR "mm:ss")
+Driver Cost	Both	DriverCost
+Estimated Cost	Old modal	esti (legacy SQL alias) — also written by SQL as EstimatedCost on inserts; reader uses esti
+Estimated Distance	Both	EstimatedDistance (string, plain number — UI appends ' km'); new modal also accepts JobDistance, distanceKm, Distance, FareDistance
+Payment Type	New cards	paymentMethod OR PaymentMethod (uppercased on display); paid flag = Recieve_payment (truthy) OR paymentStatus/PaymentStatus === "paid"
+Paid Amount	Old modal	Recieve_payment
+Tariff Name	Both	TarriffType (yes, double-r — legacy SQL column, stays)
+Tariff ID	SQL writes	TarriffId (legacy spelling)
+Pick Address	Both	PickAddress → PickLocation
+Drop Address	Both	DropAddress → DropLocation
+Pickup coords	New modal map	PickLatLng ("lat,lng" string)
+Drop coords	New modal map	DropLatLng ("lat,lng" string)
+GPS route polyline	New modal map	RoutePolyline (encoded polyline string)
+Passenger Name	Both	ppname (with j.Name fallback in PDF) — the mojibake is jsPDF's fault, not yours; write UTF-8 as you already do
+Passenger Phone	Old modal labels it "Passenger Phone" but reads	AccountId (legacy — this is just the customer's phone number stored in the AccountId SQL column; not the business account id)
+Business Account	Old modal	Account_id, Account_Name (separate from AccountId above)
+Driver Name	New modal prefers	drivername → UserFName + ' ' + UserLName
+Vehicle	Both	CallSign / VehicleNo
+Total Ride Time	Old modal	TotalTime (string "mm:ss"); new modal computes it as ActiveAt → JobCompleteTime diff in minutes
+Booking Source	Both	BookingSource ("Dispatch Console", "Hail", etc.)
+Job ID	New modal	bookingidx → Id
+Timeline / timestamps (new modal jdpBuildTimeline)
+All accept either ISO "YYYY-MM-DDTHH:mm:ss" (rendered verbatim as NZ local) or anything new Date() can parse. Use ISO with NO Z suffix and NO offset — the page treats unstamped ISO as already-NZ-local, which matches our TZ=Pacific/Auckland setup.
+
+Milestone	Field name
+Booked	BookingDateTime
+Dispatched / offered	OfferedAt
+Driver accepted	AcceptedAt
+Driver on way (PoB pickup en-route)	PickingAt
+Meter start (pickup)	ActiveAt
+Completed	JobCompleteTime → newcompelete
+Old modal uses the SQL-side aliases on the same row: jobaccpettime, arrivedtime, pickuptime, onthewaytime, newcompelete, JobCompleteTime, DispatchTime. These are populated by the ASP.NET backend when driver actions come through /Login.svc proc calls; if you want them to appear when offline-synced, your syncOfflineTrip POST needs to land in the same SQL row (which it already does — confirmed working since v22au).
+
+Firebase paths the dispatch page reads
+Primary: allbookings/{cid}/{bookingId} — direct key lookup.
+Fallback: completedJobs/{cid} .orderByChild('bookingId').equalTo(String(bookingId)).limitToFirst(1) — for your push-keyed completed records. (Note: this requires ".indexOn": ["bookingId"] on completedJobs/$cid — already in database.rules.json.)
+Both nodes are merged onto the SQL row, with Firebase wins on non-empty values — meaning anything you write under the names above (PascalCase or the camelCase fallbacks I've listed) will populate the on-screen card and the PDF automatically.
+"Tariff Change Counter" / "Meter Change Counter"
+These are hardcoded "Not Avalible Yet" strings in the old modal HTML (lines 1703 + 1706 of Default.aspx). The dispatch page doesn't currently read tariffChanges or pauseLog arrays from anywhere. To make them show, HQ needs to (a) wire them to read from Firebase, and (b) decide a render format. That's on me — I'll do it as part of the PDF/UI cleanup pass once you give me the green light.

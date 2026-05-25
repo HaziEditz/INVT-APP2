@@ -1,0 +1,47 @@
+~/workspace$ npx eas build --profile preview --platform android --clear-cache
+Found eas-cli in your project dependencies.
+It's recommended to use the "cli.version" field in eas.json to enforce the eas-cli version for your project.
+Learn more: https://github.com/expo/eas-cli#enforcing-eas-cli-version-for-your-project
+
+Resolved "preview" environment for the build. Learn more: https://docs.expo.dev/eas/environment-variables/#setting-the-environment-for-your-builds
+No environment variables with visibility "Plain text" and "Sensitive" found for the "preview" environment on EAS.
+
+
+
+✔ Using remote Android credentials (Expo server)
+✔ Using Keystore from configuration: Build Credentials YBRTvGylu8 (default)
+
+Compressing project files and uploading to EAS Build. Learn more: https://expo.fyi/eas-build-archive
+✔ Compressed project files 13s (76.3 MB)
+✔ Uploaded to EAS 13s
+✔ Computed project fingerprint
+
+See logs: https://expo.dev/accounts/lovesaf/projects/taxi360-driver/builds/568bb8dc-9f50-4fdb-9727-22b1ad02bead
+
+Waiting for build to complete. You can press Ctrl+C to exit.
+✔ Build finished
+
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+  █ ▄▄▄▄▄ █▄▄███▀ █▀█▄▄ █▀ ▄▀██ █ ▄▄▄▄▄ █
+  █ █   █ █ ▀█ ▄ █ ▀▀█ ▀█▀██ █▀▄█ █   █ █
+  █ █▄▄▄█ █▄ ▄▄▀█▀▄█ █ ▄████▄ ▄▄█ █▄▄▄█ █
+  █▄▄▄▄▄▄▄█▄▀▄▀▄█▄█▄▀▄▀▄█▄█ █▄▀▄█▄▄▄▄▄▄▄█
+  █ ▄▄ █▀▄█ ████▀█▄█ █ ▄ ▀▀ █ █▀▄█▀▄  ▀▄█
+  █▄▄ ▀ ▀▄ ▀ ▀▀▀▀▀█▄▄█▀▀▄▀ ▄▀▄█▄ ▀ ▄█  ▀█
+  █▀▀█▄█▄▄ ██  ▄▄█▀█ █▀ ▀▄██▄▄ ▀  ▀   █ █
+  █▀▄█▄ ▀▄▄ █▀█████▄█   ▀ █ ███ ▀█▀  █▄▀█
+  █▄▄▄█▀ ▄▄██▄ ▀  ▀██▄▄▄▄▄▀▀▄█▀▄█▀▀█▀▄ ▀█
+  █ ▀▀█▄▀▄   ▄▀█▄▀▄▀  ▀ █▄▀▄▄▄  ▄▀▀ ▀▄ ▄█
+  ██▄▄ ▀▄▄  ▄▀▀██▄█  ▀   █ ▄▀▄▄  █▀▄██ ██
+  █ ▄██ ▀▄▄█▄ ▄  ▄▀█▄ ▀ █▄▄▄ ▄██▀█▄▄ ▀███
+  █▄▄▄▀▀▀▄ █▀██ ▄█ ▀▄ ▀██ █ ▄ ▀▀  ▀ █ ▄ █
+  █▀▄▀ ▄▄▄ █ ▀▀▀▄▀▀ ██▄▀ ▄██▄ █▀▄▄ ██▄▄▀█
+  ███▄▄▄▄▄█ ▀▀ ▀ █▀ █▄▄  ▀   █▄ ▄▄▄ ▄ ▄ █
+  █ ▄▄▄▄▄ ██▄ █▄██▄  ██ █ █▀▄██ █▄█  █▄▄█
+  █ █   █ █▀█▀▀ █▄▄▄▄█▀▀ █ ▀█ █   ▄ █▀▄██
+  █ █▄▄▄█ █  ▄▄█▀██▀▄ ▀▀▄▀ ▄▀█▀█▀▄  ▄ ███
+  █▄▄▄▄▄▄▄█▄█▄██▄█▄▄▄▄█▄█▄██▄▄███▄▄▄▄▄▄▄█
+
+
+🤖 Open this link on your Android devices (or scan the QR code) to install the app:
+https://expo.dev/accounts/lovesaf/projects/taxi360-driver/builds/568bb8dc-9f50-4fdb-9727-22b1ad02bead

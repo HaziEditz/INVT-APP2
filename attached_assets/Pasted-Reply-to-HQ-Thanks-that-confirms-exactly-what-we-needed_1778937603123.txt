@@ -1,0 +1,31 @@
+Reply to HQ:
+
+Thanks — that confirms exactly what we needed. Two clarifications and one remaining ask:
+
+1. Correction on whose templates need updating. Apologies — the Closed Jobs list and the Active-panel driver-row table you spotted are in our dispatch console (Default.aspx), not on the HQ side. You don't need to touch those. I've just deployed a server-side fix: _shouldCopy was correctly refusing to overwrite local "truth", but it was treating our own hail-time placeholder strings ("Hail - lat,lng", "Hail Pickup (lat,lng)", "Hail / Street Pickup") as truth and refusing to merge the real resolved address from allbookings. That's now fixed for PickAddress / DropAddress only — placeholders are recognised and overwritten by the resolved string. Other fields still keep the no-overwrite guarantee.
+
+2. Active-panel driver-row is a different gap. That row reads driverz.jobpickup and driverz.jobdropoff from online/{cid}/{vehicleId}/current. You mentioned those fields are in your contract — if you can confirm the driver app writes jobpickup (resolved address) to online/.../current on hail-trip start (not just dispatcher trips), we'll have a complete fix once it lands.
+
+3. Still open — Q1 from earlier. Which OTA was D002 running for trips 6112605171 and 6112605173? We still need that to know whether the 5-keys-in-allbookings issue is a pre-22au build or something live we need to dig into.
+
+Will re-test the Closed Jobs list against trip 6112605174 once the server fix is verified live and report back.
+
+Thanks again.
+
+Code review on the small scoped change:
+
+
+Reviewed server.js address merge logic
+Architect review came back clean — no severe issues, no regressions. The fix is scoped strictly to PickAddress/DropAddress and only triggers when the local value is a recognised placeholder.
+
+Summary of this round:
+
+✅ Fixed the root cause on our side: _shouldCopy was treating our own "Hail - lat,lng" / "Hail Pickup (lat,lng)" placeholders as "truth" and blocking the real resolved address from allbookings from being merged into the closed-job entry. Now placeholders are recognised and overwritten — but only for PickAddress/DropAddress, and only when the incoming value is a real (non-placeholder) string. Real addresses still can't be overwritten by other real addresses.
+
+✅ Corrected your draft HQ message — the Closed Jobs list and Active panel are in our Default.aspx, not HQ's. The fixed reply is above (scroll up to "Reply to HQ:").
+
+⏳ Active-panel driver-row is a separate issue — that one reads online/{cid}/{vehicleId}/current.jobpickup, which is the driver app's domain. HQ needs to confirm whether their app writes jobpickup on hail starts.
+
+⏳ Still waiting on HQ's Q1 answer (D002's OTA version for trips 6112605171/6112605173).
+
+Once HQ confirms the OTA and you re-test against a fresh hail trip, the Closed Jobs list should show the real address.

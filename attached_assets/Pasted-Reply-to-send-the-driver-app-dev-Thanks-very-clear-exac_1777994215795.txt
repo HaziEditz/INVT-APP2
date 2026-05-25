@@ -1,0 +1,41 @@
+Reply to send the driver app dev:
+
+Thanks — very clear, exactly what we needed.
+Here's our status on each of the 4 items:
+#1 — completedAt_ISO field name
+Fixed on our end. SA portal now reads completedAt_ISO as primary and falls
+back to completedAt only as a last resort. All date filtering and month
+grouping now uses the ISO field.
+#2 — TM cardNumber not in completedJobs
+Fixed on our end. SA portal now fetches trips/{cid} in parallel and looks up
+trips/{cid}/{bookingId}/cardNumber when cardNumber is missing from the job record.
+Going forward, could you also write cardNumber directly into the completedJobs
+record when the job completes? That removes the need for the secondary lookup
+and makes the earnings export simpler. Not urgent — the fallback now handles it.
+#3 — Dispatched jobs in allbookings, not completedJobs
+Fixed on our end. SA portal now reads both completedJobs/{cid} AND
+allbookings/{cid} for every company. Dispatched jobs are counted when
+status = "completed" or "done". TM dispatched trips are also picked up
+and included in the subsidy claim totals.
+Please confirm: are there any other status values a completed dispatched job
+can have? (e.g. "paid", "closed", "fulfilled") — we currently count
+"completed" and "done" only.
+#4 — Exact completedJobs field contract
+Here is exactly what the SA portal reads from each completedJobs record:
+  completedAt_ISO   — ISO timestamp (used for all date filtering)
+  completedAt       — NZ display string (display only, not used for maths)
+  startedAt_ISO     — ISO timestamp (used for month grouping)
+  fare              — float (trip revenue)
+  meterFare         — float (fallback if fare missing)
+  paymentType       — string ("cash", "card", "total_mobility", etc.)
+  driverName        — string
+  vehicleId         — string
+  cardNumber        — string (TM voucher, now looked up via bookingId if missing)
+  tmVoucherNo       — string (TM voucher alternative field name, either works)
+  bookingId         — string (used to join to trips/{cid} for TM cardNumber)
+  councilId         — string (used for TM subsidy calculation)
+  tmSubsidy         — float (pre-calculated subsidy, used if > 0 and < fare)
+  tmSubsidyFare     — float (alternative field name for pre-calculated subsidy)
+Same fields are now read from allbookings/{cid} records too, with the
+addition of "status" (must be "completed" or "done" to be counted).
+Let us know if any of those field names differ on your end.

@@ -1,0 +1,58 @@
+modules = ["java-graalvm22.3", "nodejs-20", "python-3.11"]
+[agent]
+expertMode = true
+integrations = ["stripe:1.0.0"]
+
+[nix]
+channel = "stable-25_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "fuser -k 8081/tcp 5000/tcp 5002/tcp 2>/dev/null; sleep 3; node proxy5000.js & node stripeServer.js & npx expo start --port 8081 --tunnel"
+waitForPort = 5000
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5002
+externalPort = 3000
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
+localPort = 8082
+externalPort = 3001
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["npx", "expo", "start", "--port", "5000", "--web", "--no-dev"]
+
+[userenv]
+
+[userenv.shared]
+EXPO_PUBLIC_SENTRY_DSN = "https://8382d794d4c133e564da455e157587a0@o4511372138119168.ingest.us.sentry.io/4511372142968832"
+SENTRY_AUTH_TOKEN = ""
+SENTRY_AUTH_TOKEN_READ = ""

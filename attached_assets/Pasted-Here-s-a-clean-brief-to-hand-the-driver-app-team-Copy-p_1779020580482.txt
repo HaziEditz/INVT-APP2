@@ -1,0 +1,64 @@
+Here's a clean brief to hand the driver-app team. Copy-paste ready.
+
+Driver-App Bug Report — "Offer received but no Accept popup, driver goes Away"
+Vehicle: TAXI02 · Driver SQL ID: D002 · Driver Firebase UID: Mi0IIAjYG4bxlZ4gT6f4XkW25hS2 · Company: 620611
+Booking under test: #6112605171
+Tested: 17 May 2026, ~12:25 NZST
+
+Observed symptom
+The driver app receives the job offer (vehicle is online, online status updates land), but no Accept / Decline popup appears on the device. After 27 seconds the dispatch console times out, marks the job "No Response", and flips the driver to Away. User reports this happens after the driver app has crashed at least once.
+
+What dispatch is writing (confirmed by Firebase reads)
+At offer time, dispatch writes to three Firebase nodes:
+
+notification/{driverSqlId} — push-style notification payload
+jobs/{companyId}/{vehicleId}/{driverSqlId} — offer envelope:
+{
+  "BookingId":  "6112605171",
+  "DriverId":   "D002",
+  "VehicleId":  "TAXI02",
+  "Status":     "Offered",
+  "offeredAt":  1779019630657
+}
+
+online/{companyId}/{vehicleId}/current — pickup/dropoff/jobname/JobphoneNo/currentJobId/joboffer=1
+What dispatch expects back (within 27 s)
+The driver app should write one of these to confirm acceptance:
+
+Preferred path: jobs/{companyId}/{vehicleId}/{driverSqlId} with Status: "DriverAccepted" or Status: "Active" (+ keep BookingId)
+Legacy path (still supported): joback/{bookingId}/{driverSqlId} with status "Accepted" / "DriverAccepted"
+What actually happened (3 offer cycles, 3 timeouts)
+The dispatch read both paths at the 27-s mark every time:
+
+jobackVal = null
+jobsNodeVal = null
+
+The driver app wrote nothing to either path during the offer window. So either:
+
+The accept popup never displayed (likely), or
+The accept button is wired but doesn't write to Firebase, or
+It writes to a path/key dispatch isn't watching
+Please confirm / fix on the driver app
+Does the app subscribe to jobs/{companyId}/{vehicleId}/{driverSqlId} and react when Status === "Offered"?
+Right now it doesn't appear to — we don't see any Firebase write back from the device.
+
+Crash on parse? User reports the app has crashed during this flow. Please add try/catch logging around the offer-payload handler and capture: payload received, parse error (if any), screen shown.
+
+Where does the Accept button write? Confirm exact Firebase path, field name, and value the device writes when the driver taps Accept. The dispatch listener is matching Status === "DriverAccepted" or Status === "Active" on the jobs/... path. If your build writes something different (e.g. accepted: true, or jobstatus: "Accept", or to a different path), tell us so we can either align dispatch or you align the app.
+
+Driver-app build / OTA in use? Please send the runtime/build/OTA group so we can correlate this device against the known-good build. The dispatch already stamps these on closed-job records but we need to know what's on D002's phone right now.
+
+Foreground / background? Was the app foregrounded, backgrounded, or killed during the test? If push notifications are needed to wake it for the offer screen, confirm FCM/APNs is wired and the device token is registered against notification/{driverSqlId}.
+
+Listener attachment timing. When the driver presses "Available", does the app immediately attach a Firebase listener on jobs/{companyId}/{vehicleId}/{driverSqlId}? If the listener is only attached after the first ever offer, a fresh login session would miss offers until then.
+
+Stale offer guard. If the app sees Status: "Offered" for a BookingId it has already actioned, please ignore — don't block the offer popup.
+
+What we'll do on dispatch side (independent of the above)
+Add a server-side fail-safe: if no acceptance lands within 25 s, push a clear-offer command to online/{companyId}/{vehicleId}/current so the device UI doesn't keep showing the stale offer if the app does recover.
+Fix the separate "No One → Pending" frontend bug (unrelated to driver app — it's in our Edit-form save handler).
+Minimum repro for driver-app dev
+Driver logs in, presses Available, vehicle status = Available, listener should be attached.
+Dispatcher offers booking #X to that driver.
+Within 27 s, the device should show the Accept popup AND, on Accept tap, write Status: "DriverAccepted" to jobs/{cid}/{vid}/{driverSqlId} (or Accepted to joback/{bookingId}/{driverSqlId}).
+If popup never appears: capture app logs from the moment Firebase received the Status: "Offered" write.

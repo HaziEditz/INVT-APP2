@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/activity_current_job_detail"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="com.khybertech.taxi360driver.JobView.CurrentJobDetail"
+    >
+
+    <android.support.v7.widget.Toolbar
+        app:layout_scrollFlags="enterAlways"
+        app:titleTextColor="#fff"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorPrimary"
+        android:minHeight="?attr/actionBarSize"
+        android:id="@+id/toolbar_current_job_detail" />
+
+
+    <LinearLayout
+        android:visibility="visible"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="50dp"
+        android:orientation="vertical"
+        >
+        <LinearLayout
+            android:id="@+id/loadingbarcurrent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_below="@id/toolbar_chat_conversation"
+            android:gravity="center"
+            >
+            <ProgressBar
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                />
+
+        </LinearLayout>
+        <include layout="@layout/currentjobdetail_cardview"/>
+
+    </LinearLayout>
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:layout_alignParentBottom="true"
+    android:background="@drawable/button_square"
+    android:shadowRadius="20"
+    android:textColor="#fff"
+    android:backgroundTint="#88a903"
+    android:layout_weight="1"
+    android:text="Track Ride"
+    >
+
+    <Button
+        android:id="@+id/btn_complete_currentjob"
+        android:layout_alignParentBottom="true"
+        android:background="@drawable/button_square"
+        android:shadowRadius="20"
+        android:textColor="#fff"
+        android:backgroundTint="#88a903"
+        android:layout_weight="1"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Track Ride"/>
+    <Button
+        android:id="@+id/btn_gotometer"
+        android:layout_alignParentBottom="true"
+        android:background="@drawable/button_square"
+        android:shadowRadius="20"
+        android:textColor="#fff"
+
+        android:backgroundTint="#88a903"
+        android:layout_weight="1"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Goto Metter"/>
+
+
+</LinearLayout>
+</RelativeLayout>

@@ -1,0 +1,527 @@
+1
+device
+100%
+SM-F966B
+os
+100%
+Android 16
+release
+100%
+1.5.0
+environment
+100%
+production
+View all tags
+
+Events
+in this issue
+First
+Latest
+Recommended
+View More Events
+
+Copy as
+ID: 70052493
+11 minutes ago
+|
+JSON
+Jump to:
+Highlights
+Stack Trace
+Replay
+Breadcrumbs
+Trace
+Tags
+Context
+9f3fe34f664d447e944f979f7f18a410
+
+Android
+16
+
+SM-F966B
+SM-F966B
+1.5.0
+production
+
+Highlights
+
+Edit
+handled
+handled
+yes
+level
+level
+error
+transaction
+transaction
+--
+mobile
+mobile
+--
+main_thread
+main_thread
+--
+Trace: Trace ID
+e72a31fa848e4a028e97e520711d556a
+Profile: profile_id
+--
+App: name
+--
+
+Stack Trace
+
+Display
+
+Copy as
+ReferenceError
+Property 'driver' doesn't exist
+mechanism
+generic
+handled
+true
+Connect with Git Providers
+Install Git providers (GitHub, GitLab…) to enable features like code mapping and stack trace linking.
+Get Started
+
+app:///index.android.bundle:1:3569199
+in
+JobOfferModal
+
+Unminify Code
+In App
+app:///index.android.bundle:1:282857
+in
+renderWithHooks
+
+Unminify Code
+In App
+app:///index.android.bundle:1:301709
+in
+updateFunctionComponent
+
+Unminify Code
+In App
+app:///index.android.bundle:1:300796
+in
+updateSimpleMemoComponent
+
+Unminify Code
+In App
+app:///index.android.bundle:1:300552
+in
+updateMemoComponent
+
+Unminify Code
+In App
+app:///index.android.bundle:1:308739
+in
+beginWork
+
+Unminify Code
+In App
+app:///index.android.bundle:1:328318
+in
+performUnitOfWork
+
+Unminify Code
+In App
+app:///index.android.bundle:1:327326
+in
+workLoopSync
+
+Unminify Code
+In App
+app:///index.android.bundle:1:327158
+in
+renderRootSync
+
+Unminify Code
+In App
+app:///index.android.bundle:1:324801
+in
+performWorkOnRoot
+
+Unminify Code
+In App
+app:///index.android.bundle:1:278307
+in
+performWorkOnRootViaSchedulerTask
+
+Unminify Code
+In App
+
+Session Replay
+Set up your React Native app with Session Replay
+Watch the errors and latency issues your users face
+
+Set Up Now
+
+
+Breadcrumbs
+
+
+
+Copy as
+Exception - This event
+error
+May 17, 8:43:46.891 PM NZST
+ReferenceError: Property 'driver' doesn't exist
+Console
+warning
+May 17, 8:43:46.902 PM NZST
+[expo-av]: Expo AV has been deprecated and will be removed in SDK 54. Use the `expo-audio` and `expo-video` packages to replace the required functionality.
+
+{
+
+arguments: [
+1 item
+],
+logger: console
+}
+Console
+error
+May 17, 8:43:46.892 PM NZST
+[TabErrorBoundary:Tabs] Property 'driver' doesn't exist ReferenceError: Property 'driver' doesn't exist
+    at JobOfferModal (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a690…
+
+{
+
+arguments: [
+4 items
+]
+} (1 item truncated)
+Console
+error
+May 17, 8:43:46.888 PM NZST
+[TabErrorBoundary:Tabs] Property 'driver' doesn't exist ReferenceError: Property 'driver' doesn't exist
+    at JobOfferModal (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a690…
+
+{
+
+arguments: [
+4 items
+]
+} (1 item truncated)
+Console
+error
+May 17, 8:43:46.888 PM NZST
+ReferenceError: Property 'driver' doesn't exist
+
+{
+
+arguments: [
+1 item
+]
+} (1 item truncated)
+
+View 46 more
+
+Trace Preview
+View Full Trace
+0.00ms0.00ms0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s0s
+
+1
+Trace
+—
+e72a31fa848e4a028e97e520711d556a
+
+Error
+—
+Property 'driver' doesn't exist ReferenceError app:///index.android.bundle JobOfferModal JobOfferModal(index.android)
+
+Tags
+
+
+
+
+
+build
+build
+sentry-v12-ota22bm (Extras on completion modal: driver can now add per-trip charges before settling payment — Airport pickup, Bike carrier, Extra bag, EFTPOS surcharge (% of fare), Cleaning fee, Ot...
+device
+device
+SM-F966B
+device.class
+class
+high
+device.family
+family
+SM-F966B
+dist
+dist
+4
+environment
+environment
+production
+evalCount
+evalCount
+1
+evalId
+evalId
+1vmial
+event
+event.environment
+environment
+javascript
+event.origin
+origin
+javascript
+handled
+handled
+yes
+hermes
+hermes
+True
+initActualRuns
+initActualRuns
+1
+initAttempts
+initAttempts
+1
+level
+level
+error
+mechanism
+mechanism
+generic
+os
+os
+Android 16
+os.build
+build
+BP2A.250605.031.A3.F966BXXS6AYKF
+os.name
+name
+Android
+os.rooted
+rooted
+no
+release
+release
+1.5.0
+rootMounts
+rootMounts
+1
+tabBoundary
+tabBoundary
+Tabs
+user
+user
+id:9f3fe34f664d447e944f979f7f18a410
+
+Contexts
+User
+Geography
+New Zealand (NZ)
+ID
+9f3fe34f664d447e944f979f7f18a410
+Operating System
+
+Build
+BP2A.250605.031.A3.F966BXXS6AYKF
+Kernel Version
+6.6.57-android15-8-31566393-abogkiF966BXXS6AYKF-4k
+Name
+Android
+Rooted
+no
+Version
+16
+App
+App Build
+3
+Build ID
+com.bookawaka.driver
+Build Name
+Bookawaka Driver
+In Foreground
+true
+is_split_apks
+true
+permissions
+
+{
+37 items
+}
+split_names
+
+[
+3 items
+]
+Start Time
+2026-05-17T07:40:50.131Z(an hour before this event)
+Version
+1.5.0
+Device
+
+archs
+
+[
+1 item
+]
+Battery Level
+16%
+Battery Temperature (°C)
+25.399999618530273
+Boot Time
+2026-05-01T03:40:43.776Z(16 days before this event)
+Brand
+samsung
+Charging
+false
+chipset
+QTI SM8750
+connection_type
+cellular
+Family
+SM-F966B
+Free Memory
+2.8 GiB
+Free Storage
+35.8 GiB
+id
+9f3fe34f664d447e944f979f7f18a410
+locale
+en_NZ
+Low Memory
+false
+Manufacturer
+samsung
+Memory Size
+10.9 GiB
+Model
+SM-F966B (BP2A.250605.031.A3)
+Model Id
+BP2A.250605.031.A3
+Online
+true
+Orientation
+portrait
+Processor Count
+8
+Processor Frequency (MHz)
+4473
+Screen Density
+2.625
+Screen DPI
+420
+Screen Height Pixels
+2520
+Screen Resolution
+null
+Screen Width Pixels
+1080
+Simulator
+false
+Storage Size
+219.4 GiB
+timezone
+Pacific/Auckland
+OTA Updates
+channel
+production
+check_automatically
+always
+is_embedded_launch
+false
+is_emergency_launch
+false
+is_enabled
+true
+is_using_embedded_assets
+false
+launch_duration
+15
+runtime_version
+1.5.0
+update_id
+019e34d3-aef1-7ccd-a0b5-8c2f46f6379a
+React Native
+component_stack
+
+    at JobOfferModal (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:3566820)
+    at RNCSafeAreaView (<anonymous>)
+    at anonymous (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1013269)
+    at HomeScreen (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:3552841)
+    at Suspense (<anonymous>)
+    at Route (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:961782)
+    at BaseRoute (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:968693)
+    at StaticContainer (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:932980)
+    at EnsureSingleNavigator (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:877138)
+    at SceneView (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:930697)
+    at NavigationProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:891177)
+    at RCTView (<anonymous>)
+    at View (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:522451)
+    at RCTView (<anonymous>)
+    at View (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:522451)
+    at Animated(View) (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:674228)
+    at Background (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:980496)
+    at Screen (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1026816)
+    at RNSScreen (<anonymous>)
+    at Animated(Anonymous) (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:674228)
+    at Suspender (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1043800)
+    at Suspense (<anonymous>)
+    at Freeze (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1043861)
+    at DelayedFreeze (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1043442)
+    at InnerScreen (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1041148)
+    at anonymous (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1042840)
+    at MaybeScreen (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1036698)
+    at RNSScreenContainer (<anonymous>)
+    at ScreenContainer (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1050391)
+    at MaybeScreenContainer (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1036861)
+    at RCTView (<anonymous>)
+    at View (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:522451)
+    at FrameSizeProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1014661)
+    at SafeAreaProviderCompat (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1026017)
+    at BottomTabView (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:974955)
+    at PreventRemoveProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:915608)
+    at NavigationStateListenerProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:938309)
+    at NavigationContent (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:927840)
+    at anonymous (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:927743)
+    at BottomTabNavigator (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:974034)
+    at anonymous (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:960701)
+    at TabErrorBoundary (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:843910)
+    at TabLayout (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:842747)
+    at Suspense (<anonymous>)
+    at Route (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:961782)
+    at BaseRoute (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:968693)
+    at StaticContainer (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:932980)
+    at EnsureSingleNavigator (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:877138)
+    at SceneView (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:930697)
+    at NavigationProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:891177)
+    at RNSScreenContentWrapper (<anonymous>)
+    at ScreenContentWrapper (<anonymous>)
+    at DebugContainer (<anonymous>)
+    at RNSScreen (<anonymous>)
+    at Animated(Anonymous) (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:674228)
+    at Suspender (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1043800)
+    at Suspense (<anonymous>)
+    at Freeze (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1043861)
+    at DelayedFreeze (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1043442)
+    at InnerScreen (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1041148)
+    at anonymous (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1042840)
+    at ScreenStackItem (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1053030)
+    at NavigationProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:891177)
+    at SceneView (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1076450)
+    at RNSScreenStack (<anonymous>)
+    at anonymous (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1052106)
+    at ScreenStack (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1051292)
+    at RCTView (<anonymous>)
+    at View (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:522451)
+    at FrameSizeProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1014661)
+    at SafeAreaProviderCompat (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1026017)
+    at NativeStackView (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:1075009)
+    at PreventRemoveProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:915608)
+    at NavigationStateListenerProvider (address at /data/user/0/com.bookawaka.driver/files/.expo-internal/e9c4a69039273b9cdf9ececc14600432:1:938309)
+    at NavigationConte...
+Trace Details
+Span ID
+80094e3696161315
+Status
+unknown
+Trace ID
+e72a31fa848e4a028e97e520711d556a
+
+SDK
+
+Event Grouping Information

@@ -1,0 +1,130 @@
+Answers to your 5 questions
+Q1: Is /api/job/command deployed on the SA server today?
+Yes, live and shipping commands. server.js line 5777. All six verbs are active: assign, accept, cancel, recall, update, complete. Auth, idempotency, version-conflict, and tenant isolation are all wired. You can curl it now.
+
+Q2: Exact JSON shape per command
+All commands share this envelope:
+
+{
+  "bookingId":       <number>,
+  "command":         "accept" | "cancel" | "recall" | "complete" | "assign" | "update",
+  "by":              "driver",
+  "ifVersion":       <number, optional>,
+  "clientRequestId": "<UUID, optional but strongly recommended>",
+  "payload":         { ...verb-specific }
+}
+
+Verb-by-verb payload:
+
+accept — payload empty. Server derives driverId from your X-User-Key header. No fields required.
+
+cancel — payload: { "reason": "<string, optional>", "driverFault": <bool, default false> }. For "I'm declining the offer" use this with reason="declined". For "passenger no-show after acceptance" use reason="No Show". Server decides based on current booking status whether this closes the job or recalls to Pending.
+
+recall — same payload shape as cancel. Use this when the driver wants to return an already-accepted job to dispatch (job goes back to Pending, cooldown stamped, you stay Available).
+
+complete — the big one. Payload field whitelist (all optional; unknown fields are dropped silently):
+
+fare                       number       — total fare charged
+distance                   number       — meter distance
+tariffId                   string|number
+tariffName                 string
+tariffChangedAt            ISO string   — if driver swapped tariff mid-trip
+waitingCost                number
+waitingTimeMinutes         number
+extras                     array|object — service-type chips (freight extras, etc)
+extrasTotal                number
+voucherCode                string
+voucherDiscount            number
+tmVoucher                  object       — full TM voucher payload as-is
+accClientId                string
+accApprovalNo              string
+accClaimNo                 string
+paymentMethod              string       — "Cash" | "Eftpos" | "Account" | "Card" | etc.
+paymentSplit               array        — [{method, amount, ...}] for split payments
+stripeChargeId             string
+stripePaymentIntentId      string
+startTime                  ISO string
+endTime                    ISO string
+duration                   number       — minutes
+pickupLat                  number
+pickupLng                  number
+dropLat                    number
+dropLng                    number
+finalDropAddress           string       — if driver deviated from booked dropoff
+driverComments             string
+meterReading               string
+fixedPrice                 number       — for fixed-price jobs
+fixedPriceReason           string
+gst                        number
+tipAmount                  number
+tollFee                    number
+parkingFee                 number
+
+Send what you have, omit what you don't. Required minimum is just fare and distance. Everything else is dispute-resolution metadata (the dispatcher's closed-job panel reads all of it).
+
+update — driver app shouldn't need this. Reserved for dispatcher/passenger metadata edits.
+
+assign — dispatcher-only verb. Not for driver app.
+
+Q3: Response shape on success
+Yes — every success returns the new version AND a full booking snapshot:
+
+{
+  "ok": true,
+  "idempotent": false,
+  "status": "Assigned" | "Completed" | "Cancelled" | "Pending",
+  "version": 7,
+  "driverId": "...",
+  "vehicleId": "...",
+  "fare": 42.50,           // complete only
+  "distance": 12.3,         // complete only
+  "driverFreed": true,      // cancel/complete — did we restore driver state?
+  "driverState": "Available" | "Away" | "Busy",  // driver's new state
+  "queueNo": 3,             // if returned to a zone queue
+  "booking": {
+    "bookingId": 6112605206,
+    "status": "Completed",
+    "version": 7,
+    "updatedAt": "2026-05-20T01:35:22.000Z",
+    "driverId": "...",
+    "vehicleId": "...",
+    "passengerName": "...",
+    "passengerPhone": "...",
+    "pickupAddress": "...",
+    "dropAddress": "...",
+    "fare": 42.50,
+    "distance": 12.3,
+    "paymentMethod": "Cash",
+    "notes": "...",
+    "bookingSource": "passengerApp"
+  }
+}
+
+On retry with same clientRequestId you get the cached response with dedup: true added.
+
+Q4: Where does the phone read updateSeq initially?
+Important — don't read it from Firebase. Today updateSeq lives in server in-memory state and is emitted via bookingEvents/{cid}/{bookingId}/{pushId}.version for audit. It is not written into jobs/{cid}/{vid}/{drv}/{bid}, pendingjobs/, or allbookings/.
+
+Treat the server response of /api/job/command as the authoritative source for version. Flow:
+
+New offer arrives via Firebase listener (today's path, unchanged): you don't know the version yet. Send accept without ifVersion — the server accepts it unconditionally (no conflict possible from an unversioned client).
+Server response returns version: N. Store it on the local job record.
+All subsequent commands for that booking include ifVersion: N and you roll forward from each response.
+If you want belt-and-braces, subscribe to bookingEvents/{cid}/{bookingId} — each push contains {eventType, version, diff, by, ts} and lets you reconcile if you missed a response. But you can ship without it; the response chain is enough.
+
+(There's a server-side todo to also fan updateSeq into pendingjobs/ and allbookings/. I'll add that as a follow-up so post-cutover you can also read it from Firebase on app cold-start. Won't block your cutover.)
+
+Q5: Hail trips — does command:"complete" use the bookingId from /api/job/create?
+Yes — same ID space, single source of truth. When you POST /api/job/create with source:"hail", the server allocates the bookingId and returns it. That exact same bookingId is what you send to /api/job/command with command:"complete". The hail booking lands in BookingStatus:'Active' with updateSeq:1, and your complete command transitions it Active → Completed (allowed by the state machine, see _BOOKING_STATE_MACHINE line 1016 — Active.complete → Completed).
+
+Worth flagging: the legacy /api/job/sync-offline-trip does NOT work for Active-state hail bookings (it can't find them). All hail completes MUST go through /api/job/command. That's part of why this cutover matters.
+
+What I'm doing on the server side in parallel
+While you build, I'll close two gaps so you don't have to discover them post-cutover:
+
+Fan updateSeq into allbookings/{cid}/{bid} and pendingjobs/{cid}/{bid} — so on app cold-start / offline-recovery you can read version from Firebase instead of replaying bookingEvents. Small additive change, no contract break.
+Stamp lastUpdatedAt consistently — every verb already bumps it; I'll verify it's in _publicBooking (line 1055) and Firebase paths.
+Both shipping before your cutover lands.
+
+One thing I need from you
+Send me the list of every direct Firebase write site you find in the audit (item 4 of your plan). Once you have that checklist labelled KEEP vs REPLACE, I want eyes on it before you start ripping things out — there are 2–3 spots where a write looks like presence but actually feeds the dispatch UI (vehiclestatus transitions to Busy, jobpickup/jobdropoff mirrors). I'll mark those clearly so we don't accidentally hide active jobs from the dispatcher.

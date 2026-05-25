@@ -1,0 +1,32 @@
+Total Mobility (TM) is a well-known NZ scheme — here's how it actually works and how it could fit into the app:
+
+How Total Mobility works in NZ
+
+Eligible passengers (elderly, disabled) carry a physical TM card issued by their local council
+The taxi operator is a registered TM provider
+The council subsidises 50% of the metered fare, capped at a fixed dollar amount (the cap varies by council — e.g. $37 in some regions means the max subsidy is $18.50, so council covers up to $18.50 and the passenger pays the rest)
+The taxi company claims the subsidy from the council — the passenger only pays their half at the time of the ride
+Traditionally this is done with paper vouchers or swipe card terminals
+What needs to happen in the app
+
+There are two sides:
+
+Driver side (your app):
+
+Before or at trip completion, driver marks the job as "Total Mobility" and enters the passenger's TM card number
+App calculates the split — e.g. full fare $30 → subsidy $15, passenger pays $15. Or full fare $80 → subsidy capped at $18.50, passenger pays $61.50
+Driver collects the passenger's portion (cash or card)
+The job is recorded with subsidy amount flagged for council claim
+Back-end / reporting side:
+
+The company needs a record of all TM trips with: card number, full fare, subsidy amount, passenger amount, date/driver
+These get batched and submitted to council for reimbursement (this is typically done by admin, not the driver)
+Things you need to decide before building:
+
+Card validation — do you want to validate TM card numbers against a list, or just let the driver type whatever number the passenger shows?
+Payment collection — is the passenger's portion always cash, or can they pay by card through the app?
+Which councils? — different councils have different caps. Do you need to handle multiple caps or just one?
+Voucher/receipt — does the passenger need a printed or emailed receipt showing the subsidy split?
+Admin portal — does your dispatcher console need a TM claims report, or is that handled separately?
+Passenger app — you mentioned the passenger app too. Would a passenger be able to flag themselves as TM when booking, or only the driver handles it at ride time?
+Once you have those answers, the implementation is fairly straightforward — it's essentially a payment-type flag on the trip completion screen with a fare-split calculator. Happy to sketch out the exact screens and data flow whenever you're re

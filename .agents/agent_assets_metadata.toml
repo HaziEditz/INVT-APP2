@@ -1,0 +1,193 @@
+uploads = []
+
+[[generated]]
+id = "B7YiXcqsTNnAUbnmePN0a"
+uri = "file://assets/images/icon.png"
+type = "image"
+title = "taxi360-driver-icon"
+
+[[generated]]
+id = "YbHbjaRAcIhaq-wNuMYva"
+uri = "file://assets/images/splash.png"
+type = "image"
+title = "taxi360-splash"
+
+[[generated]]
+id = "YDP7rselYWop0PvtUBxM_"
+uri = "file://attached_assets/generated_images/hero_banner_for_a_4e20.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "WZDc_WA7VVWdnvTeVXRWg"
+uri = "file://attached_assets/generated_images/google_play_store_feature_3164.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "EhxlOBiE5h67_r_9BQq_L"
+uri = "file://attached_assets/generated_images/google_play_store_feature_2cbb.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "OVxtPy6wV12lVqhIZRn2E"
+uri = "file://attached_assets/generated_images/google_play_store_feature_e313.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "1oQUPQLxRFVdlYomzwOmE"
+uri = "file://attached_assets/generated_images/google_play_store_feature_a282.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "X8eyRD2Rnw1kn2viJxwgT"
+uri = "file://attached_assets/generated_images/google_play_store_feature_5ed0.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "MqJZfpV_WgF_VvCfrSWLA"
+uri = "file://attached_assets/generated_images/google_play_store_feature_beba.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "r5VTTGurjf1i7zWTLrwOI"
+uri = "file://attached_assets/generated_images/google_play_store_feature_7472.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "SEnYfhZUSOnipjuZ8JlOt"
+uri = "file://attached_assets/generated_images/google_play_store_feature_3f32.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "RPNyJVDwMR_Q9QZL_l4Xg"
+uri = "file://attached_assets/generated_images/google_play_store_feature_0ba6.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "orjbZAl25tdtH3VHHUIf6"
+uri = "file://attached_assets/generated_images/award_winning_google_play_32f9.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "Y-yVAVUgGxFxHezVTvfaO"
+uri = "file://attached_assets/generated_images/stunning_google_play_store_16af.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "x8w4Al2dCKjmiZc1y86g7"
+uri = "file://attached_assets/generated_images/premium_google_play_store_8813.png"
+type = "image"
+title = "generated_image"
+
+[[outputs]]
+id = "6IjYtCzBKyyXdAdEji_mK"
+uri = "file://store-assets/feature-graphic-1024x500.png"
+type = "image"
+title = "Feature Graphic (download, upload to Play Console later)"
+
+[[outputs]]
+id = "krFnDXOJYlYDECk3xN3iN"
+uri = "file://store-assets/privacy-policy.md"
+type = "text"
+title = "Privacy Policy (download, then paste into Google Doc)"
+
+[[outputs]]
+id = "55EwNHKjyQrJaDqnd-AFO"
+uri = "file://store-assets/feature-v1-minimal-yellow.png"
+type = "image"
+title = "Option 1 — Minimal yellow on black"
+
+[[outputs]]
+id = "bOhmrz45QzOaig2583eCN"
+uri = "file://store-assets/feature-v2-cityscape.png"
+type = "image"
+title = "Option 2 — Night city skyline"
+
+[[outputs]]
+id = "UqZb4jqh-Jy0N33_DpLQ3"
+uri = "file://store-assets/feature-v3-phone-mockup.png"
+type = "image"
+title = "Option 3 — Phone mockup split"
+
+[[outputs]]
+id = "hqYXBbtN93fU4tX5vwds9"
+uri = "file://store-assets/feature-v4-photo-real.png"
+type = "image"
+title = "Option 4 — Cinematic taxi photo"
+
+[[outputs]]
+id = "f4rttb6s8JciUbM4yjm81"
+uri = "file://store-assets/feature-v5-bold-geometric.png"
+type = "image"
+title = "Option 5 — Bold geometric (Swiss)"
+
+[[outputs]]
+id = "w9gVBF4ClWY3vlKoc9Emc"
+uri = "file://store-assets/feature-v6-dark-premium.png"
+type = "image"
+title = "Option 6 — Dark premium fintech"
+
+[[outputs]]
+id = "L-uGgY_G_p54gVXENK5jg"
+uri = "file://store-assets/feature-v6a.png"
+type = "image"
+title = "Option 6A — Glowing B badge, side layout"
+
+[[outputs]]
+id = "jylfmd8fuWqTdiw1ftsZC"
+uri = "file://store-assets/feature-v6b.png"
+type = "image"
+title = "Option 6B — Navy gradient, gold taxi icon"
+
+[[outputs]]
+id = "RLgv1oV_MJqEbA6Ck4QrA"
+uri = "file://store-assets/feature-v6c.png"
+type = "image"
+title = "Option 6C — Centered glowing app icon"
+
+[[outputs]]
+id = "WZd9ZeoxMNIvtfQZkHWB7"
+uri = "file://store-assets/feature-v6c-stunning1.png"
+type = "image"
+title = "6C Stunning #1 — God-rays + chrome B"
+
+[[outputs]]
+id = "IYkbKUpsmP1LMXUzNwQz-"
+uri = "file://store-assets/feature-v6c-stunning2.png"
+type = "image"
+title = "6C Stunning #2 — Glassy icon + halo"
+
+[[outputs]]
+id = "Sh5eqaEzKGiWK5VK4zeg2"
+uri = "file://store-assets/feature-v6c-stunning3.png"
+type = "image"
+title = "6C Stunning #3 — Glossy floating icon"
+
+[[outputs]]
+id = "ePP226UV_2cwOCEYBYJCe"
+uri = "file://privacy_policy.md"
+type = "text"
+title = "Bookawaka Driver — Privacy Policy"
+
+[[outputs]]
+id = "eMB7WetazhTVL6WgWhOPe"
+uri = "file://docs/dispatch-driver-lifecycle-spec.md"
+type = "text"
+title = "Dispatch ↔ Driver Lifecycle Spec"
+
+[[outputs]]
+id = "fKpTn2H2NGaf5et4xSNkW"
+uri = "file://.local/firebase_writes_audit.md"
+type = "text"
+title = "Firebase Writes Audit — for server dev review"

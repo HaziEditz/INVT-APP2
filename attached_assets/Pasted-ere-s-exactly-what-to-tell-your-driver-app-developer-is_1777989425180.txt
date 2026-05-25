@@ -1,0 +1,38 @@
+ere's exactly what to tell your driver app developer, issue by issue:
+
+1. Drop-off address / route map not showing
+
+When the passenger is dropped off, the driver app must write the drop-off GPS coordinates and address back to the job record. The dispatch console reads these fields:
+
+DropLatLng — string in format "-46.4047,168.3479" (lat,lng)
+DropAddress — human-readable street address (optional — dispatch will reverse-geocode if missing)
+These should be sent to the server when the driver taps "Drop Off" or "Complete Trip", either via the existing job-update API endpoint or Firebase job node update. Right now the job keeps DropLatLng: "0,0" because the driver app never writes the actual drop-off location.
+
+2. Meter price / fare not showing
+
+When the driver completes the trip, the driver app must send the fare breakdown. The dispatch console reads these fields (from the job object):
+
+TotalFare — total amount charged (number, e.g. 18.50)
+FareBase — flag-fall / base fare
+FareTime — time/waiting charge
+FareDistance — distance charge
+FareExtras — any extras
+JobDistance — trip distance in km (number)
+FareCurrency — e.g. "NZD"
+These should be written when the trip is completed, via the sync endpoint at:
+
+POST /api/job/sync-offline-trip
+
+The server already handles this endpoint and stores all the above fields correctly — the driver app just needs to send them.
+
+3. Driver name showing as username/email
+
+In the driver app's Firebase profile / registration, the drivername field should be the driver's real full name (e.g. "Abdullah Gul"), not their login username or email prefix. The dispatch console uses whatever is stored in drivername on the Firebase driver node. If the driver registered with their email prefix as their display name, they need to update their profile in the driver app settings.
+
+4. Driver going "off shift" leaves ghost car on map
+
+When the driver goes off shift, the driver app must cleanly remove their Firebase node at:
+
+online/{companyId}/{vehicleId}
+
+If the app just closes without calling onDisconnect() cleanup, the node stays in Firebase and the dispatch console keeps showing the car. The driver app should call Firebase remove() on that node when the driver taps "Go Off Shift", and also set up onDisconnect().remove() so it auto-clears if the app crashe

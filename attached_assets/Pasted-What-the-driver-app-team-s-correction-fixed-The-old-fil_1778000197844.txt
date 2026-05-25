@@ -1,0 +1,23 @@
+What the driver app team's correction fixed:
+
+The old filter checked serviceType — a field that does not exist anywhere in driver app data. That meant the Food Delivery Jobs and Freight Jobs report pages returned zero results for hail trips, even when jobs with bookingType: "food" or bookingType: "freight" existed in completedJobs. The filter was silently dropping everything.
+
+Four changes made to the owner portal:
+
+What	Before	After
+Food/freight filter field	r.serviceType (doesn't exist)	r.bookingType (primary) with r.serviceType as dead fallback
+Food keywords	food, delivery, parcel, meal	food, meal, restaurant, deliver — exact match to driver app audit
+Freight keywords	freight, cargo, courier, parcel	freight, parcel, cargo — exact match to driver app audit
+Dispatched order reads	Not read at all	Now reads foodOrders/{cid} and freightOrders/{cid} (only on those two pages, not on every report load)
+Column header	"Service Type"	"Booking Type"
+_detectBookingType (dispatch jobs editor)	Missing deliver keyword for food	Added deliver
+How the two job types now combine on each report page:
+
+completedJobs/{cid} → hail food/freight jobs — filtered by bookingType field
+foodOrders/{cid}/{bookingId} → dispatched food orders — merged in and auto-tagged bookingType: "food"
+freightOrders/{cid}/{bookingId} → dispatched freight orders — auto-tagged bookingType: "freight"
+Both sources are merged into a single flat list before display. completedJobs wins on any key collision (same bookingId in both paths), so there's no double-counting if a job happens to appear in both.
+
+Reply to send back to the driver app team:
+
+Confirmed and applied. The portal now reads foodOrders/{cid}/{bookingId} and freightOrders/{cid}/{bookingId} for dispatched orders, and filters completedJobs/{cid} hail trips by bookingType (not serviceType). Keywords used: Food = food / meal / restaurant / deliver; Freight = freight / parcel / cargo — exact match to your audit. One open item from our side: please confirm whether bookingType is written on hail jobs through the driver app meter, or only on dispatched jobs. If hail jobs don't include bookingType, the description-text fallback will be the only way to classify them.

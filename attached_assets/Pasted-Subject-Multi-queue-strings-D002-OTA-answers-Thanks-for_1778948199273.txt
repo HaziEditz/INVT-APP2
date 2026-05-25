@@ -1,0 +1,32 @@
+Subject: Multi-queue strings + D002 OTA — answers
+
+Thanks for the OTA 22bf rundown — confirmed the false-block fix on our side too.
+
+1. Multi-queue job-type strings
+
+Dispatch normalises every job to a single lowercase serviceType field on the job record. The values you'll see are:
+
+serviceType	Meaning	Queue cap
+taxi	Standard taxi ride (default if missing)	1 queued
+tm	Total Mobility	1 queued
+food	Food / restaurant delivery	multiple OK
+freight	Parcel / freight delivery	multiple OK
+Notes:
+
+The field is serviceType (camelCase). We also tolerate ServiceType as an alias on inbound payloads, but every job we emit uses lowercase serviceType.
+Inbound aliases we normalise: restaurant → food, delivery → freight. You only need to gate on the four normalised strings above.
+Rentals and towing are not first-class serviceType values yet — they currently fall under taxi. Treat them as multi-queue once we add the strings; I'll ping you when we do.
+Anything missing or unknown should default to taxi (1 queued) — same fail-safe our server uses.
+Server-side cap already shipped to match this policy: taxi and tm keep the 1-queued cap, food and freight are uncapped. Server is ready when the driver app catches up.
+
+2. D002's OTA version for trips 6112605171 / 6112605173
+
+Those four trips have no AppVersion / runtime / OTA-group stamped on the closed-job record. They completed before we wired runtime capture into the trip-summary handler, so we genuinely can't tell you which OTA D002 was on at that moment.
+
+From now on we will know automatically. Any trip the driver app posts to /api/syncOfflineTrip with runtimeVersion / groupId / platform at the root of the payload gets those persisted as AppVersion / AppBuild / Platform on the closed-job record. Next time you need to ask "which OTA was D002 on for trip #X" we can just look it up.
+
+3. Status of the four reserved UIs
+
+Split-payment, fixed-fare-override, driver-note and trip-issue-category are now rendered read-only on the dispatch closed-job detail panel using your wire-format defaults. Editable dispatcher UIs (so a dispatcher can override a fare or flag an issue themselves) are not built yet — let me know when you want those.
+
+Paste that to the driver-app developer. Once they confirm they've gated the local check on serviceType in ['food','freight'], multi-queue is live end-to-end.

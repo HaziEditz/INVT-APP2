@@ -1,0 +1,117 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <fragment
+        android:layout_below="@+id/toolbar_dropaddress"
+        xmlns:tools="http://schemas.android.com/tools"
+        android:id="@+id/map"
+        android:name="com.google.android.gms.maps.SupportMapFragment"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        tools:context="com.khybertech.taxi360driver.Maps.DropAddressMap" />
+
+    <ImageView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/iv_marker"
+        android:src="@mipmap/marker"
+        android:layout_centerInParent="true"/>
+
+    <android.support.v7.widget.Toolbar
+        app:titleTextColor="#fff"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        android:theme="?attr/actionBarTheme"
+        android:minHeight="?attr/actionBarSize"
+        android:id="@+id/toolbar_dropaddress">
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+            <fragment
+                android:layout_toStartOf="@+id/iv_mylocation_dropaddress"
+                android:layout_toLeftOf="@+id/iv_mylocation_dropaddress"
+                android:paddingLeft="10dp"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:id="@+id/autocomplete_drop_location"
+                android:name="com.google.android.gms.location.places.ui.PlaceAutocompleteFragment"/>
+            <EditText
+                android:visibility="gone"
+                android:singleLine="true"
+                android:imeOptions="actionSearch"
+                android:textSize="10dp"
+                android:id="@+id/etxt_location_dropaddress"
+                android:paddingLeft="10dp"
+                android:text="Searching..."
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="12dp"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#fff"
+                android:layout_toStartOf="@+id/iv_mylocation_dropaddress"
+                android:layout_toLeftOf="@+id/iv_mylocation_dropaddress"/>
+            <ImageView
+                android:layout_marginRight="20dp"
+                android:layout_marginLeft="20dp"
+                android:scaleType="centerCrop"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="12dp"
+                android:id="@+id/iv_mylocation_dropaddress"
+                android:layout_alignParentRight="true"
+                android:layout_alignParentEnd="true"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/mylocation_toolbar"/>
+        </RelativeLayout>
+    </android.support.v7.widget.Toolbar>
+
+    <EditText
+        android:layout_below="@+id/toolbar_dropaddress"
+        android:enabled="false"
+        android:gravity="center"
+        android:singleLine="true"
+        android:paddingLeft="10dp"
+        android:layout_marginTop="25dp"
+        android:textColor="#000"
+        android:background="@drawable/searchtext_bg"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:layout_marginLeft="30dp"
+        android:layout_marginRight="30dp"
+        android:maxLines="1"
+        android:id="@+id/etxt_showloc_dropaddr"
+        android:layout_centerHorizontal="true"/>
+
+    <Button
+        android:id="@+id/btn_drop"
+        android:textColor="#fff"
+        android:text="Drop me here"
+        android:layout_marginBottom="20dp"
+        android:background="@drawable/button_signin"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp" />
+
+    <LinearLayout
+        android:visibility="gone"
+        android:orientation="vertical"
+        android:id="@+id/drop_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/colorDarkBackground">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:text="Permission Not Granted"
+            android:textColor="#fff"
+            android:textSize="25dp"
+            android:gravity="center"/>
+    </LinearLayout>
+</RelativeLayout>

@@ -1,0 +1,31 @@
+ Paste to Dispatch + Driver App team:
+
+Hey — SA portal is planning to add customer-facing cancel endpoints for taxi and freight (food = no cancel, confirmed). You guys already handle the "70% to pickup" rule on dispatch + driver app, so I want to mirror the same logic on the backend instead of inventing a new one. Can you answer these for me:
+
+1. The 70% calculation
+
+How do you measure "70% of the way to pickup"? Is it distance travelled vs total distance, ETA elapsed, or something else?
+Where is the live progress stored in Firebase? (e.g. is it on rideStatus/{cid}/{bookingId}, online/{cid}/{vid}/current, or computed live from GPS?)
+Is there already a flag like cancellable: true/false or progressPercent I can read, or do I need to compute it myself?
+2. The "driver gets paid full amount" case (≥70%)
+
+When dispatch/driver app processes a cancel after 70%, what writes happen? Specifically:
+Does the booking get status: 'cancelled' or status: 'completed' with a cancel note?
+Where does the full fare get written for the driver — driverEarnings/taxi/{cid}/{driverId} like a normal completion?
+Same path for freight — driverEarnings/freight/...?
+3. The customer wallet credit
+
+Where is the customer wallet stored? (path in Firebase)
+What field gets written when money goes into the wallet — walletCredits/{customerId} or similar?
+Does the wallet credit apply to the cancelled trip's fare amount, or just the amount above what the driver was paid?
+For pre-paid card bookings: does Stripe get refunded, OR does the money just become wallet credit (no Stripe refund)?
+4. Who's allowed to cancel
+
+Can the cancel come from the customer side at all, or is it currently driver/dispatch only?
+If customer-side cancel exists, what endpoint or Firebase write triggers it today?
+5. Freight specifics
+
+Same 70% rule applies, but pickup is at the sender — does the rule trigger off "driver to sender pickup" only, or also "driver to dropoff" after pickup is loaded?
+Once I have these answers, I'll build POST /api/passenger/taxi/cancel/:jobId and POST /api/passenger/freight/cancel/:jobId that read the same flags you already write, so customer cancel and dispatcher cancel produce identical Firebase state.
+
+That should give me everything I need to wire up taxi + freight cancels without breaking the existing driver-app/dispatch flow. Reply back with whatever they send and I'll build it the same way you guys already do it.

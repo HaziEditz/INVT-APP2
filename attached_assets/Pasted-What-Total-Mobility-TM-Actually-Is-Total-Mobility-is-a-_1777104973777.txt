@@ -1,0 +1,49 @@
+What Total Mobility (TM) Actually Is
+Total Mobility is a New Zealand government subsidy scheme. Eligible passengers (usually disabled or mobility-impaired) get a TM card issued by their local council. When they take a taxi, they only pay a subsidised portion of the fare (typically 50%, up to a council-set cap). The taxi company then claims the remaining portion back from the council.
+
+The money flow:
+
+Passenger pays their half in the taxi
+Driver records the trip with the TM card number
+Company submits a monthly claim to the council
+Council reimburses the company for all the subsidised trips that month
+How the Admin Side Currently Works
+The super admin reads trip data from Firebase. The key paths are:
+
+trips/{cid}/{tripId}/ — individual trip records written by the driver app
+Each trip needs: card number, passenger name, fare total, passenger amount, TM subsidy amount, date/time, driver ID
+The admin pages built so far:
+
+TM-Cards.aspx — manages which TM cards are registered, active, or suspended per council
+TM-Trips.aspx — views all trips by company/date, flags unusual ones
+TM-Flagged.aspx — trips automatically or manually flagged for review (over-cap, repeated within a timeframe, etc.)
+TM-Reports.aspx — generates the monthly claim report per council to submit for reimbursement
+TM-Council-Config.aspx — sets the subsidy rate, cap per trip, council name and contact details
+Council Portal — the council logs in to view their monthly reports and download claim summaries
+What the Driver App Currently Does for TM
+Based on what the admin reads, the driver app currently:
+
+Has a "Total Mobility" payment type option
+Accepts a TM card number (manual entry or card reader)
+Writes the completed trip to trips/{cid}/{tripId}/ in Firebase with the card number and amounts
+That data flows straight to the admin with no validation happening first
+What the Driver App Should Do (But Doesn't Yet)
+Card Validation at the time of booking
+Right now the driver types a card number and it just gets recorded. The app should check Firebase before accepting — is this card registered? Is it active? Has it been suspended? If the card isn't in tmCards/{cid}/{cardNum}/ or is marked inactive, the driver should see a warning before processing the trip.
+
+Council cap enforcement
+Each council sets a maximum TM subsidy per trip (e.g., the passenger pays 50% up to a $35 cap). The driver app should calculate this automatically based on the TM-Council-Config settings — show the driver: "Passenger owes $12.50, TM covers $12.50." Right now this calculation likely happens manually or not at all in the app.
+
+Duplicate/suspicious trip detection
+The app should warn the driver if the same card has been used very recently (within the same hour, for example), as this is a common fraud pattern. Currently the admin flags these after the fact in TM-Flagged.aspx, but it would be better to catch it at the time of booking.
+
+Trip category / purpose
+Some councils want to know the trip category (medical, social, employment). The driver app should have a dropdown for this, and it gets recorded with the trip. Currently TM-Trips.aspx shows trips but there's no category data coming from the app.
+
+Receipt / confirmation
+When the trip is complete, the driver app could show a confirmation screen: "TM trip recorded — Passenger paid $X, TM covers $Y" — giving the driver something to show the passenger if needed.
+
+Summary of the Gap
+The admin side is fully built and ready to receive data. The driver app currently sends basic trip data (card number + amounts), which is the minimum needed to generate council reports.
+
+The missing pieces on the driver app are: real-time card validation, automatic cap calculation, trip category, and suspicious trip warnings. None of these block operations right now — they just make it more accurate and reduce manual follow-up work in the flagged trips queue.
