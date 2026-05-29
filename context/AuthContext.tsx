@@ -92,6 +92,34 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+function isValidDriverSession(saved: Driver | null | undefined): saved is Driver {
+  return !!(saved?.uid && saved?.companyId && (saved?.id || saved?.email));
+}
+
+async function enrichSessionFromFirebase(saved: Driver, uid: string): Promise<Driver> {
+  if (!saved.companyId) return saved;
+  try {
+    const snap = await get(ref(database, `drivers/${saved.companyId}/${uid}`));
+    if (!snap.exists()) return saved;
+    const fb = snap.val() as Record<string, any>;
+    const remoteId = String(fb.id ?? fb.DriverId ?? fb.driverId ?? '').trim();
+    const remoteVehicleId = String(
+      fb.vehicleId ?? fb.VehicleId ?? fb.selectedVehicleId ?? fb.SelectedVehicleid ?? '',
+    ).trim();
+    const enriched: Driver = { ...saved };
+    if (remoteId && remoteId !== uid) enriched.id = remoteId;
+    if (remoteVehicleId) enriched.vehicleId = remoteVehicleId;
+    if (JSON.stringify(enriched) !== JSON.stringify(saved)) {
+      await storeData('driver_session', enriched);
+      console.log('[Auth] Session enriched from Firebase — id:', enriched.id, 'vehicleId:', enriched.vehicleId);
+    }
+    return enriched;
+  } catch (err) {
+    console.warn('[Auth] Session enrich from Firebase failed:', err);
+    return saved;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [driver, setDriver] = useState<Driver | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
@@ -102,39 +130,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   driverRef.current = driver;
   const localSessionIdRef = useRef<string | null>(null);
 
-  // Restore session on app start
+  // Preload driver_session from AsyncStorage immediately on cold start so the
+  // app can restore the driver profile before Firebase Auth finishes resolving.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const saved = await getData<Driver>('driver_session');
+      if (cancelled || !isValidDriverSession(saved)) return;
+      if (!saved.allowedServices) saved.allowedServices = parseAllowedServices(null);
+      setDriver(saved);
+      console.log('[Auth] Preloaded driver_session — id:', saved.id, 'companyId:', saved.companyId);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Restore session on app start — pairs AsyncStorage driver_session with persisted Firebase Auth.
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
         const saved = await getData<Driver>('driver_session');
-        if (saved && saved.uid === user.uid) {
-          // Restore local session ID so the kick listener can compare against it
+        if (isValidDriverSession(saved) && saved.uid === user.uid) {
           const storedSessionId = await getData<string>('active_session_id');
           if (storedSessionId) localSessionIdRef.current = storedSessionId;
 
-          // Back-fill allowedServices for sessions saved before this field existed
           if (!saved.allowedServices) saved.allowedServices = parseAllowedServices(null);
-          // If saved session is missing vehicleId, do a live Firebase read to recover it
-          if (!saved.vehicleId && saved.companyId) {
-            try {
-              const snap = await get(ref(database, `drivers/${saved.companyId}/${user.uid}`));
-              if (snap.exists()) {
-                const fb = snap.val() as Partial<Driver>;
-                if (fb.vehicleId) {
-                  const recovered = { ...saved, vehicleId: fb.vehicleId, id: fb.id || saved.id };
-                  await storeData('driver_session', recovered);
-                  setDriver(recovered);
-                  console.log('[Auth] Recovered vehicleId from Firebase on session restore:', fb.vehicleId);
-                  setIsLoading(false);
-                  return;
-                }
-              }
-            } catch (err) {
-              console.warn('[Auth] Firebase vehicleId recovery failed:', err);
-            }
-          }
-          setDriver(saved);
+          const restored = await enrichSessionFromFirebase(saved, user.uid);
+          setDriver(restored);
+          console.log('[Auth] Session restored — no login required');
+        } else if (!saved) {
+          setDriver(null);
         }
       } else {
         setDriver(null);

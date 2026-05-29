@@ -44,6 +44,7 @@ import {
   extractChanges,
   sortBookingEventsBySeq,
 } from '@/lib/bookingEvents';
+import { recoverActiveJobsFromFirebase, recoverShiftFromFirebase } from '@/lib/crashRecovery';
 
 export type DriverStatus = 'Available' | 'Assigned' | 'Busy' | 'Away';
 
@@ -712,6 +713,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [takenAlert, setTakenAlert] = useState<string | null>(null);
   const [cancelledJobAlert, setCancelledJobAlert] = useState<{ id: number; title: string; message: string } | null>(null);
   const [systemAlert, setSystemAlert] = useState<{ id: number; type: 'kicked' | 'suspended'; title: string; message: string } | null>(null);
+
+  const crashRecoveryDoneRef = useRef<string | null>(null);
+  const crashRecoveryPendingRef = useRef(false);
+  const [crashRecoveryComplete, setCrashRecoveryComplete] = useState(false);
 
   const notifRef = useRef<DatabaseReference | null>(null);
   const passengerJobRef = useRef<DatabaseReference | null>(null);
@@ -6252,11 +6257,94 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return () => off(connRef);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Cold-start crash recovery ─────────────────────────────────────────────
+  // Restore shift + active/offered jobs from Firebase after a force-quit/crash.
+  // Runs once per login before stale-presence cleanup so we don't clobber a
+  // live shift with an Away write while the async reads are still in flight.
+  useEffect(() => {
+    if (!driver?.id || !driver?.companyId || !driver?.vehicleId) {
+      setCrashRecoveryComplete(false);
+      crashRecoveryDoneRef.current = null;
+      return;
+    }
+    const recoveryKey = `${driver.id}:${driver.companyId}:${driver.vehicleId}`;
+    if (crashRecoveryDoneRef.current === recoveryKey) return;
+
+    crashRecoveryPendingRef.current = true;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [recoveredJobs, shiftState] = await Promise.all([
+          recoverActiveJobsFromFirebase(driver.companyId, driver.id),
+          recoverShiftFromFirebase(driver.companyId, driver.vehicleId, driver.id),
+        ]);
+        if (cancelled) return;
+
+        if (shiftState.shiftActive) {
+          setShiftActive(true);
+          shiftActiveRef.current = true;
+          if (!currentShift) {
+            const now = new Date();
+            setCurrentShift({
+              id: `shift-recovered-${now.getTime()}`,
+              date: fmtNZDate(now),
+              startTime: fmtNZTime(now),
+              startMs: now.getTime(),
+              earnings: 0,
+              jobCount: 0,
+            });
+          }
+          if (!meterRunningRef.current) {
+            setStatusState(shiftState.status);
+            statusRef.current = shiftState.status;
+          }
+          writeOnlinePresence(shiftState.status, driver.vehicleId).catch(() => {});
+          update(ref(database, `online/${driver.companyId}/${driver.vehicleId}`), {
+            vehiclestatus: shiftState.status === 'Assigned' ? 'Picking' : shiftState.status,
+          }).catch(() => {});
+          console.log('[CrashRecovery] Shift restored — status:', shiftState.status);
+        }
+
+        if (recoveredJobs.length && !meterRunningRef.current) {
+          setJobs(recoveredJobs);
+          const current = recoveredJobs.find(j => j.status === 'current');
+          const offer = recoveredJobs.find(j => j.status === 'offered');
+
+          if (current) {
+            const jobStatus: DriverStatus =
+              shiftState.status === 'Busy' ? 'Busy' : 'Assigned';
+            setStatusState(jobStatus);
+            statusRef.current = jobStatus;
+          } else if (offer) {
+            setIncomingJob(offer);
+          }
+
+          console.log('[CrashRecovery] Jobs restored:', recoveredJobs.length,
+            '| current:', current?.bookingId ?? 'none',
+            '| offer:', offer?.bookingId ?? 'none');
+        }
+
+        runResumeCheck().catch(() => {});
+      } catch (err) {
+        console.warn('[CrashRecovery] Failed:', (err as Error)?.message ?? err);
+      } finally {
+        crashRecoveryPendingRef.current = false;
+        crashRecoveryDoneRef.current = recoveryKey;
+        if (!cancelled) setCrashRecoveryComplete(true);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.id, driver?.companyId, driver?.vehicleId]);
+
   // ── Stale presence cleanup on login ──────────────────────────────────────
   // If a previous session ended without endShift (crash, force-quit, etc.),
   // the Firebase presence record stays "Available" and dispatch sees the driver
   // as online. Clear it to "Away" as soon as the driver loads with no active shift.
   useEffect(() => {
+    if (!crashRecoveryComplete || crashRecoveryPendingRef.current) return;
     if (!driver?.vehicleId || !driver?.companyId || shiftActive) return;
     const d = driverRef.current;
     if (!d?.vehicleId || !d?.companyId) return;
@@ -6283,7 +6371,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     // user taps Start Shift, startShift's writeOnlinePresence + top-level
     // Available update will overwrite both paths.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.id]); // Run once per login — driver?.id changes when auth resolves
+  }, [driver?.id, crashRecoveryComplete, shiftActive]); // Run after crash recovery resolves
 
   // ── Firebase reconnect handler ────────────────────────────────────────────
   // Firebase marks .info/connected false whenever the web-socket drops, then

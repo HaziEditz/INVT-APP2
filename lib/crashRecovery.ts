@@ -2,6 +2,13 @@ import { get, ref } from 'firebase/database';
 import { database } from './firebase';
 import type { Job, PaymentType } from '@/context/DriverContext';
 
+export type RecoveredDriverStatus = 'Available' | 'Assigned' | 'Busy' | 'Away';
+
+export interface RecoveredShiftState {
+  shiftActive: boolean;
+  status: RecoveredDriverStatus;
+}
+
 function parsePaymentType(raw?: string): PaymentType {
   const s = String(raw ?? '').trim().toLowerCase();
   if (s.includes('account')) return 'account';
@@ -33,7 +40,8 @@ function matchesDriver(data: Record<string, unknown>, driverId: string): boolean
 
 function isRecoverableStatus(raw: unknown): boolean {
   const s = String(raw ?? '').trim().toLowerCase();
-  return s === 'active' || s === 'picking' || s === 'assigned' || s === 'on way' || s === 'onway';
+  return s === 'offered' || s === 'assigned' || s === 'active' ||
+    s === 'picking' || s === 'on way' || s === 'onway';
 }
 
 function isTerminalStatus(raw: unknown): boolean {
@@ -42,7 +50,27 @@ function isTerminalStatus(raw: unknown): boolean {
     s === 'noshow' || s === 'no-show' || s === 'no_show';
 }
 
-function bookingToJob(bookingId: string, data: Record<string, unknown>, jobStatus: Job['status']): Job {
+function bookingPriority(raw: unknown): number {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (s === 'picking') return 0;
+  if (s === 'active') return 1;
+  if (s === 'assigned') return 2;
+  if (s === 'offered') return 3;
+  return 9;
+}
+
+function mapBookingToJobStatus(raw: unknown, isPrimaryActive: boolean): Job['status'] {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (s === 'offered') return 'offered';
+  if (isPrimaryActive) return 'current';
+  return 'queued';
+}
+
+function bookingToJob(
+  bookingId: string,
+  data: Record<string, unknown>,
+  jobStatus: Job['status'],
+): Job {
   return {
     id:              `recovered-${bookingId}`,
     bookingId,
@@ -65,9 +93,17 @@ function bookingToJob(bookingId: string, data: Record<string, unknown>, jobStatu
   };
 }
 
+function mapVehicleStatusToDriverStatus(raw: unknown): RecoveredDriverStatus {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (s === 'picking' || s === 'assigned') return 'Assigned';
+  if (s === 'busy') return 'Busy';
+  if (s === 'away') return 'Away';
+  return 'Available';
+}
+
 /**
  * Cold-start / crash recovery: scan allbookings/{companyId} for trips still
- * assigned to this driver with Status Active or Picking.
+ * assigned to this driver with Status Offered / Assigned / Active / Picking.
  */
 export async function recoverActiveJobsFromFirebase(
   companyId: string,
@@ -89,20 +125,102 @@ export async function recoverActiveJobsFromFirebase(
       if (isTerminalStatus(data.Status ?? data.status)) return;
       if (!isRecoverableStatus(data.Status ?? data.status)) return;
 
-      const statusRaw = String(data.Status ?? data.status ?? '').toLowerCase();
-      const priority = statusRaw === 'picking' ? 0 : statusRaw === 'active' ? 1 : 2;
-      matches.push({ bookingId, data, priority });
+      matches.push({
+        bookingId,
+        data,
+        priority: bookingPriority(data.Status ?? data.status),
+      });
     });
 
     if (!matches.length) return [];
 
-    matches.sort((a, b) => a.priority - b.priority);
+    matches.sort((a, b) => a.priority - b.priority || a.bookingId.localeCompare(b.bookingId));
 
-    return matches.map((m, idx) =>
-      bookingToJob(m.bookingId, m.data, idx === 0 ? 'current' : 'queued'),
-    );
+    const primaryIdx = matches.findIndex(m => {
+      const s = String(m.data.Status ?? m.data.status ?? '').toLowerCase();
+      return s !== 'offered';
+    });
+
+    return matches.map((m, idx) => {
+      const statusRaw = m.data.Status ?? m.data.status;
+      const isPrimaryActive = primaryIdx >= 0 ? idx === primaryIdx : false;
+      const jobStatus = mapBookingToJobStatus(statusRaw, isPrimaryActive);
+      return bookingToJob(m.bookingId, m.data, jobStatus);
+    });
   } catch (err) {
     console.warn('[CrashRecovery] allbookings scan failed:', (err as Error)?.message ?? err);
     return [];
   }
+}
+
+/**
+ * Restore shift state from Firebase online/{companyId}/{vehicleId} after a crash.
+ * Falls back to an active shiftLogs entry when online presence is missing.
+ */
+export async function recoverShiftFromFirebase(
+  companyId: string,
+  vehicleId: string,
+  driverId: string,
+): Promise<RecoveredShiftState> {
+  const idle: RecoveredShiftState = { shiftActive: false, status: 'Available' };
+  if (!companyId || !vehicleId || !driverId) return idle;
+
+  try {
+    const [onlineSnap, currentSnap] = await Promise.all([
+      get(ref(database, `online/${companyId}/${vehicleId}`)),
+      get(ref(database, `online/${companyId}/${vehicleId}/current`)),
+    ]);
+
+    const onlineData = (onlineSnap.val() ?? {}) as Record<string, unknown>;
+    const currentData = (currentSnap.val() ?? {}) as Record<string, unknown>;
+
+    const remoteDriverId = normId(
+      currentData.driverid ?? currentData.driverId ?? onlineData.driverid ?? onlineData.driverId,
+    );
+    const me = normId(driverId);
+    if (remoteDriverId && remoteDriverId !== me) {
+      console.log('[CrashRecovery] online node belongs to another driver — skip shift restore');
+      return idle;
+    }
+
+    const vehicleStatus = String(
+      currentData.vehiclestatus ?? currentData.VehicleStatus ??
+      onlineData.vehiclestatus ?? onlineData.VehicleStatus ?? '',
+    ).trim().toLowerCase();
+
+    const isOnline = onlineData.online === true || currentData.online === true;
+    const activeStatuses = new Set(['available', 'assigned', 'picking', 'busy']);
+
+    if (vehicleStatus === 'away' || vehicleStatus === 'offline') {
+      return idle;
+    }
+
+    if (activeStatuses.has(vehicleStatus) || isOnline) {
+      console.log('[CrashRecovery] Shift restored from online — vehiclestatus:', vehicleStatus || '(online)');
+      return {
+        shiftActive: true,
+        status: mapVehicleStatusToDriverStatus(vehicleStatus || 'available'),
+      };
+    }
+  } catch (err) {
+    console.warn('[CrashRecovery] online read failed:', (err as Error)?.message ?? err);
+  }
+
+  try {
+    const logsSnap = await get(ref(database, `shiftLogs/${companyId}/${driverId}`));
+    if (logsSnap.exists()) {
+      const logs = logsSnap.val() as Record<string, Record<string, unknown>>;
+      for (const key of Object.keys(logs)) {
+        const log = logs[key];
+        if (log?.isActive === true) {
+          console.log('[CrashRecovery] Shift restored from active shiftLog:', key);
+          return { shiftActive: true, status: 'Available' };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[CrashRecovery] shiftLogs read failed:', (err as Error)?.message ?? err);
+  }
+
+  return idle;
 }
