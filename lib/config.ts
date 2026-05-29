@@ -26,4 +26,4 @@ export const APP_VERSION = '1.4.0';
  * "Driver App Min Version" field in App & Service Configuration.
  * Increment this by 1 with every release distributed to drivers.
  */
-export const APP_BUILD = 4;
+export const APP_BUILD = 5;

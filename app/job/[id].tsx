@@ -20,6 +20,7 @@ import { ref, update } from 'firebase/database';
 import { push } from 'firebase/database';
 import { database } from '@/lib/firebase';
 import { appendJournalEntry } from '@/lib/tripJournal';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 function fmtDist(m: number): string {
   return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
@@ -393,7 +394,7 @@ function buildMapHtml(
 </html>`;
 }
 
-export default function JobDetailScreen() {
+function JobDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -1554,6 +1555,14 @@ export default function JobDetailScreen() {
 
       {recallModal}
     </SafeAreaView>
+  );
+}
+
+export default function JobDetailScreenWithBoundary() {
+  return (
+    <ErrorBoundary>
+      <JobDetailScreen />
+    </ErrorBoundary>
   );
 }
 

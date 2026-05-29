@@ -285,9 +285,15 @@ function GlobalJobAlert() {
       job={incomingJob}
       onAccept={() => {
         const jobId = incomingJob.id;
-        acceptJob(incomingJob);
-        dismissIncoming();
-        router.push(`/job/${jobId}`);
+        const jobSnapshot = incomingJob;
+        acceptJob(jobSnapshot)
+          .then(() => {
+            dismissIncoming();
+            router.push(`/job/${jobId}`);
+          })
+          .catch((err) => {
+            console.error('[GlobalJobAlert] acceptJob failed:', err?.message ?? err);
+          });
       }}
       onReject={() => {
         rejectJob(incomingJob.id);
@@ -626,27 +632,33 @@ function RootLayout() {
           <ErrorBoundary>
             <AuthProvider>
               <DriverProvider>
-                <AuthGate />
-                <PushNotificationSetup />
-                <GlobalCancelHandler />
-                <GlobalSystemKickHandler />
-                <GlobalKeepAwake />
-                <GlobalJobAlert />
-                <PendingJobBanner />
-                <OfflineBanner />
-                <TripRatingModal />
-                <StatusBar style="light" />
-                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0F' } }}>
-                  <Stack.Screen name="index" />
-                  <Stack.Screen name="login" />
-                  <Stack.Screen name="register" options={{ animation: 'slide_from_right' }} />
-                  <Stack.Screen name="pending" options={{ animation: 'fade' }} />
-                  <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
-                  <Stack.Screen name="(tabs)" />
-                  <Stack.Screen name="job/[id]" options={{ presentation: 'card' }} />
-                  <Stack.Screen name="chat/[id]" options={{ presentation: 'card' }} />
-                  <Stack.Screen name="dispatch" options={{ headerShown: false }} />
-                </Stack>
+                <ErrorBoundary>
+                  <AuthGate />
+                  <PushNotificationSetup />
+                  <GlobalCancelHandler />
+                  <GlobalSystemKickHandler />
+                  <GlobalKeepAwake />
+                  <ErrorBoundary>
+                    <GlobalJobAlert />
+                  </ErrorBoundary>
+                  <ErrorBoundary>
+                    <PendingJobBanner />
+                  </ErrorBoundary>
+                  <OfflineBanner />
+                  <TripRatingModal />
+                  <StatusBar style="light" />
+                  <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0F' } }}>
+                    <Stack.Screen name="index" />
+                    <Stack.Screen name="login" />
+                    <Stack.Screen name="register" options={{ animation: 'slide_from_right' }} />
+                    <Stack.Screen name="pending" options={{ animation: 'fade' }} />
+                    <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
+                    <Stack.Screen name="(tabs)" />
+                    <Stack.Screen name="job/[id]" options={{ presentation: 'card' }} />
+                    <Stack.Screen name="chat/[id]" options={{ presentation: 'card' }} />
+                    <Stack.Screen name="dispatch" options={{ headerShown: false }} />
+                  </Stack>
+                </ErrorBoundary>
               </DriverProvider>
             </AuthProvider>
           </ErrorBoundary>

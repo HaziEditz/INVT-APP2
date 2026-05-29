@@ -4764,6 +4764,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const acceptJob = async (job: Job) => {
+    try {
+    if (!job || typeof job !== 'object') {
+      console.error('[acceptJob] Invalid job payload:', job);
+      return;
+    }
     // Block if driver account is deactivated by SA
     if (driver?.active === false) {
       Alert.alert('Account Deactivated', 'Your account has been deactivated. Please contact your fleet administrator.');
@@ -4894,6 +4899,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         }).then(refreshPendingUploadCount);
       }).catch(() => {});
       logDriverEvent('Accepted', job.bookingId ?? job.id);
+    }
+    } catch (err: any) {
+      console.error('[acceptJob] Unhandled error:', err?.message ?? err, err?.stack);
+      try {
+        Sentry.captureException(err, {
+          tags: { area: 'acceptJob' },
+          extra: { bookingId: job?.bookingId, jobId: job?.id, driverId: driver?.id },
+        });
+      } catch {}
+      Alert.alert(
+        'Accept failed',
+        'Something went wrong accepting this job. Please try again or contact dispatch.',
+      );
     }
   };
 
