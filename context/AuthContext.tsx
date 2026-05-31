@@ -20,6 +20,29 @@ function generateSessionId(): string {
   });
 }
 
+/** Normalise driver IDs like d001 / D1 → D001 for consistent session storage and login matching */
+function normalizeDriverId(id: string | undefined | null): string {
+  const s = String(id ?? '').trim();
+  if (!s) return '';
+  const m = s.match(/^([dD])(\d+)$/i);
+  if (m) return 'D' + String(parseInt(m[2], 10)).padStart(3, '0');
+  return s;
+}
+
+function driverIdsMatch(a: string | undefined | null, b: string | undefined | null): boolean {
+  const na = normalizeDriverId(a);
+  const nb = normalizeDriverId(b);
+  if (!na || !nb) return false;
+  return na.toLowerCase() === nb.toLowerCase();
+}
+
+function extractDriverIdFromRecord(fb: Record<string, any> | null | undefined): string {
+  if (!fb || typeof fb !== 'object') return '';
+  return normalizeDriverId(
+    String(fb.id ?? fb.driverId ?? fb.DriverId ?? fb.dispatcherId ?? '').trim(),
+  );
+}
+
 export interface AllowedServices {
   taxi:    boolean;
   food:    boolean;
@@ -102,7 +125,7 @@ async function enrichSessionFromFirebase(saved: Driver, uid: string): Promise<Dr
     const snap = await get(ref(database, `drivers/${saved.companyId}/${uid}`));
     if (!snap.exists()) return saved;
     const fb = snap.val() as Record<string, any>;
-    const remoteId = String(fb.id ?? fb.DriverId ?? fb.driverId ?? '').trim();
+    const remoteId = extractDriverIdFromRecord(fb);
     const remoteVehicleId = String(
       fb.vehicleId ?? fb.VehicleId ?? fb.selectedVehicleId ?? fb.SelectedVehicleid ?? '',
     ).trim();
@@ -212,11 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
            '')
         : current.vehicleId || '';
 
-      const remoteDriverId: string =
-        remote.id        ||
-        remote.DriverId  ||
-        remote.driverId  ||
-        '';
+      const remoteDriverId: string = extractDriverIdFromRecord(remote);
 
       const remoteAllowedServices: AllowedServices = remote.allowedServices != null
         ? parseAllowedServices(remote.allowedServices)
@@ -240,7 +259,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const merged: Driver = {
         ...current,
         // Admin-managed fields — always take from Firebase if present
-        id:              remoteDriverId && remoteDriverId !== current.uid ? remoteDriverId : current.id,
+        id:              remoteDriverId || current.id,
         vehicleId:       remoteVehicleId || current.vehicleId,
         name:            remote.name       || current.name,
         phone:           remote.phone      || current.phone,
@@ -385,14 +404,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // First-ever login MUST use the email address so the local cache is seeded.
   // Every subsequent login on the same device can use the driver ID.
   const resolveDriverIdToEmail = async (driverId: string): Promise<string> => {
-    const id = driverId.trim().toLowerCase();
+    const idNorm = normalizeDriverId(driverId);
 
     // 1. Local session cache — populated by every successful email login.
     //    No Firebase read required, works completely offline.
     try {
       const cached = await getData<Driver>('driver_session');
-      if (cached?.id && cached.id.trim().toLowerCase() === id && cached.email?.includes('@')) {
-        console.log('[Login] Driver ID resolved from local session cache:', id, '→', cached.email);
+      if (cached?.id && driverIdsMatch(cached.id, idNorm) && cached.email?.includes('@')) {
+        console.log('[Login] Driver ID resolved from local session cache:', idNorm, '→', cached.email);
         return cached.email;
       }
     } catch (err) {
@@ -411,15 +430,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (foundEmail) return;
             const d = levelTwo.val();
             if (!d || typeof d !== 'object') return;
-            const nodeId = String(d.id ?? d.DriverId ?? d.driverId ?? '').trim().toLowerCase();
-            if (nodeId === id) {
+            const nodeId = extractDriverIdFromRecord(d);
+            if (driverIdsMatch(nodeId, idNorm)) {
               const email = String(d.email ?? '').trim();
               if (email.includes('@')) foundEmail = email;
             }
           });
         });
         if (foundEmail) {
-          console.log('[Login] Driver ID resolved by Firebase scan:', id, '→', foundEmail);
+          console.log('[Login] Driver ID resolved by Firebase scan:', idNorm, '→', foundEmail);
           return foundEmail;
         }
       }
@@ -431,7 +450,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     throw Object.assign(
       new Error(
-        `Driver ID "${driverId.toUpperCase()}" not recognised on this device.\n\nPlease log in with your email address. Once you've signed in with email, you can use your driver ID next time.`,
+        `Driver ID "${idNorm || driverId.toUpperCase()}" not recognised on this device.\n\nPlease log in with your email address. Once you've signed in with email, you can use your driver ID next time.`,
       ),
       { code: 'app/driver-not-found' },
     );
@@ -573,8 +592,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           console.log('[Login] No assignedVehicles/allocatedVehicles in profile — ignoring stale vehicleId field');
         }
-        const rawId = fb.id || fb.DriverId || fb.driverId || '';
-        firebaseDriverId = (rawId && rawId !== user.uid) ? rawId : '';
+        firebaseDriverId = extractDriverIdFromRecord(fb);
         firebaseName  = fb.name  || '';
         firebasePhone = fb.phone || '';
         firebaseAllowedServices = parseAllowedServices(fb.allowedServices);
@@ -639,11 +657,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Restore any manually-saved session values as last resort
     const savedSession = await getData<Driver>('driver_session');
     const savedVehicleId = savedSession?.uid === user.uid ? (savedSession.vehicleId || '') : '';
-    const savedDriverId  = savedSession?.uid === user.uid ? (savedSession.id || '') : '';
+    const savedDriverId  = savedSession?.uid === user.uid
+      ? normalizeDriverId(savedSession.id || '')
+      : '';
 
-    // Priority: REST API > Firebase admin-set > locally saved
+    // Priority: REST API > Firebase admin-set > locally saved (never fall back to Firebase Auth uid)
     const resolvedVehicleId = vehicleId || firebaseVehicleId || savedVehicleId;
-    const resolvedDriverId  = apiDriverId || firebaseDriverId || savedDriverId;
+    const resolvedDriverId  = normalizeDriverId(apiDriverId || firebaseDriverId || savedDriverId);
 
     // ── Suspension check (dispatch console schema) ──────────────────────────
     // Dispatch writes { type, message, suspendedUntil, suspendedBy, timestamp }
@@ -675,14 +695,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // We only write these back to Firebase if they came from the REST API — otherwise we
     // risk overwriting the admin panel's assignment with a stale cached value.
     const vehicleIdFromApi = !!vehicleId;
-    const driverIdFromApi  = !!apiDriverId;
 
     const savedAllowedServices: AllowedServices | null =
       savedSession?.uid === user.uid ? (savedSession.allowedServices ?? null) : null;
 
     const driverObj: Driver = {
       uid:             user.uid,
-      id:              resolvedDriverId || user.uid,
+      id:              resolvedDriverId,
       name:            driverName || firebaseName || resolvedEmail,
       email:           resolvedEmail,
       companyId:       driverCompanyId,
@@ -707,6 +726,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setDriver(driverObj);
     setJustSignedIn(true);
     await storeData('driver_session', driverObj);
+    console.log('[Login] Session saved — id:', driverObj.id, 'email:', driverObj.email);
 
     // Merge driver profile into Firebase — use update() so we never blank out
     // fields the admin panel or a previous sign-in already set (especially vehicleId).
@@ -723,7 +743,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Never write a vehicleId that came only from Firebase or a saved session —
       // doing so would perpetuate stale values from old buggy logins.
       if (vehicleIdFromApi && driverObj.vehicleId)     profileUpdate.vehicleId   = driverObj.vehicleId;
-      if (driverIdFromApi  && driverObj.id && driverObj.id !== user.uid) profileUpdate.id = driverObj.id;
+      if (driverObj.id) {
+        profileUpdate.id = driverObj.id;
+        profileUpdate.driverId = driverObj.id;
+      }
       if (driverObj.name)                              profileUpdate.name        = driverObj.name;
       if (driverObj.phone)                             profileUpdate.phone       = driverObj.phone;
       if (driverObj.driverType)                        profileUpdate.driverType  = driverObj.driverType;
@@ -739,6 +762,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           companyId: driverObj.companyId,
           uid:       user.uid,
           email:     driverObj.email || '',
+          ...(driverObj.id ? { id: driverObj.id, driverId: driverObj.id } : {}),
         });
         console.log('[Auth] Top-level driver node stamped at drivers/', user.uid);
       } catch (stampErr) {
@@ -764,12 +788,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateDriverId = async (driverId: string) => {
     if (!driver) return;
-    const updated: Driver = { ...driver, id: driverId };
+    const normalized = normalizeDriverId(driverId);
+    const updated: Driver = { ...driver, id: normalized };
     setDriver(updated);
     await storeData('driver_session', updated);
     try {
-      await set(ref(database, `drivers/${driver.companyId}/${driver.uid}/id`), driverId);
-      console.log('[Auth] DriverId updated in Firebase:', driverId);
+      await update(ref(database, `drivers/${driver.companyId}/${driver.uid}`), {
+        id: normalized,
+        driverId: normalized,
+      });
+      console.log('[Auth] DriverId updated in Firebase:', normalized);
     } catch (err) {
       console.warn('[Auth] Could not update driverId in Firebase:', err);
     }
