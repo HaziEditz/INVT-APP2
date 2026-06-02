@@ -1,42 +1,82 @@
 {
   "expo": {
-    "name": "Bookawaka-Driver-App",
-    "slug": "Bookawaka-Driver-App",
+    "name": "BookaWaka Driver",
+    "slug": "bookawaka-driver",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "bookawakadriverapp",
-    "userInterfaceStyle": "automatic",
+    "scheme": "bookawakadriver",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0F"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.bookawaka.driver",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "BookaWaka Driver needs your location for dispatch and navigation.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "BookaWaka Driver tracks location in the background while you are online or on a job.",
+        "NSLocationAlwaysUsageDescription": "BookaWaka Driver tracks location in the background while you are online or on a job.",
+        "UIBackgroundModes": ["location", "fetch", "remote-notification"]
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#0A0A0F"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.bookawaka.driver",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "WAKE_LOCK",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
     },
-    "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
-    },
+    "platforms": ["ios", "android"],
     "plugins": [
       "expo-router",
+      "expo-updates",
+      "expo-secure-store",
       [
-        "expo-splash-screen",
+        "expo-location",
         {
-          "image": "./assets/images/splash-icon.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "locationAlwaysAndWhenInUsePermission": "BookaWaka Driver needs background location for dispatch.",
+          "locationWhenInUsePermission": "BookaWaka Driver needs your location for dispatch.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
+        }
+      ],
+      "expo-task-manager",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#1a73e8"
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "00000000-0000-0000-0000-000000000000"
+      },
+      "dispatchApiUrl": "https://invt-production.up.railway.app"
     }
   }
 }

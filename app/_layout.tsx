@@ -1,56 +1,41 @@
-import { useFonts } from 'expo-font';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
+import { AuthProvider } from '@/context/AuthContext';
+import { DriverProvider } from '@/context/DriverContext';
+import { Colors } from '@/constants/theme';
+import { JobOfferModal } from '@/components/JobOfferModal';
+import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import 'react-native-reanimated';
-
-import { useColorScheme } from '@/components/useColorScheme';
-
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
-
-export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)',
-};
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+import { registerForPushNotifications } from '@/services/notificationService';
 
 export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
-
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
-    if (error) throw error;
-  }, [error]);
-
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
-
-  if (!loaded) {
-    return null;
-  }
-
-  return <RootLayoutNav />;
-}
-
-function RootLayoutNav() {
-  const colorScheme = useColorScheme();
+    registerForPushNotifications().catch(() => undefined);
+  }, []);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-      </Stack>
-    </ThemeProvider>
+    <AuthProvider>
+      <DriverProvider>
+        <StatusBar style="light" />
+        <Stack
+          screenOptions={{
+            headerStyle: { backgroundColor: Colors.background },
+            headerTintColor: Colors.text,
+            contentStyle: { backgroundColor: Colors.background },
+            headerShadowVisible: false,
+          }}
+        >
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="login" options={{ headerShown: false }} />
+          <Stack.Screen name="register" options={{ title: 'Become a Driver' }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="active-job" options={{ title: 'Active Job' }} />
+          <Stack.Screen name="meter" options={{ title: 'Meter' }} />
+          <Stack.Screen name="zone-queue" options={{ title: 'Zone Queue' }} />
+          <Stack.Screen name="pre-booking" options={{ title: 'Pre-booking' }} />
+          <Stack.Screen name="chat" options={{ title: 'Dispatcher Chat' }} />
+        </Stack>
+        <JobOfferModal />
+      </DriverProvider>
+    </AuthProvider>
   );
 }
