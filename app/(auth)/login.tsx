@@ -1,10 +1,10 @@
 import { Input } from '@/components/Input';
-import { useAuth } from '@/context/AuthContext';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
-import { AuthError } from 'firebase/auth';
+import { getAuthInstance, isFirebaseReady } from '@/lib/firebase';
+import { AuthError, signInWithEmailAndPassword } from 'firebase/auth';
 import { Link, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,7 +20,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 function authErrorMessage(err: unknown): string {
   const code = (err as AuthError)?.code ?? '';
-  console.log('[Login] mapping error code:', code);
   switch (code) {
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
@@ -42,33 +41,28 @@ function authErrorMessage(err: unknown): string {
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { signIn, driver, loading: authLoading } = useAuth();
-  const [loginId, setLoginId] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (!authLoading && driver) {
-      console.log('[Login] Already signed in, redirecting to tabs');
-      router.replace('/(tabs)');
-    }
-  }, [authLoading, driver, router]);
-
   const handleSignIn = async () => {
-    console.log('[Login] Sign In button pressed');
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail || !password) {
+      Alert.alert('Missing fields', 'Enter your email and password.');
+      return;
+    }
 
-    if (!loginId.trim() || !password) {
-      Alert.alert('Missing fields', 'Enter email or Driver ID and password.');
+    if (!isFirebaseReady) {
+      Alert.alert('Sign In Failed', 'Firebase is not ready. Restart the app and try again.');
       return;
     }
 
     setLoading(true);
     try {
-      console.log('[Login] Calling signIn…');
-      await signIn(loginId.trim(), password);
-      console.log('[Login] signIn finished');
+      const auth = getAuthInstance();
+      await signInWithEmailAndPassword(auth, trimmedEmail, password);
+      router.replace('/(tabs)');
     } catch (err) {
-      console.error('[Login] signIn unexpected error:', err);
       Alert.alert('Sign In Failed', authErrorMessage(err));
     } finally {
       setLoading(false);
@@ -77,59 +71,60 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={sharedStyles.screen} edges={['top', 'bottom', 'left', 'right']}>
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.brand}>
-          Booka<Text style={styles.brandAccent}>Waka</Text>
-        </Text>
-        <Text style={styles.tagline}>Driver Portal</Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.brand}>
+            Booka<Text style={styles.brandAccent}>Waka</Text>
+          </Text>
+          <Text style={styles.tagline}>Driver Portal</Text>
 
-        <View style={sharedStyles.card}>
-          <Input
-            label="Email or Driver ID"
-            placeholder="you@email.com or D001"
-            autoCapitalize="none"
-            value={loginId}
-            onChangeText={setLoginId}
-            onSubmitEditing={handleSignIn}
-            returnKeyType="next"
-          />
-          <Input
-            label="Password"
-            placeholder="Password"
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-            onSubmitEditing={handleSignIn}
-            returnKeyType="done"
-          />
-          <TouchableOpacity
-            style={[styles.signInBtn, loading && styles.signInBtnDisabled]}
-            onPress={handleSignIn}
-            disabled={loading}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel="Sign In"
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.signInText}>Sign In</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+          <View style={sharedStyles.card}>
+            <Input
+              label="Email"
+              placeholder="you@email.com"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              value={email}
+              onChangeText={setEmail}
+              onSubmitEditing={handleSignIn}
+              returnKeyType="next"
+            />
+            <Input
+              label="Password"
+              placeholder="Password"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+              onSubmitEditing={handleSignIn}
+              returnKeyType="done"
+            />
+            <TouchableOpacity
+              style={[styles.signInBtn, loading && styles.signInBtnDisabled]}
+              onPress={handleSignIn}
+              disabled={loading}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Sign In"
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.signInText}>Sign In</Text>
+              )}
+            </TouchableOpacity>
+          </View>
 
-        <Link href="/register" asChild>
-          <TouchableOpacity style={styles.secondaryBtn} activeOpacity={0.85}>
-            <Text style={styles.secondaryText}>Become a Driver</Text>
-          </TouchableOpacity>
-        </Link>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          <Link href="/register" asChild>
+            <TouchableOpacity style={styles.secondaryBtn} activeOpacity={0.85}>
+              <Text style={styles.secondaryText}>Become a Driver</Text>
+            </TouchableOpacity>
+          </Link>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

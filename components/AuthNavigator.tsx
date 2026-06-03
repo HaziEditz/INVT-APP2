@@ -2,11 +2,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 
-/**
- * Keeps the route stack in sync with auth state so login → home works without restarting.
- */
+/** Route guard: signed-in users leave auth stack; signed-out users cannot stay on tabs. */
 export function AuthNavigator() {
-  const { driver, loading } = useAuth();
+  const { firebaseUser, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -14,18 +12,18 @@ export function AuthNavigator() {
     if (loading) return;
 
     const root = segments[0];
-    const inAuth = root === '(auth)' || root === 'login';
+    const inAuth = root === '(auth)';
     const inTabs = root === '(tabs)';
 
-    if (driver && inAuth) {
+    if (firebaseUser && inAuth) {
       router.replace('/(tabs)');
       return;
     }
 
-    if (!driver && inTabs) {
+    if (!firebaseUser && inTabs) {
       router.replace('/(auth)/login');
     }
-  }, [driver, loading, segments, router]);
+  }, [firebaseUser, loading, segments, router]);
 
   return null;
 }

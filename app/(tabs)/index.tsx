@@ -11,6 +11,7 @@ import { MapErrorFallback } from '@/components/MapErrorFallback';
 import JobMap from '@/components/JobMap';
 import { VehiclePickerModal } from '@/components/VehiclePickerModal';
 import { Colors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { useState } from 'react';
@@ -25,6 +26,7 @@ import {
 } from 'react-native';
 
 export default function MainScreen() {
+  const { firebaseUser, driver, profileLoading, refreshDriver } = useAuth();
   const {
     shiftActive,
     readyForJobs,
@@ -56,6 +58,11 @@ export default function MainScreen() {
   const [mapExpanded, setMapExpanded] = useState(false);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const [, setTick] = useState(0);
+
+  useSafeEffect(() => {
+    if (!firebaseUser) return;
+    refreshDriver().catch((err) => console.error('[Main] refreshDriver failed:', err));
+  }, [firebaseUser?.uid], 'MainScreen-loadProfile');
 
   useSafeEffect(() => {
     if (!hailActive && !activeJob) return;
@@ -112,6 +119,15 @@ export default function MainScreen() {
   const showDispatchMeter = !!activeJob && !hailActive;
   const tripActive = showHailMeter || showDispatchMeter;
   const mapShowsRoute = !!activeJob;
+
+  if (profileLoading || (firebaseUser && !driver)) {
+    return (
+      <View style={styles.loadingRoot}>
+        <ActivityIndicator color={Colors.accent} size="large" />
+        <Text style={styles.loadingText}>Loading your profile…</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -250,6 +266,14 @@ export default function MainScreen() {
 }
 
 const styles = StyleSheet.create({
+  loadingRoot: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: { color: Colors.textMuted, fontSize: 15 },
   root: { flex: 1, backgroundColor: Colors.background },
   notice: {
     backgroundColor: Colors.warning + '33',

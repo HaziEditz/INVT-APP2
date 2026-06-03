@@ -4,7 +4,7 @@ import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
 export default function Index() {
-  const { driver, loading } = useAuth();
+  const { firebaseUser, loading } = useAuth();
 
   if (loading) {
     return (
@@ -14,6 +14,6 @@ export default function Index() {
     );
   }
 
-  if (driver) return <Redirect href="/(tabs)" />;
+  if (firebaseUser) return <Redirect href="/(tabs)" />;
   return <Redirect href="/(auth)/login" />;
 }
