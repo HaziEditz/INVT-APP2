@@ -70,13 +70,6 @@
           "icon": "./assets/images/icon.png",
           "color": "#1a73e8"
         }
-      ],
-      [
-        "react-native-maps",
-        {
-          "androidGoogleMapsApiKey": "AIzaSyAg5Q5LyM2Bv0xpeHz4gPRG1MwMh71klis",
-          "iosGoogleMapsApiKey": "AIzaSyAg5Q5LyM2Bv0xpeHz4gPRG1MwMh71klis"
-        }
       ]
     ],
     "experiments": {
