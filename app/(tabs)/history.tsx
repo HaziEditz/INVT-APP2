@@ -7,9 +7,26 @@ import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
 import { formatPaymentLabel } from '@/lib/earnings';
 import { HistoryJob } from '@/lib/jobHistory';
+import {
+  applyHistoryFilters,
+  getPeriodLabel,
+  HistoryPeriod,
+  PAYMENT_FILTER_OPTIONS,
+  PaymentFilter,
+  PERIOD_OPTIONS,
+  periodSummary,
+} from '@/lib/historyFilters';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback } from 'react';
-import { ActivityIndicator, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 function statusLabel(job: HistoryJob) {
   if (job.status === 'cancelled') return 'Cancelled';
@@ -47,6 +64,26 @@ function JobCard({ job }: { job: HistoryJob }) {
   );
 }
 
+function FilterChip({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.chip, active && styles.chipActive]}
+      accessibilityRole="button"
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function Section({ title, jobs }: { title: string; jobs: HistoryJob[] }) {
   if (!jobs.length) return null;
   return (
@@ -60,7 +97,9 @@ function Section({ title, jobs }: { title: string; jobs: HistoryJob[] }) {
 }
 
 export default function HistoryScreen() {
-  const { jobHistory, jobHistoryLoading, historyEarnings, refreshJobHistory } = useDriver();
+  const { jobHistory, jobHistoryLoading, refreshJobHistory } = useDriver();
+  const [period, setPeriod] = useState<HistoryPeriod>('week');
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
 
   useFocusEffect(
     useCallback(() => {
@@ -68,9 +107,27 @@ export default function HistoryScreen() {
     }, [refreshJobHistory]),
   );
 
-  const completed = jobHistory.filter((j) => j.status === 'completed');
-  const cancelled = jobHistory.filter((j) => j.status === 'cancelled');
-  const noshows = jobHistory.filter((j) => j.status === 'noshow');
+  const periodJobs = useMemo(
+    () => applyHistoryFilters(jobHistory, period, 'all'),
+    [jobHistory, period],
+  );
+
+  const summary = useMemo(() => periodSummary(periodJobs), [periodJobs]);
+
+  const displayJobs = useMemo(
+    () => applyHistoryFilters(jobHistory, period, paymentFilter),
+    [jobHistory, period, paymentFilter],
+  );
+
+  const completed = displayJobs.filter((j) => j.status === 'completed');
+  const cancelled =
+    paymentFilter === 'all' ? periodJobs.filter((j) => j.status === 'cancelled') : [];
+  const noshows =
+    paymentFilter === 'all' ? periodJobs.filter((j) => j.status === 'noshow') : [];
+
+  const periodLabel = getPeriodLabel(period);
+  const paymentLabel =
+    PAYMENT_FILTER_OPTIONS.find((p) => p.id === paymentFilter)?.label ?? 'All';
 
   return (
     <ScreenScroll
@@ -83,27 +140,60 @@ export default function HistoryScreen() {
         />
       }
     >
-      <ScreenHeader title="Job History" subtitle="Last 7 days from dispatch" />
+      <ScreenHeader title="Job History" subtitle="Filter by period and payment type" />
+
+      <Text style={styles.filterHeading}>Period</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+        {PERIOD_OPTIONS.map((opt) => (
+          <FilterChip
+            key={opt.id}
+            label={opt.label}
+            active={period === opt.id}
+            onPress={() => setPeriod(opt.id)}
+          />
+        ))}
+      </ScrollView>
+
+      <Text style={styles.filterHeading}>Payment type</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+        {PAYMENT_FILTER_OPTIONS.map((opt) => (
+          <FilterChip
+            key={opt.id}
+            label={opt.label}
+            active={paymentFilter === opt.id}
+            onPress={() => setPaymentFilter(opt.id)}
+          />
+        ))}
+      </ScrollView>
 
       {jobHistoryLoading && jobHistory.length === 0 ? (
         <ActivityIndicator color={Colors.accent} style={{ marginVertical: 24 }} />
       ) : (
         <>
           <EarningsBreakdownCard
-            title="Total income (completed)"
-            breakdown={historyEarnings}
-            jobCount={completed.length}
+            title={`${periodLabel} — income`}
+            breakdown={summary.earnings}
+            jobCount={summary.completedCount}
           />
 
           <View style={sharedStyles.card}>
-            <Text style={sharedStyles.cardTitle}>Summary</Text>
-            <Text style={sharedStyles.cardText}>{completed.length} completed</Text>
-            <Text style={sharedStyles.cardText}>{cancelled.length} cancelled</Text>
-            <Text style={sharedStyles.cardText}>{noshows.length} no-show</Text>
+            <Text style={sharedStyles.cardTitle}>{periodLabel} summary</Text>
+            <Text style={styles.summaryTotal}>${summary.earnings.total.toFixed(2)} total</Text>
+            <Text style={sharedStyles.cardText}>{summary.completedCount} completed</Text>
+            <Text style={sharedStyles.cardText}>{summary.cancelledCount} cancelled</Text>
+            <Text style={sharedStyles.cardText}>{summary.noshowCount} no-show</Text>
+            {paymentFilter !== 'all' ? (
+              <Text style={[sharedStyles.cardText, { marginTop: 8 }]}>
+                Showing {paymentLabel} jobs only ({completed.length})
+              </Text>
+            ) : null}
           </View>
 
-          {jobHistory.length === 0 ? (
-            <Text style={sharedStyles.cardText}>No jobs in the last 7 days.</Text>
+          {displayJobs.length === 0 && !jobHistoryLoading ? (
+            <Text style={sharedStyles.cardText}>
+              No jobs for {periodLabel}
+              {paymentFilter !== 'all' ? ` · ${paymentLabel}` : ''}.
+            </Text>
           ) : (
             <>
               <Section title="Completed" jobs={completed} />
@@ -118,6 +208,38 @@ export default function HistoryScreen() {
 }
 
 const styles = StyleSheet.create({
+  filterHeading: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  chipRow: { marginBottom: 12, flexGrow: 0 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surfaceElevated,
+    marginRight: 8,
+  },
+  chipActive: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.accent + '22',
+  },
+  chipText: { color: Colors.textMuted, fontSize: 14, fontWeight: '600' },
+  chipTextActive: { color: Colors.accent },
+  summaryTotal: {
+    color: Colors.success,
+    fontSize: 24,
+    fontWeight: '800',
+    marginTop: 4,
+    marginBottom: 8,
+  },
   sectionTitle: {
     color: Colors.text,
     fontSize: 17,

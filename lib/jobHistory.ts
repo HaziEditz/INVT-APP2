@@ -147,11 +147,10 @@ export async function loadDriverJobHistory(
 ): Promise<HistoryJob[]> {
   if (!companyId || !driverId) return [];
 
-  const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const byId = new Map<string, HistoryJob>();
 
   const ingest = (row: HistoryJob | null) => {
-    if (!row || row.completedAt < cutoffMs) return;
+    if (!row) return;
     const existing = byId.get(row.id);
     if (!existing || row.status === 'completed') {
       byId.set(row.id, row);
@@ -160,7 +159,7 @@ export async function loadDriverJobHistory(
 
   try {
     const snap = await get(
-      query(ref(database, `completedJobs/${companyId}`), limitToLast(150)),
+      query(ref(database, `completedJobs/${companyId}`), limitToLast(500)),
     );
     if (snap.exists()) {
       snap.forEach((child) => {
@@ -175,7 +174,7 @@ export async function loadDriverJobHistory(
 
   try {
     const snap = await get(
-      query(ref(database, `allbookings/${companyId}`), limitToLast(200)),
+      query(ref(database, `allbookings/${companyId}`), limitToLast(500)),
     );
     if (snap.exists()) {
       snap.forEach((child) => {
