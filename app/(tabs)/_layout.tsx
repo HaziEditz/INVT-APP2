@@ -1,3 +1,4 @@
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { Tabs } from 'expo-router';
@@ -9,6 +10,7 @@ export default function TabLayout() {
   const { offersBadgeCount } = useDriver();
 
   return (
+    <ErrorBoundary name="Tabs">
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -53,5 +55,6 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    </ErrorBoundary>
   );
 }

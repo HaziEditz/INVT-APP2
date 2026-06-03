@@ -1,8 +1,6 @@
-import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, initializeAuth } from 'firebase/auth';
-// @ts-expect-error RN persistence export
-import { getReactNativePersistence } from 'firebase/auth';
-import { getDatabase } from 'firebase/database';
+import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
+import { getAuth, initializeAuth, Auth } from 'firebase/auth';
+import { getDatabase, Database } from 'firebase/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
@@ -16,20 +14,39 @@ const firebaseConfig = {
   appId: '1:909621127467:web:504f502a533ca0a216fd6e',
 };
 
-const isNew = getApps().length === 0;
-const app = isNew ? initializeApp(firebaseConfig) : getApps()[0];
+let app: FirebaseApp;
+let auth: Auth;
+let database: Database;
 
-function buildAuth() {
-  if (!isNew || Platform.OS === 'web') return getAuth(app);
-  try {
-    return initializeAuth(app, {
-      persistence: getReactNativePersistence(AsyncStorage),
-    });
-  } catch {
-    return getAuth(app);
+try {
+  const isNew = getApps().length === 0;
+  app = isNew ? initializeApp(firebaseConfig) : getApps()[0];
+
+  if (!isNew || Platform.OS === 'web') {
+    auth = getAuth(app);
+  } else {
+    try {
+      // @ts-expect-error RN persistence export
+      const { getReactNativePersistence } = require('firebase/auth');
+      auth = initializeAuth(app, {
+        persistence: getReactNativePersistence(AsyncStorage),
+      });
+    } catch (persistErr) {
+      console.warn('[Firebase] RN persistence failed, using default auth:', persistErr);
+      auth = getAuth(app);
+    }
   }
+
+  database = getDatabase(app);
+  console.log('[Firebase] initialized');
+} catch (err) {
+  console.error('[Firebase] fatal init error:', err);
+  const isNew = getApps().length === 0;
+  app = isNew ? initializeApp(firebaseConfig) : getApps()[0];
+  auth = getAuth(app);
+  database = getDatabase(app);
 }
 
-export const auth = buildAuth();
-export const database = getDatabase(app);
+export const isFirebaseReady = !!app && !!auth && !!database;
+export { auth, database };
 export default app;

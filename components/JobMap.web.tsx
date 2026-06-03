@@ -1,5 +1,5 @@
 import { Colors } from '@/constants/theme';
-import type { JobMapProps } from '@/components/JobMap';
+import type { JobMapProps } from '@/components/JobMap.types';
 import { StyleSheet, Text, View } from 'react-native';
 
 /** Web stub — maps are only available on iOS/Android. */

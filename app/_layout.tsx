@@ -1,3 +1,5 @@
+import 'react-native-gesture-handler';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/context/AuthContext';
 import { DriverProvider } from '@/context/DriverContext';
 import { AuthNavigator } from '@/components/AuthNavigator';
@@ -6,17 +8,20 @@ import { JobOfferModal } from '@/components/JobOfferModal';
 import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { registerForPushNotifications } from '@/services/notificationService';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function RootLayout() {
-  useEffect(() => {
-    registerForPushNotifications().catch(() => undefined);
-  }, []);
+  useSafeEffect(() => {
+    registerForPushNotifications().catch((err) => {
+      console.error('[RootLayout] push registration failed:', err);
+    });
+  }, [], 'RootLayout-push');
 
   return (
     <SafeAreaProvider>
+    <ErrorBoundary name="App">
     <AuthProvider>
       <DriverProvider>
         <AuthNavigator />
@@ -38,10 +43,15 @@ export default function RootLayout() {
           <Stack.Screen name="pre-booking" options={{ title: 'Pre-booking' }} />
           <Stack.Screen name="chat" options={{ title: 'Dispatcher Chat' }} />
         </Stack>
-        <ShiftKeepAwake />
-        <JobOfferModal />
+        <ErrorBoundary name="ShiftKeepAwake">
+          <ShiftKeepAwake />
+        </ErrorBoundary>
+        <ErrorBoundary name="JobOfferModal">
+          <JobOfferModal />
+        </ErrorBoundary>
       </DriverProvider>
     </AuthProvider>
+    </ErrorBoundary>
     </SafeAreaProvider>
   );
 }

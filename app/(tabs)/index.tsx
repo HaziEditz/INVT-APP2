@@ -6,11 +6,14 @@ import { HomeStatusBar } from '@/components/home/HomeStatusBar';
 import { MeterOverlay } from '@/components/home/MeterOverlay';
 import { QueuedOffersSheet } from '@/components/home/QueuedOffersSheet';
 import { TariffPicker } from '@/components/home/TariffPicker';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { MapErrorFallback } from '@/components/MapErrorFallback';
 import JobMap from '@/components/JobMap';
 import { VehiclePickerModal } from '@/components/VehiclePickerModal';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
-import { useEffect, useState } from 'react';
+import { useSafeEffect } from '@/hooks/useSafeEffect';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -54,11 +57,11 @@ export default function MainScreen() {
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const [, setTick] = useState(0);
 
-  useEffect(() => {
+  useSafeEffect(() => {
     if (!hailActive && !activeJob) return;
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, [hailActive, activeJob]);
+  }, [hailActive, activeJob], 'MainScreen-tick');
 
   const openStartFlow = () => {
     if (vehiclesLoading) return;
@@ -112,7 +115,9 @@ export default function MainScreen() {
 
   return (
     <View style={styles.root}>
-      <HomeStatusBar onOffersPress={() => setQueueSheetOpen(true)} />
+      <ErrorBoundary name="HomeStatusBar">
+        <HomeStatusBar onOffersPress={() => setQueueSheetOpen(true)} />
+      </ErrorBoundary>
 
       {jobEditNotice ? (
         <Pressable style={styles.notice} onPress={dismissJobEditNotice}>
@@ -122,29 +127,35 @@ export default function MainScreen() {
       ) : null}
 
       <View style={styles.mapSection}>
-        <JobMap
-          pickupLat={activeJob?.pickupLat}
-          pickupLng={activeJob?.pickupLng}
-          dropoffLat={activeJob?.dropoffLat}
-          dropoffLng={activeJob?.dropoffLng}
-          showRoute={mapShowsRoute}
-          showsUserLocation={shiftActive}
-        />
+        <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
+          <JobMap
+            pickupLat={activeJob?.pickupLat}
+            pickupLng={activeJob?.pickupLng}
+            dropoffLat={activeJob?.dropoffLat}
+            dropoffLng={activeJob?.dropoffLng}
+            showRoute={mapShowsRoute}
+            showsUserLocation={shiftActive}
+          />
+        </ErrorBoundary>
 
         {showHailMeter && meter ? (
           <View style={styles.overlayTop} pointerEvents="box-none">
-            <MeterOverlay
-              meter={meter}
-              onPause={pauseMeter}
-              onWait={toggleWaitMeter}
-              onExpand={() => setMapExpanded(true)}
-            />
+            <ErrorBoundary name="MeterOverlay">
+              <MeterOverlay
+                meter={meter}
+                onPause={pauseMeter}
+                onWait={toggleWaitMeter}
+                onExpand={() => setMapExpanded(true)}
+              />
+            </ErrorBoundary>
           </View>
         ) : null}
 
         {showDispatchMeter && activeJob ? (
           <View style={styles.overlayTop} pointerEvents="box-none">
-            <DispatchTripOverlay job={activeJob} onExpand={() => setMapExpanded(true)} />
+            <ErrorBoundary name="DispatchTripOverlay">
+              <DispatchTripOverlay job={activeJob} onExpand={() => setMapExpanded(true)} />
+            </ErrorBoundary>
           </View>
         ) : null}
 
@@ -161,18 +172,24 @@ export default function MainScreen() {
         bounces={false}
         showsVerticalScrollIndicator={false}
       >
-        {activeJob ? <ActiveJobPanel /> : null}
+        {activeJob ? (
+          <ErrorBoundary name="ActiveJobPanel">
+            <ActiveJobPanel />
+          </ErrorBoundary>
+        ) : null}
 
         {shiftActive ? (
           <>
-            <TariffPicker
-              tariffs={tariffs}
-              selected={selectedTariff}
-              open={tariffOpen}
-              onOpen={() => setTariffOpen(true)}
-              onClose={() => setTariffOpen(false)}
-              onSelect={setSelectedTariff}
-            />
+            <ErrorBoundary name="TariffPicker">
+              <TariffPicker
+                tariffs={tariffs}
+                selected={selectedTariff}
+                open={tariffOpen}
+                onOpen={() => setTariffOpen(true)}
+                onClose={() => setTariffOpen(false)}
+                onSelect={setSelectedTariff}
+              />
+            </ErrorBoundary>
             <View style={styles.bottomBar}>
               <Button
                 title={hailActive ? 'END HAIL TRIP' : 'HAIL PASSENGER'}

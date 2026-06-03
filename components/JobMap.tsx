@@ -1,21 +1,12 @@
 import { Platform } from 'react-native';
 import type { ComponentType } from 'react';
-import type { MapCoord } from './JobMap.native';
+import type { JobMapProps } from './JobMap.types';
 
-export type JobMapProps = {
-  pickup?: MapCoord;
-  dropoff?: MapCoord;
-  pickupLat?: number;
-  pickupLng?: number;
-  dropoffLat?: number;
-  dropoffLng?: number;
-  showRoute?: boolean;
-  showsUserLocation?: boolean;
-};
+export type { JobMapProps } from './JobMap.types';
 
 const JobMap: ComponentType<JobMapProps> =
   Platform.OS === 'web'
     ? require('./JobMap.web').default
-    : require('./JobMap.native').default;
+    : require('./SafeJobMap').default;
 
 export default JobMap;

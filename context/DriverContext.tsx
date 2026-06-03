@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
 import { Alert } from 'react-native';
 import { get, onValue, ref, update } from 'firebase/database';
-import { database } from '@/lib/firebase';
+import { database, isFirebaseReady } from '@/lib/firebase';
+import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
@@ -182,53 +183,66 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const meterTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const waitTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
+  useSafeEffect(() => {
     shiftActiveRef.current = shiftActive;
-  }, [shiftActive]);
+  }, [shiftActive], 'Driver-shiftRef');
 
-  useEffect(() => {
+  useSafeEffect(() => {
     readyForJobsRef.current = readyForJobs;
-  }, [readyForJobs]);
+  }, [readyForJobs], 'Driver-readyRef');
 
-  useEffect(() => {
+  useSafeEffect(() => {
     hailActiveRef.current = hailActive;
-  }, [hailActive]);
+  }, [hailActive], 'Driver-hailRef');
 
-  useEffect(() => {
+  useSafeEffect(() => {
     activeJobIdRef.current = activeJob?.id ?? null;
-  }, [activeJob?.id]);
+  }, [activeJob?.id], 'Driver-activeJobRef');
 
-  useEffect(() => {
-    getData<string>(STORAGE_KEYS.selectedVehicle).then((v) => v && setSelectedVehicleIdState(v));
-    getData<ActiveJob>(STORAGE_KEYS.activeJob).then((j) => j && setActiveJob(j));
-    getData<boolean>(STORAGE_KEYS.shiftActive).then((v) => {
-      if (v) {
-        setShiftActive(true);
-        shiftActiveRef.current = true;
-        setReadyForJobs(true);
-        readyForJobsRef.current = true;
-        setPresenceStatus('Online');
+  useSafeEffect(() => {
+    void (async () => {
+      try {
+        const v = await getData<string>(STORAGE_KEYS.selectedVehicle);
+        if (v) setSelectedVehicleIdState(v);
+        const j = await getData<ActiveJob>(STORAGE_KEYS.activeJob);
+        if (j) setActiveJob(j);
+        const shift = await getData<boolean>(STORAGE_KEYS.shiftActive);
+        if (shift) {
+          setShiftActive(true);
+          shiftActiveRef.current = true;
+          setReadyForJobs(true);
+          readyForJobsRef.current = true;
+          setPresenceStatus('Online');
+        }
+        const tariffId = await getData<string>(STORAGE_KEYS.selectedTariffId);
+        const t = DEFAULT_TARIFFS.find((x) => x.id === tariffId);
+        if (t) setSelectedTariffState(t);
+        const m = await getData<MeterState>(STORAGE_KEYS.meterState);
+        if (m?.running) {
+          setMeter(m);
+          setHailActive(true);
+        }
+      } catch (err) {
+        console.error('[Driver] hydrate storage failed:', err);
       }
-    });
-    getData<string>(STORAGE_KEYS.selectedTariffId).then((id) => {
-      const t = DEFAULT_TARIFFS.find((x) => x.id === id);
-      if (t) setSelectedTariffState(t);
-    });
-    getData<MeterState>(STORAGE_KEYS.meterState).then((m) => {
-      if (m?.running) {
-        setMeter(m);
-        setHailActive(true);
-      }
-    });
-  }, []);
+    })();
+  }, [], 'Driver-hydrate');
 
-  useEffect(() => {
-    const unsub = subscribeConnectivity(async (connected) => {
-      setIsOffline(!connected);
-      if (connected) await flushOfflineQueue();
-    });
-    return unsub;
-  }, []);
+  useSafeEffect(() => {
+    try {
+      const unsub = subscribeConnectivity(async (connected) => {
+        try {
+          setIsOffline(!connected);
+          if (connected) await flushOfflineQueue();
+        } catch (err) {
+          console.error('[Driver] connectivity handler:', err);
+        }
+      });
+      return unsub;
+    } catch (err) {
+      console.error('[Driver] subscribeConnectivity failed:', err);
+    }
+  }, [], 'Driver-connectivity');
 
   const refreshVehicles = async () => {
     if (!driver?.companyId || !driver.uid) {
@@ -257,18 +271,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  useEffect(() => {
-    refreshVehicles();
+  useSafeEffect(() => {
+    refreshVehicles().catch((err) => console.error('[Driver] refreshVehicles', err));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.uid, driver?.companyId, driver?.id, driver?.vehicleId]);
+  }, [driver?.uid, driver?.companyId, driver?.id, driver?.vehicleId], 'Driver-vehicles');
 
-  useEffect(() => {
+  useSafeEffect(() => {
     if (!driver?.companyId) {
       setCompany(null);
       return;
     }
-    loadCompanyInfo(driver.companyId, driver.uid).then(setCompany);
-  }, [driver?.companyId, driver?.uid]);
+    loadCompanyInfo(driver.companyId, driver.uid)
+      .then(setCompany)
+      .catch((err) => console.error('[Driver] loadCompanyInfo', err));
+  }, [driver?.companyId, driver?.uid], 'Driver-company');
 
   const refreshJobHistory = async () => {
     if (!driver?.companyId || !driver.id) {
@@ -286,18 +302,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  useEffect(() => {
-    refreshJobHistory();
+  useSafeEffect(() => {
+    refreshJobHistory().catch((err) => console.error('[Driver] refreshJobHistory', err));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.companyId, driver?.id]);
+  }, [driver?.companyId, driver?.id], 'Driver-jobHistory');
 
-  useEffect(() => {
+  useSafeEffect(() => {
     if (!shiftActive) return;
     const id = setInterval(() => {
-      tickWorkedMinutes(1).catch(() => undefined);
+      tickWorkedMinutes(1).catch((err) => console.error('[Driver] tickWorkedMinutes', err));
     }, 60000);
     return () => clearInterval(id);
-  }, [shiftActive]);
+  }, [shiftActive], 'Driver-nztaTick');
 
   const sessionEarnings = sumBreakdown(completedJobs);
   const historyEarnings = sumBreakdown(
@@ -306,66 +322,82 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
   const activeVehicleBodyType = activeVehicle?.bodyType ?? '—';
 
-  useEffect(() => {
-    if (!driver?.companyId || !selectedVehicleId) {
+  useSafeEffect(() => {
+    if (!isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
       setZone(EMPTY_ZONE);
       return;
     }
-
-    const zoneRef = ref(database, `online/${driver.companyId}/${selectedVehicleId}/zone`);
-    return onValue(zoneRef, (snap) => {
-      if (snap.exists()) {
-        setZone(parseZoneNode(snap.val()));
-        return;
-      }
-      get(ref(database, `online/${driver.companyId}/${selectedVehicleId}/current`)).then((cur) => {
-        if (!cur.exists()) {
-          setZone(EMPTY_ZONE);
-          return;
+    try {
+      const zoneRef = ref(database, `online/${driver.companyId}/${selectedVehicleId}/zone`);
+      return onValue(zoneRef, (snap) => {
+        try {
+          if (snap.exists()) {
+            setZone(parseZoneNode(snap.val()));
+            return;
+          }
+          get(ref(database, `online/${driver.companyId}/${selectedVehicleId}/current`))
+            .then((cur) => {
+              if (!cur.exists()) {
+                setZone(EMPTY_ZONE);
+                return;
+              }
+              const d = cur.val() as Record<string, unknown>;
+              setZone({
+                name: String(d.zonename ?? d.zoneName ?? '').trim(),
+                position: Number(d.zonequeue ?? d.zoneQueue ?? 0),
+                totalInQueue: 0,
+                nearbyDrivers: 0,
+              });
+            })
+            .catch((err) => console.error('[Driver] zone fallback read', err));
+        } catch (err) {
+          console.error('[Driver] zone listener', err);
         }
-        const d = cur.val() as Record<string, unknown>;
-        setZone({
-          name: String(d.zonename ?? d.zoneName ?? '').trim(),
-          position: Number(d.zonequeue ?? d.zoneQueue ?? 0),
-          totalInQueue: 0,
-          nearbyDrivers: 0,
-        });
       });
-    });
-  }, [driver?.companyId, selectedVehicleId]);
+    } catch (err) {
+      console.error('[Driver] zone subscribe failed', err);
+    }
+  }, [driver?.companyId, selectedVehicleId], 'Driver-zone');
 
-  useEffect(() => {
-    if (!driver?.companyId || !selectedVehicleId) {
+  useSafeEffect(() => {
+    if (!isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
       if (!readyForJobsRef.current) setPresenceStatus('Offline');
       return;
     }
-
-    const presenceRef = ref(database, `online/${driver.companyId}/${selectedVehicleId}/current`);
-    return onValue(presenceRef, (snap) => {
-      if (!snap.exists()) {
-        if (readyForJobsRef.current || shiftActiveRef.current) {
-          setPresenceStatus('Online');
-          return;
+    try {
+      const presenceRef = ref(database, `online/${driver.companyId}/${selectedVehicleId}/current`);
+      return onValue(presenceRef, (snap) => {
+        try {
+          if (!snap.exists()) {
+            if (readyForJobsRef.current || shiftActiveRef.current) {
+              setPresenceStatus('Online');
+              return;
+            }
+            setPresenceStatus('Offline');
+            return;
+          }
+          const data = snap.val() as Record<string, unknown>;
+          const rawStatus = String(data.vehiclestatus ?? data.VehicleStatus ?? '');
+          const myId = String(driver.id ?? '');
+          const nodeDriverId = String(data.driverid ?? '');
+          if (nodeDriverId && myId && nodeDriverId !== myId && nodeDriverId !== String(driver.uid)) {
+            setPresenceStatus('Offline');
+            setReadyForJobs(false);
+            return;
+          }
+          const mapped = mapVehicleStatusToDisplay(rawStatus);
+          setPresenceStatus(mapped);
+          if (mapped === 'Online' && shiftActiveRef.current) {
+            setReadyForJobs(true);
+          }
+        } catch (err) {
+          console.error('[Driver] presence listener', err);
         }
-        setPresenceStatus('Offline');
-        return;
-      }
-      const data = snap.val() as Record<string, unknown>;
-      const rawStatus = String(data.vehiclestatus ?? data.VehicleStatus ?? '');
-      const myId = String(driver.id ?? '');
-      const nodeDriverId = String(data.driverid ?? '');
-      if (nodeDriverId && myId && nodeDriverId !== myId && nodeDriverId !== String(driver.uid)) {
-        setPresenceStatus('Offline');
-        setReadyForJobs(false);
-        return;
-      }
-      const mapped = mapVehicleStatusToDisplay(rawStatus);
-      setPresenceStatus(mapped);
-      if (mapped === 'Online' && shiftActiveRef.current) {
-        setReadyForJobs(true);
-      }
-    });
-  }, [driver?.companyId, driver?.id, driver?.uid, selectedVehicleId]);
+      });
+    } catch (err) {
+      console.error('[Driver] presence subscribe failed', err);
+    }
+  }, [driver?.companyId, driver?.id, driver?.uid, selectedVehicleId], 'Driver-presence');
 
   const offersBadgeCount = queuedOffers.length;
 
@@ -413,20 +445,28 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await notifyJobOffer('New Job Offer', `${offer.type}: ${offer.pickup}`);
   };
 
-  useEffect(() => {
-    if (!driver?.companyId || !driver.id) return;
-    const offerRef = ref(database, `jobOffers/${driver.companyId}/${driver.id}`);
-    return onValue(offerRef, async (snap) => {
-      const val = snap.val();
-      if (!val || typeof val !== 'object') return;
-      if (val.editNotice && activeJobIdRef.current === String(val.jobId ?? val.id)) {
-        setJobEditNotice(String(val.editNotice));
-      }
-      if (val.removed || val.declined) return;
-      await handleIncomingOffer(val as Record<string, unknown>);
-    });
+  useSafeEffect(() => {
+    if (!isFirebaseReady || !driver?.companyId || !driver.id) return;
+    try {
+      const offerRef = ref(database, `jobOffers/${driver.companyId}/${driver.id}`);
+      return onValue(offerRef, async (snap) => {
+        try {
+          const val = snap.val();
+          if (!val || typeof val !== 'object') return;
+          if (val.editNotice && activeJobIdRef.current === String(val.jobId ?? val.id)) {
+            setJobEditNotice(String(val.editNotice));
+          }
+          if (val.removed || val.declined) return;
+          await handleIncomingOffer(val as Record<string, unknown>);
+        } catch (err) {
+          console.error('[Driver] job offer listener', err);
+        }
+      });
+    } catch (err) {
+      console.error('[Driver] job offer subscribe failed', err);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.companyId, driver?.id, activeJob?.stage]);
+  }, [driver?.companyId, driver?.id, activeJob?.stage], 'Driver-jobOffers');
 
   const setSelectedVehicleId = async (id: string) => {
     const normalized = id.trim().toUpperCase();

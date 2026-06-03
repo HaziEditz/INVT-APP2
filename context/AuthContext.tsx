@@ -188,29 +188,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      console.log('[Auth] onAuthStateChanged:', user?.uid ?? 'signed out');
-      setFirebaseUser(user);
-      if (!user) {
-        setDriver(null);
-        setLoading(false);
-        return;
-      }
-      const saved = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
-      const companyId = await resolveCompanyId(user.uid, user.displayName);
-      const profile = await loadDriverProfile(user.uid, companyId, saved?.id ?? '');
-      if (profile) {
-        if (!profile.email && user.email) profile.email = user.email;
-        setDriver(profile);
-        await storeData(STORAGE_KEYS.driverSession, profile);
-      } else if (saved?.uid === user.uid) {
-        setDriver(saved);
-      }
+    let unsub = () => {};
+    try {
+      unsub = onAuthStateChanged(auth, async (user) => {
+        try {
+          console.log('[Auth] onAuthStateChanged:', user?.uid ?? 'signed out');
+          setFirebaseUser(user);
+          if (!user) {
+            setDriver(null);
+            setLoading(false);
+            return;
+          }
+          const saved = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
+          const companyId = await resolveCompanyId(user.uid, user.displayName);
+          const profile = await loadDriverProfile(user.uid, companyId, saved?.id ?? '');
+          if (profile) {
+            if (!profile.email && user.email) profile.email = user.email;
+            setDriver(profile);
+            await storeData(STORAGE_KEYS.driverSession, profile);
+          } else if (saved?.uid === user.uid) {
+            setDriver(saved);
+          }
+          setLoading(false);
+        } catch (err) {
+          console.error('[Auth] onAuthStateChanged handler failed:', err);
+          setLoading(false);
+        }
+      });
+      getData<DriverProfile>(STORAGE_KEYS.driverSession)
+        .then((saved) => {
+          if (saved) setDriver(saved);
+        })
+        .catch((err) => console.error('[Auth] restore session failed:', err));
+    } catch (err) {
+      console.error('[Auth] onAuthStateChanged setup failed:', err);
       setLoading(false);
-    });
-    getData<DriverProfile>(STORAGE_KEYS.driverSession).then((saved) => {
-      if (saved) setDriver(saved);
-    });
+    }
     return unsub;
   }, []);
 

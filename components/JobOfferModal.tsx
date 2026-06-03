@@ -2,24 +2,29 @@ import { Button } from '@/components/Button';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
-import { useEffect, useState } from 'react';
+import { useSafeEffect } from '@/hooks/useSafeEffect';
+import { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function JobOfferModal() {
   const { jobOffer, acceptOffer, declineOffer } = useDriver();
   const [secondsLeft, setSecondsLeft] = useState(0);
 
-  useEffect(() => {
+  useSafeEffect(() => {
     if (!jobOffer) return;
     const tick = () => {
-      const left = Math.max(0, Math.ceil((jobOffer.expiresAt - Date.now()) / 1000));
-      setSecondsLeft(left);
-      if (left <= 0) declineOffer();
+      try {
+        const left = Math.max(0, Math.ceil((jobOffer.expiresAt - Date.now()) / 1000));
+        setSecondsLeft(left);
+        if (left <= 0) declineOffer().catch((err) => console.error('[JobOfferModal] decline', err));
+      } catch (err) {
+        console.error('[JobOfferModal] tick', err);
+      }
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [jobOffer, declineOffer]);
+  }, [jobOffer, declineOffer], 'JobOfferModal-timer');
 
   if (!jobOffer) return null;
 

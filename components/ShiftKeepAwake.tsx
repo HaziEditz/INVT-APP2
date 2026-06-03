@@ -1,18 +1,18 @@
 import { useDriver } from '@/context/DriverContext';
 import { enableWakeLock, disableWakeLock } from '@/services/wakeLock';
-import { useEffect } from 'react';
+import { useSafeEffect } from '@/hooks/useSafeEffect';
 
 /** Keeps screen on while shift is active or on a trip. */
 export function ShiftKeepAwake() {
   const { shiftActive, activeJob, hailActive } = useDriver();
 
-  useEffect(() => {
+  useSafeEffect(() => {
     if (shiftActive || activeJob || hailActive) {
-      enableWakeLock().catch(() => undefined);
+      enableWakeLock().catch((err) => console.error('[ShiftKeepAwake]', err));
       return () => disableWakeLock();
     }
     disableWakeLock();
-  }, [shiftActive, activeJob, hailActive]);
+  }, [shiftActive, activeJob, hailActive], 'ShiftKeepAwake');
 
   return null;
 }
