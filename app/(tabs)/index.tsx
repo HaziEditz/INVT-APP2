@@ -76,11 +76,11 @@ export default function MainScreen() {
       Alert.alert('No vehicles', 'Ask your fleet admin to allocate vehicles to your profile.');
       return;
     }
-    if (vehicles.length === 1) {
-      void runStartShift(vehicles[0].id);
-      return;
-    }
-    setPickerVehicle(selectedVehicleId || vehicles[0]?.id || '');
+    const defaultId =
+      (selectedVehicleId && vehicles.some((v) => v.id === selectedVehicleId)
+        ? selectedVehicleId
+        : vehicles[0]?.id) ?? '';
+    setPickerVehicle(defaultId);
     setPickerOpen(true);
   };
 

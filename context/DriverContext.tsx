@@ -206,14 +206,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (v) setSelectedVehicleIdState(v);
         const j = await getData<ActiveJob>(STORAGE_KEYS.activeJob);
         if (j) setActiveJob(j);
-        const shift = await getData<boolean>(STORAGE_KEYS.shiftActive);
-        if (shift) {
-          setShiftActive(true);
-          shiftActiveRef.current = true;
-          setReadyForJobs(true);
-          readyForJobsRef.current = true;
-          setPresenceStatus('Online');
-        }
+        // Do not restore shift as "online" on launch — driver must confirm vehicle each session.
+        await storeData(STORAGE_KEYS.shiftActive, false);
         const tariffId = await getData<string>(STORAGE_KEYS.selectedTariffId);
         const t = DEFAULT_TARIFFS.find((x) => x.id === tariffId);
         if (t) setSelectedTariffState(t);
@@ -258,10 +252,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         driver.vehicleId || selectedVehicleId,
       );
       setVehicles(list);
-      if (list.length === 1 && !selectedVehicleId) {
-        await setSelectedVehicleId(list[0].id);
-      } else if (driver.vehicleId && list.some((v) => v.id === driver.vehicleId.toUpperCase())) {
-        if (!selectedVehicleId) await setSelectedVehicleId(driver.vehicleId.toUpperCase());
+      // Pre-select a default for the picker only; shift still requires explicit confirmation.
+      if (!selectedVehicleId) {
+        const preferred =
+          list.find((v) => v.id === driver.vehicleId?.toUpperCase()) ?? list[0];
+        if (preferred) await setSelectedVehicleId(preferred.id);
       }
     } catch (err) {
       console.warn('[Driver] refreshVehicles failed:', err);
@@ -497,9 +492,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const startShift = async (vehicleIdOverride?: string) => {
     if (!driver) return;
 
-    const vehicleId = await resolveVehicleId(vehicleIdOverride);
+    const vehicleId = (vehicleIdOverride ?? '').trim().toUpperCase();
     if (!vehicleId) {
-      Alert.alert('Vehicle required', 'Select a vehicle to start your shift.');
+      Alert.alert('Vehicle required', 'Select a vehicle and confirm before starting your shift.');
       return;
     }
 

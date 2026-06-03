@@ -3,7 +3,8 @@ import { Colors } from '@/constants/theme';
 import { MapErrorFallback } from '@/components/MapErrorFallback';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 export type MapCoord = { latitude: number; longitude: number };
 
@@ -18,21 +19,8 @@ type Props = {
   showsUserLocation?: boolean;
 };
 
-type MapsModule = {
-  default: React.ComponentType<Record<string, unknown>>;
-  Marker: React.ComponentType<Record<string, unknown>>;
-  Polyline: React.ComponentType<Record<string, unknown>>;
-  PROVIDER_GOOGLE?: string;
-};
-
-function loadMapsModule(): MapsModule | null {
-  try {
-    return require('react-native-maps') as MapsModule;
-  } catch (err) {
-    console.error('[JobMap] react-native-maps load failed:', err);
-    return null;
-  }
-}
+/** Use Google Maps on native builds (API key is injected via app.json at build time). */
+const MAP_PROVIDER = Platform.OS === 'android' || Platform.OS === 'ios' ? PROVIDER_GOOGLE : undefined;
 
 export default function JobMap({
   pickup,
@@ -44,8 +32,7 @@ export default function JobMap({
   showRoute = true,
   showsUserLocation = true,
 }: Props) {
-  const maps = loadMapsModule();
-  const mapRef = useRef<{ animateToRegion?: (r: unknown, ms: number) => void } | null>(null);
+  const mapRef = useRef<MapView | null>(null);
   const [mapBroken, setMapBroken] = useState(false);
 
   const p = pickup ?? jobCoords(pickupLat, pickupLng);
@@ -54,32 +41,29 @@ export default function JobMap({
 
   useSafeEffect(() => {
     try {
-      mapRef.current?.animateToRegion?.(region, 400);
+      mapRef.current?.animateToRegion(region, 400);
     } catch (err) {
       console.error('[JobMap] animateToRegion failed:', err);
     }
   }, [p.latitude, p.longitude, d.latitude, d.longitude], 'JobMap-animate');
 
-  if (mapBroken || !maps?.default) {
+  if (mapBroken) {
     return <MapErrorFallback />;
   }
-
-  const MapView = maps.default;
-  const Marker = maps.Marker;
-  const Polyline = maps.Polyline;
 
   return (
     <View style={styles.wrap}>
       <MapView
-        ref={mapRef as never}
+        ref={mapRef}
         style={styles.map}
+        provider={MAP_PROVIDER}
         initialRegion={region}
         showsUserLocation={showsUserLocation}
         showsMyLocationButton={false}
         loadingEnabled
         mapType="standard"
-        onMapReady={() => console.log('[JobMap] map ready')}
-        onError={(e: { nativeEvent?: { error?: string } }) => {
+        onMapReady={() => console.log('[JobMap] map ready', { provider: MAP_PROVIDER, platform: Platform.OS })}
+        onError={(e) => {
           console.error('[JobMap] native error:', e?.nativeEvent?.error ?? e);
           setMapBroken(true);
         }}
