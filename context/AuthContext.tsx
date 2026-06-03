@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { Alert } from 'react-native';
 import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -6,8 +7,9 @@ import {
   User,
   AuthError,
 } from 'firebase/auth';
+import type { DataSnapshot } from 'firebase/database';
 import { get, ref } from 'firebase/database';
-import { auth, database } from '@/lib/firebase';
+import { getAuthInstance, getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
 import { getData, removeData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { DriverProfile } from '@/types';
 
@@ -51,6 +53,35 @@ function buildProfileFromFirebase(
   };
 }
 
+function forEachChild(snap: DataSnapshot, fn: (child: DataSnapshot) => void): void {
+  if (!snap.exists()) return;
+  try {
+    snap.forEach((child) => {
+      try {
+        fn(child);
+      } catch (err) {
+        console.warn('[Auth] forEachChild callback error:', err);
+      }
+    });
+  } catch (err) {
+    console.warn('[Auth] forEachChild failed:', err);
+  }
+}
+
+function formatSignInError(err: unknown): string {
+  const code = (err as AuthError)?.code ?? '';
+  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+    return 'Incorrect password. Please try again.';
+  }
+  if (code === 'auth/user-not-found') return 'No account found. Contact your fleet administrator.';
+  if (code === 'auth/invalid-email') return 'Invalid email format.';
+  if (code === 'auth/network-request-failed') return 'Network error. Check your connection and try again.';
+  if (code === 'auth/too-many-requests') return 'Too many attempts. Wait a moment and try again.';
+  if (code === 'auth/user-disabled') return 'This account has been disabled.';
+  if (err instanceof Error) return err.message;
+  return 'Unable to sign in. Please try again.';
+}
+
 interface AuthContextValue {
   driver: DriverProfile | null;
   firebaseUser: User | null;
@@ -67,9 +98,13 @@ async function loadDriverProfile(
   companyId: string,
   driverIdHint: string,
 ): Promise<DriverProfile | null> {
+  const database = getDatabaseInstance();
   const companySnap = await get(ref(database, `drivers/${companyId}/${uid}`));
   if (companySnap.exists()) {
-    return buildProfileFromFirebase(uid, companyId, companySnap.val(), driverIdHint);
+    const val = companySnap.val();
+    if (val && typeof val === 'object') {
+      return buildProfileFromFirebase(uid, companyId, val as Record<string, unknown>, driverIdHint);
+    }
   }
 
   try {
@@ -77,13 +112,16 @@ async function loadDriverProfile(
     if (!driversRoot.exists()) return null;
 
     let profile: DriverProfile | null = null;
-    driversRoot.forEach((companyNode) => {
+    forEachChild(driversRoot, (companyNode) => {
       if (profile) return;
       const cId = companyNode.key;
       if (!cId) return;
       const node = companyNode.child(uid);
       if (node.exists()) {
-        profile = buildProfileFromFirebase(uid, cId, node.val(), driverIdHint);
+        const val = node.val();
+        if (val && typeof val === 'object') {
+          profile = buildProfileFromFirebase(uid, cId, val as Record<string, unknown>, driverIdHint);
+        }
       }
     });
     return profile;
@@ -107,10 +145,11 @@ async function resolveCompanyId(uid: string, displayName: string | null): Promis
   }
 
   try {
+    const database = getDatabaseInstance();
     const driversRoot = await get(ref(database, 'drivers'));
     if (driversRoot.exists()) {
       let found = '';
-      driversRoot.forEach((companyNode) => {
+      forEachChild(driversRoot, (companyNode) => {
         if (found) return;
         const cId = companyNode.key;
         if (!cId || !companyNode.child(uid).exists()) return;
@@ -142,12 +181,13 @@ async function resolveDriverIdToEmail(driverId: string): Promise<string> {
   }
 
   try {
+    const database = getDatabaseInstance();
     const driversSnap = await get(ref(database, 'drivers'));
     if (driversSnap.exists()) {
       let foundEmail = '';
-      driversSnap.forEach((levelOne) => {
+      forEachChild(driversSnap, (levelOne) => {
         if (foundEmail) return;
-        levelOne.forEach((levelTwo) => {
+        forEachChild(levelOne, (levelTwo) => {
           if (foundEmail) return;
           const d = levelTwo.val() as Record<string, unknown> | null;
           if (!d || typeof d !== 'object') return;
@@ -156,6 +196,13 @@ async function resolveDriverIdToEmail(driverId: string): Promise<string> {
             if (email.includes('@')) foundEmail = email;
           }
         });
+        if (!foundEmail) {
+          const d = levelOne.val() as Record<string, unknown> | null;
+          if (d && typeof d === 'object' && driverIdsMatch(extractDriverIdFromRecord(d), idNorm)) {
+            const email = String(d.email ?? '').trim();
+            if (email.includes('@')) foundEmail = email;
+          }
+        }
       });
       if (foundEmail) {
         console.log('[Auth] Driver ID → email from Firebase:', foundEmail);
@@ -177,20 +224,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshDriver = async () => {
-    const saved = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
-    if (saved?.uid && saved.companyId) {
-      const profile = await loadDriverProfile(saved.uid, saved.companyId, saved.id);
-      if (profile) {
-        setDriver(profile);
-        await storeData(STORAGE_KEYS.driverSession, profile);
+    try {
+      const saved = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
+      if (saved?.uid && saved.companyId) {
+        const profile = await loadDriverProfile(saved.uid, saved.companyId, saved.id);
+        if (profile) {
+          setDriver(profile);
+          await storeData(STORAGE_KEYS.driverSession, profile);
+        }
       }
+    } catch (err) {
+      console.error('[Auth] refreshDriver failed:', err);
     }
   };
 
   useEffect(() => {
+    if (!isFirebaseReady) {
+      console.error('[Auth] Firebase not ready — auth listener skipped');
+      setLoading(false);
+      return;
+    }
+
     let unsub = () => {};
     try {
-      unsub = onAuthStateChanged(auth, async (user) => {
+      const authInstance = getAuthInstance();
+      unsub = onAuthStateChanged(authInstance, async (user) => {
         try {
           console.log('[Auth] onAuthStateChanged:', user?.uid ?? 'signed out');
           setFirebaseUser(user);
@@ -229,70 +287,97 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (loginId: string, password: string) => {
     const trimmed = loginId.trim();
-    console.log('[Auth] signIn called', {
-      loginId: trimmed.includes('@') ? trimmed : trimmed,
-      hasPassword: !!password,
-    });
+    const maskedLogin = trimmed.includes('@')
+      ? trimmed.replace(/(.{2}).+(@.+)/, '$1***$2')
+      : trimmed;
 
-    if (!trimmed || !password) {
-      throw new Error('Enter your email or driver ID and password.');
-    }
-
-    const emailToUse = trimmed.includes('@')
-      ? trimmed
-      : await resolveDriverIdToEmail(trimmed);
-
-    console.log('[Auth] signInWithEmailAndPassword →', emailToUse);
-
-    let cred;
     try {
-      cred = await signInWithEmailAndPassword(auth, emailToUse, password);
-    } catch (err) {
-      const authErr = err as AuthError;
-      console.error('[Auth] Firebase Auth error:', authErr.code, authErr.message);
-      throw err;
-    }
+      console.log('[Auth] signIn start', { loginId: maskedLogin, hasPassword: !!password });
 
-    console.log('[Auth] Firebase Auth success, uid:', cred.user.uid);
-
-    const companyId = await resolveCompanyId(cred.user.uid, cred.user.displayName);
-    const driverIdHint = trimmed.includes('@') ? '' : normalizeDriverId(trimmed);
-    const profile = await loadDriverProfile(cred.user.uid, companyId, driverIdHint);
-
-    if (!profile) {
-      console.error('[Auth] No driver profile at drivers/', companyId, '/', cred.user.uid);
-      await firebaseSignOut(auth);
-      throw new Error(
-        'Driver profile not found. Your account may not be set up yet — contact your fleet administrator.',
-      );
-    }
-
-    if (!profile.email && cred.user.email) {
-      profile.email = cred.user.email;
-    }
-
-    if (!profile.passforlink) {
-      try {
-        const linksSnap = await get(ref(database, 'links'));
-        if (linksSnap.exists()) {
-          const links = linksSnap.val() as Record<string, string>;
-          profile.passforlink = String(links.passforlink ?? links.PassForLink ?? '');
-        }
-      } catch {
-        // non-fatal
+      if (!trimmed || !password) {
+        throw new Error('Enter your email or driver ID and password.');
       }
-    }
 
-    console.log('[Auth] Driver profile loaded:', profile.id, profile.companyId);
-    setDriver(profile);
-    await storeData(STORAGE_KEYS.driverSession, profile);
+      if (!isFirebaseReady) {
+        throw new Error('Firebase is not ready. Restart the app and try again.');
+      }
+
+      const authInstance = getAuthInstance();
+      console.log('[Auth] Firebase Auth ready', { appName: authInstance.app?.name });
+
+      const emailToUse = trimmed.includes('@')
+        ? trimmed.toLowerCase()
+        : await resolveDriverIdToEmail(trimmed);
+
+      console.log('[Auth] signInWithEmailAndPassword', {
+        email: emailToUse.replace(/(.{2}).+(@.+)/, '$1***$2'),
+      });
+
+      const cred = await signInWithEmailAndPassword(authInstance, emailToUse, password);
+      console.log('[Auth] Firebase Auth success', { uid: cred.user.uid });
+
+      const companyId = await resolveCompanyId(cred.user.uid, cred.user.displayName);
+      console.log('[Auth] companyId resolved:', companyId);
+
+      const driverIdHint = trimmed.includes('@') ? '' : normalizeDriverId(trimmed);
+      const profile = await loadDriverProfile(cred.user.uid, companyId, driverIdHint);
+
+      if (!profile) {
+        console.error('[Auth] No driver profile', { companyId, uid: cred.user.uid });
+        try {
+          await firebaseSignOut(authInstance);
+        } catch (signOutErr) {
+          console.warn('[Auth] signOut after missing profile failed:', signOutErr);
+        }
+        throw new Error(
+          'Driver profile not found. Your account may not be set up yet — contact your fleet administrator.',
+        );
+      }
+
+      if (!profile.email && cred.user.email) {
+        profile.email = cred.user.email;
+      }
+
+      if (!profile.passforlink) {
+        try {
+          const database = getDatabaseInstance();
+          const linksSnap = await get(ref(database, 'links'));
+          if (linksSnap.exists()) {
+            const links = linksSnap.val() as Record<string, string>;
+            profile.passforlink = String(links.passforlink ?? links.PassForLink ?? '');
+          }
+        } catch (linksErr) {
+          console.warn('[Auth] links lookup failed (non-fatal):', linksErr);
+        }
+      }
+
+      console.log('[Auth] signIn complete', { driverId: profile.id, companyId: profile.companyId });
+      setDriver(profile);
+      await storeData(STORAGE_KEYS.driverSession, profile);
+    } catch (err) {
+      const message = formatSignInError(err);
+      console.error('[Auth] signIn failed:', {
+        message,
+        code: (err as AuthError)?.code,
+        stack: err instanceof Error ? err.stack : undefined,
+        raw: err,
+      });
+      Alert.alert('Sign In Failed', message);
+    }
   };
 
   const signOut = async () => {
-    console.log('[Auth] signOut');
-    await firebaseSignOut(auth);
-    await removeData(STORAGE_KEYS.driverSession);
-    setDriver(null);
+    try {
+      console.log('[Auth] signOut');
+      if (isFirebaseReady) {
+        await firebaseSignOut(getAuthInstance());
+      }
+      await removeData(STORAGE_KEYS.driverSession);
+      setDriver(null);
+    } catch (err) {
+      console.error('[Auth] signOut failed:', err);
+      Alert.alert('Sign Out Failed', err instanceof Error ? err.message : 'Could not sign out');
+    }
   };
 
   return (

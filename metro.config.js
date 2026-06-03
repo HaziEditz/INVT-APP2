@@ -13,6 +13,17 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       type: 'sourceFile',
     };
   }
+  // Ensure Firebase Auth resolves to the React Native build (persistence / getReactNativePersistence).
+  if (
+    (platform === 'android' || platform === 'ios') &&
+    (moduleName === '@firebase/auth' || moduleName === 'firebase/auth')
+  ) {
+    const rnAuthPath = path.resolve(
+      __dirname,
+      'node_modules/@firebase/auth/dist/rn/index.js',
+    );
+    return { filePath: rnAuthPath, type: 'sourceFile' };
+  }
   if (defaultResolveRequest) {
     return defaultResolveRequest(context, moduleName, platform);
   }

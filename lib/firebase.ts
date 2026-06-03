@@ -1,7 +1,12 @@
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, initializeAuth, Auth } from 'firebase/auth';
-import { getDatabase, Database } from 'firebase/database';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
+import {
+  Auth,
+  getAuth,
+  getReactNativePersistence,
+  initializeAuth,
+} from 'firebase/auth';
+import { Database, getDatabase } from 'firebase/database';
 import { Platform } from 'react-native';
 
 const firebaseConfig = {
@@ -14,39 +19,74 @@ const firebaseConfig = {
   appId: '1:909621127467:web:504f502a533ca0a216fd6e',
 };
 
-let app: FirebaseApp;
-let auth: Auth;
-let database: Database;
+let app: FirebaseApp | undefined;
+let auth: Auth | undefined;
+let database: Database | undefined;
+let initError: string | null = null;
 
-try {
-  const isNew = getApps().length === 0;
-  app = isNew ? initializeApp(firebaseConfig) : getApps()[0];
+function initAuth(instance: FirebaseApp): Auth {
+  if (Platform.OS === 'web') {
+    return getAuth(instance);
+  }
 
-  if (!isNew || Platform.OS === 'web') {
-    auth = getAuth(app);
-  } else {
+  const isNew = getApps().length === 1;
+  if (!isNew) {
     try {
-      // @ts-expect-error RN persistence export
-      const { getReactNativePersistence } = require('firebase/auth');
-      auth = initializeAuth(app, {
-        persistence: getReactNativePersistence(AsyncStorage),
-      });
-    } catch (persistErr) {
-      console.warn('[Firebase] RN persistence failed, using default auth:', persistErr);
-      auth = getAuth(app);
+      return getAuth(instance);
+    } catch (err) {
+      console.warn('[Firebase] getAuth on existing app:', err);
     }
   }
 
+  try {
+    if (typeof getReactNativePersistence === 'function') {
+      return initializeAuth(instance, {
+        persistence: getReactNativePersistence(AsyncStorage),
+      });
+    }
+    console.warn('[Firebase] getReactNativePersistence missing — using getAuth');
+    return getAuth(instance);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('already-initialized') || message.includes('already initialized')) {
+      console.log('[Firebase] Auth already initialized, reusing instance');
+      return getAuth(instance);
+    }
+    console.warn('[Firebase] initializeAuth failed, using getAuth:', err);
+    return getAuth(instance);
+  }
+}
+
+try {
+  const isNewApp = getApps().length === 0;
+  app = isNewApp ? initializeApp(firebaseConfig) : getApps()[0];
+  auth = initAuth(app);
   database = getDatabase(app);
-  console.log('[Firebase] initialized');
+  console.log('[Firebase] initialized', {
+    platform: Platform.OS,
+    auth: !!auth?.app,
+    database: !!database?.app,
+  });
 } catch (err) {
+  initError = err instanceof Error ? err.message : String(err);
   console.error('[Firebase] fatal init error:', err);
-  const isNew = getApps().length === 0;
-  app = isNew ? initializeApp(firebaseConfig) : getApps()[0];
-  auth = getAuth(app);
-  database = getDatabase(app);
 }
 
 export const isFirebaseReady = !!app && !!auth && !!database;
+
+export function getAuthInstance(): Auth {
+  if (!auth) {
+    throw new Error(initError ?? 'Firebase Auth is not initialized. Restart the app and try again.');
+  }
+  return auth;
+}
+
+export function getDatabaseInstance(): Database {
+  if (!database) {
+    throw new Error(initError ?? 'Firebase Database is not initialized.');
+  }
+  return database;
+}
+
 export { auth, database };
 export default app;

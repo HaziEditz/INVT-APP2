@@ -66,10 +66,9 @@ export default function LoginScreen() {
     try {
       console.log('[Login] Calling signIn…');
       await signIn(loginId.trim(), password);
-      console.log('[Login] signIn succeeded, navigating to home');
-      router.replace('/(tabs)');
+      console.log('[Login] signIn finished');
     } catch (err) {
-      console.error('[Login] signIn error:', err);
+      console.error('[Login] signIn unexpected error:', err);
       Alert.alert('Sign In Failed', authErrorMessage(err));
     } finally {
       setLoading(false);
