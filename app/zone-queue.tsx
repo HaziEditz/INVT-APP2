@@ -1,9 +1,10 @@
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { ScreenScroll } from '@/components/ScreenScroll';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 const NEARBY = [
   { id: 'D002', name: 'James', position: 1 },
@@ -14,14 +15,15 @@ const NEARBY = [
 export default function ZoneQueueScreen() {
   const { driver } = useAuth();
   const { zone } = useDriver();
+  const zoneName = zone.name?.trim() || 'Not assigned yet';
 
   return (
-    <ScrollView style={sharedStyles.screen} contentContainerStyle={sharedStyles.content}>
+    <ScreenScroll>
       <ScreenHeader title="Zone Queue" subtitle="Your position in the dispatch queue" />
 
       <View style={[sharedStyles.card, styles.hero]}>
         <Text style={styles.zoneLabel}>Current zone</Text>
-        <Text style={styles.zoneName}>{zone.name}</Text>
+        <Text style={styles.zoneName}>{zoneName}</Text>
         <Text style={styles.position}>
           You are #{zone.position || '—'} of {zone.totalInQueue || NEARBY.length + 1}
         </Text>
@@ -43,14 +45,14 @@ export default function ZoneQueueScreen() {
           <Text style={styles.queueNum}>#{d.position}</Text>
         </View>
       ))}
-    </ScrollView>
+    </ScreenScroll>
   );
 }
 
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', paddingVertical: 28 },
   zoneLabel: { color: Colors.textMuted, textTransform: 'uppercase', fontSize: 12, letterSpacing: 1 },
-  zoneName: { color: Colors.accent, fontSize: 32, fontWeight: '800', marginVertical: 8 },
+  zoneName: { color: Colors.accent, fontSize: 32, fontWeight: '800', marginVertical: 8, textAlign: 'center' },
   position: { color: Colors.text, fontSize: 18, fontWeight: '600' },
   listTitle: { color: Colors.text, fontSize: 16, fontWeight: '700', marginBottom: 8, marginTop: 8 },
   driverRow: { ...sharedStyles.row },

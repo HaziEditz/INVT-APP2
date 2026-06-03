@@ -61,6 +61,36 @@ function extractAllocatedIds(profile: Record<string, unknown>): string[] {
   return [...new Set(allocated)].filter(Boolean);
 }
 
+function extractVehicleNumber(id: string, meta: Record<string, unknown>): string {
+  const fromMeta = String(
+    meta.vehicleNumber ?? meta.VehicleNumber ?? meta.number ?? meta.callSign ?? meta.callsign ?? '',
+  ).trim();
+  if (fromMeta) return fromMeta.replace(/\D/g, '') || fromMeta;
+
+  const digits = id.match(/(\d+)/);
+  if (digits) return digits[1];
+  return id;
+}
+
+function extractVehicleType(meta: Record<string, unknown>): string {
+  const raw = String(
+    meta.vehicleType ??
+      meta.vehicletype ??
+      meta.VehicleType ??
+      meta.type ??
+      meta.serviceType ??
+      meta.service ??
+      meta.category ??
+      'Taxi',
+  ).trim();
+  if (!raw) return 'Taxi';
+  const lower = raw.toLowerCase();
+  if (lower.includes('cab')) return 'Cab';
+  if (lower.includes('taxi')) return 'Taxi';
+  if (lower.includes('van')) return 'Van';
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
 async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Vehicle[]> {
   if (!ids.length) return [];
 
@@ -76,10 +106,16 @@ async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Veh
   return ids.map((id) => {
     const upper = id.toUpperCase();
     const meta = registry[upper] ?? registry[id] ?? {};
-    const label =
-      String(meta.name ?? meta.label ?? meta.make ?? meta.model ?? '').trim() || id;
-    const plate = String(meta.plate ?? meta.registration ?? meta.plateNumber ?? meta.number ?? '').trim();
-    return { id: upper, label, plate: plate || '—' };
+    const number = extractVehicleNumber(upper, meta);
+    const vehicleType = extractVehicleType(meta);
+    const plate = String(meta.plate ?? meta.registration ?? meta.plateNumber ?? '').trim();
+    return {
+      id: upper,
+      number,
+      vehicleType,
+      label: `${number} · ${vehicleType}`,
+      plate: plate || '—',
+    };
   });
 }
 

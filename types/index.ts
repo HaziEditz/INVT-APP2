@@ -13,10 +13,15 @@ export interface DriverProfile {
   companyId: string;
   vehicleId: string;
   driverType: JobType | 'Multi';
+  passforlink?: string;
 }
 
 export interface Vehicle {
   id: string;
+  /** Display number e.g. 201 */
+  number: string;
+  /** Taxi, Cab, Van, etc. */
+  vehicleType: string;
   label: string;
   plate: string;
 }

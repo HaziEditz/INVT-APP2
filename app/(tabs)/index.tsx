@@ -1,25 +1,29 @@
 import { Button } from '@/components/Button';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { ScreenScroll } from '@/components/ScreenScroll';
+import { VehiclePickerModal } from '@/components/VehiclePickerModal';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
 import { PresenceDisplayStatus } from '@/types';
 import { Link } from 'expo-router';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 
 function statusColor(status: PresenceDisplayStatus) {
   switch (status) {
     case 'Online':
       return Colors.success;
     case 'Away':
-      return Colors.warning ?? '#e6a700';
+      return Colors.warning;
     default:
       return Colors.textMuted;
   }
 }
 
-function statusLabel(status: PresenceDisplayStatus) {
+function statusLabel(status: PresenceDisplayStatus, ready: boolean) {
+  if (ready && status === 'Online') return '● Online — ready for jobs';
   switch (status) {
     case 'Online':
       return '● Online';
@@ -34,6 +38,7 @@ export default function HomeScreen() {
   const { driver } = useAuth();
   const {
     presenceStatus,
+    readyForJobs,
     shiftActive,
     selectedVehicleId,
     vehicles,
@@ -44,139 +49,184 @@ export default function HomeScreen() {
     setSelectedVehicleId,
     startShift,
     endShift,
-    goOnline,
-    goOffline,
     pushDemoOffer,
   } = useDriver();
 
-  const canGoOnline = shiftActive && selectedVehicleId && presenceStatus !== 'Online';
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [pickerVehicle, setPickerVehicle] = useState(selectedVehicleId);
 
-  const togglePresence = async () => {
-    try {
-      if (presenceStatus === 'Online') await goOffline();
-      else await goOnline();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update status');
-    }
-  };
-
-  const handleStartShift = async () => {
-    if (!selectedVehicleId) {
-      Alert.alert('Vehicle required', 'Select your vehicle, then start your shift.');
+  const openStartFlow = () => {
+    if (vehiclesLoading) return;
+    if (vehicles.length === 0) {
+      Alert.alert('No vehicles', 'Ask your fleet admin to allocate vehicles to your profile.');
       return;
     }
+    if (vehicles.length === 1) {
+      const id = vehicles[0].id;
+      setPickerVehicle(id);
+      void runStartShift(id);
+      return;
+    }
+    setPickerVehicle(selectedVehicleId || vehicles[0]?.id || '');
+    setPickerOpen(true);
+  };
+
+  const runStartShift = async (vehicleId: string) => {
+    setStarting(true);
     try {
-      await startShift();
+      await startShift(vehicleId);
+      setPickerOpen(false);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not start shift');
+    } finally {
+      setStarting(false);
     }
   };
 
+  const zoneName = zone.name?.trim() || (shiftActive ? 'Awaiting zone assignment' : '—');
+
   return (
-    <ScrollView style={sharedStyles.screen} contentContainerStyle={sharedStyles.content}>
-      <ScreenHeader
-        title={`Hello, ${driver?.name ?? 'Driver'}`}
-        subtitle={isOffline ? 'Offline mode — changes will sync when connected' : `Driver ID: ${driver?.id ?? '—'}`}
-      />
+    <>
+      <ScreenScroll padBottom>
+        <ScreenHeader
+          title={`Hello, ${driver?.name ?? 'Driver'}`}
+          subtitle={
+            isOffline
+              ? 'Offline mode — changes sync when connected'
+              : `Driver ID: ${driver?.id ?? '—'}`
+          }
+        />
 
-      <View style={[sharedStyles.card, presenceStatus === 'Online' && styles.onlineCard]}>
-        <Text style={sharedStyles.cardTitle}>Shift</Text>
-        <Text style={sharedStyles.cardText}>
-          {shiftActive ? 'Shift in progress' : 'Start your shift to register with dispatch'}
-        </Text>
-        <View style={{ marginTop: 12, gap: 8 }}>
-          {!shiftActive ? (
-            <Button
-              title="Start Shift"
-              onPress={handleStartShift}
-              disabled={vehiclesLoading || !selectedVehicleId}
-            />
-          ) : (
-            <Button title="End Shift" variant="danger" onPress={endShift} />
-          )}
-        </View>
-      </View>
-
-      <View style={sharedStyles.card}>
-        <Text style={sharedStyles.cardTitle}>Vehicle</Text>
-        {vehiclesLoading ? (
-          <ActivityIndicator color={Colors.accent} style={{ marginTop: 12 }} />
-        ) : vehicles.length === 0 ? (
-          <Text style={sharedStyles.cardText}>
-            No vehicles allocated. Ask your fleet admin to assign vehicles in the driver portal.
-          </Text>
-        ) : (
-          vehicles.map((v) => (
-            <Pressable
-              key={v.id}
-              onPress={() => setSelectedVehicleId(v.id)}
-              style={[styles.vehicleRow, selectedVehicleId === v.id && styles.vehicleSelected]}
-            >
-              <Text style={styles.vehicleLabel}>{v.label}</Text>
-              <Text style={styles.vehiclePlate}>{v.plate}</Text>
-              <Text style={styles.vehicleId}>{v.id}</Text>
-            </Pressable>
-          ))
-        )}
-      </View>
-
-      <View style={sharedStyles.card}>
-        <Text style={sharedStyles.cardTitle}>Status</Text>
-        <Text style={[styles.status, { color: statusColor(presenceStatus) }]}>
-          {statusLabel(presenceStatus)}
-        </Text>
-        <Text style={sharedStyles.cardText}>
-          {shiftActive
-            ? 'Synced from Firebase dispatch presence'
-            : 'Start shift to appear on the dispatch board'}
-        </Text>
-        <View style={{ marginTop: 12 }}>
-          <Button
-            title={presenceStatus === 'Online' ? 'Go Away' : 'Go Online'}
-            onPress={togglePresence}
-            disabled={!canGoOnline && presenceStatus !== 'Online'}
-          />
-        </View>
-      </View>
-
-      <View style={sharedStyles.card}>
-        <Text style={sharedStyles.cardTitle}>Current Zone</Text>
-        <Text style={styles.zoneName}>{zone.name}</Text>
-        <Text style={sharedStyles.cardText}>Queue position: {zone.position || '—'} of {zone.totalInQueue || '—'}</Text>
-        <Link href="/zone-queue" asChild>
-          <Button title="View Zone Queue" variant="secondary" style={{ marginTop: 12 }} />
-        </Link>
-      </View>
-
-      <View style={styles.quickLinks}>
-        {activeJob ? (
-          <>
-            <Link href="/active-job" asChild><Button title="Active Job" /></Link>
-            <Link href="/meter" asChild><Button title="Meter" variant="secondary" /></Link>
-          </>
+        {readyForJobs && shiftActive ? (
+          <View style={styles.readyBanner}>
+            <Text style={styles.readyTitle}>You are online</Text>
+            <Text style={styles.readyText}>Ready to receive job offers from dispatch.</Text>
+          </View>
         ) : null}
-        <Link href="/pre-booking" asChild><Button title="Pre-booking" variant="secondary" /></Link>
-        <Link href="/chat" asChild><Button title="Chat Dispatcher" variant="secondary" /></Link>
-        <Button title="Simulate Job Offer" variant="secondary" onPress={pushDemoOffer} />
-      </View>
-    </ScrollView>
+
+        <View style={[sharedStyles.card, (readyForJobs || presenceStatus === 'Online') && styles.onlineCard]}>
+          <Text style={sharedStyles.cardTitle}>Shift</Text>
+          <Text style={[styles.status, { color: statusColor(presenceStatus) }]}>
+            {statusLabel(presenceStatus, readyForJobs)}
+          </Text>
+          <Text style={sharedStyles.cardText}>
+            {shiftActive
+              ? 'Tap End Shift when you finish for the day.'
+              : 'Start shift to select your vehicle and go online automatically.'}
+          </Text>
+          <View style={styles.cardActions}>
+            {!shiftActive ? (
+              <Button title="Start Shift" onPress={openStartFlow} disabled={vehiclesLoading} />
+            ) : (
+              <Button title="End Shift" variant="danger" onPress={endShift} />
+            )}
+          </View>
+        </View>
+
+        {!shiftActive && vehicles.length > 0 ? (
+          <View style={sharedStyles.card}>
+            <Text style={sharedStyles.cardTitle}>Your vehicles</Text>
+            {vehiclesLoading ? (
+              <ActivityIndicator color={Colors.accent} style={{ marginTop: 12 }} />
+            ) : (
+              vehicles.map((v) => (
+                <View key={v.id} style={styles.vehicleRow}>
+                  <View>
+                    <Text style={styles.vehicleNumber}>{v.number}</Text>
+                    <Text style={styles.vehicleType}>{v.vehicleType}</Text>
+                  </View>
+                  <Text style={styles.vehicleId}>{v.id}</Text>
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
+
+        {shiftActive && selectedVehicleId ? (
+          <View style={sharedStyles.card}>
+            <Text style={sharedStyles.cardTitle}>Active vehicle</Text>
+            {(() => {
+              const v = vehicles.find((x) => x.id === selectedVehicleId);
+              return (
+                <>
+                  <Text style={styles.vehicleNumber}>{v?.number ?? selectedVehicleId}</Text>
+                  <Text style={styles.vehicleType}>{v?.vehicleType ?? 'Taxi'}</Text>
+                </>
+              );
+            })()}
+          </View>
+        ) : null}
+
+        <View style={sharedStyles.card}>
+          <Text style={sharedStyles.cardTitle}>Current zone</Text>
+          <Text style={styles.zoneName}>{zoneName}</Text>
+          {zone.position > 0 ? (
+            <Text style={sharedStyles.cardText}>
+              Queue position: {zone.position}
+              {zone.totalInQueue > 0 ? ` of ${zone.totalInQueue}` : ''}
+            </Text>
+          ) : (
+            <Text style={sharedStyles.cardText}>
+              {shiftActive ? 'Zone will appear when dispatch assigns you.' : 'Start shift to join the queue.'}
+            </Text>
+          )}
+          <Link href="/zone-queue" asChild>
+            <Button title="View Zone Queue" variant="secondary" style={{ marginTop: 12 }} />
+          </Link>
+        </View>
+
+        <View style={styles.quickLinks}>
+          {activeJob ? (
+            <>
+              <Link href="/active-job" asChild><Button title="Active Job" /></Link>
+              <Link href="/meter" asChild><Button title="Meter" variant="secondary" /></Link>
+            </>
+          ) : null}
+          <Link href="/pre-booking" asChild><Button title="Pre-booking" variant="secondary" /></Link>
+          <Link href="/chat" asChild><Button title="Chat Dispatcher" variant="secondary" /></Link>
+          <Button title="Simulate Job Offer" variant="secondary" onPress={pushDemoOffer} />
+        </View>
+      </ScreenScroll>
+
+      <VehiclePickerModal
+        visible={pickerOpen}
+        vehicles={vehicles}
+        selectedId={pickerVehicle}
+        loading={starting}
+        onSelect={setPickerVehicle}
+        onConfirm={() => runStartShift(pickerVehicle)}
+        onClose={() => !starting && setPickerOpen(false)}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   onlineCard: { borderColor: Colors.success },
-  vehicleRow: {
-    padding: 12,
-    borderRadius: 10,
+  readyBanner: {
+    backgroundColor: Colors.success + '22',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: Colors.border,
-    marginTop: 8,
+    borderColor: Colors.success,
   },
-  vehicleSelected: { borderColor: Colors.accent, backgroundColor: Colors.accent + '15' },
-  vehicleLabel: { color: Colors.text, fontWeight: '600' },
-  vehiclePlate: { color: Colors.textMuted, marginTop: 2 },
-  vehicleId: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
-  status: { fontSize: 18, fontWeight: '700' },
+  readyTitle: { color: Colors.success, fontSize: 18, fontWeight: '800' },
+  readyText: { color: Colors.text, fontSize: 14, marginTop: 4 },
+  status: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  cardActions: { marginTop: 12, gap: 8 },
+  vehicleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  vehicleNumber: { color: Colors.text, fontSize: 24, fontWeight: '800' },
+  vehicleType: { color: Colors.accent, fontSize: 15, fontWeight: '600', marginTop: 2 },
+  vehicleId: { color: Colors.textMuted, fontSize: 12 },
   zoneName: { color: Colors.accent, fontSize: 20, fontWeight: '700', marginBottom: 4 },
-  quickLinks: { gap: 10, marginTop: 8 },
+  quickLinks: { gap: 10, marginTop: 4, marginBottom: 8 },
 });

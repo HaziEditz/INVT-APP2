@@ -7,7 +7,7 @@ export const sharedStyles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     padding: 20,
   },
   title: {

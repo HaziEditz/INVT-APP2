@@ -47,6 +47,7 @@ function buildProfileFromFirebase(
     companyId: String(fb.companyId ?? companyId),
     vehicleId: String(fb.vehicleId ?? fb.vehicle ?? ''),
     driverType: (fb.driverType as DriverProfile['driverType']) ?? 'Taxi',
+    passforlink: String(fb.passforlink ?? fb.PassForLink ?? ''),
   };
 }
 
@@ -255,6 +256,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!profile.email && cred.user.email) {
       profile.email = cred.user.email;
+    }
+
+    if (!profile.passforlink) {
+      try {
+        const linksSnap = await get(ref(database, 'links'));
+        if (linksSnap.exists()) {
+          const links = linksSnap.val() as Record<string, string>;
+          profile.passforlink = String(links.passforlink ?? links.PassForLink ?? '');
+        }
+      } catch {
+        // non-fatal
+      }
     }
 
     console.log('[Auth] Driver profile loaded:', profile.id, profile.companyId);

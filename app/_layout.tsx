@@ -7,6 +7,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { registerForPushNotifications } from '@/services/notificationService';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function RootLayout() {
   useEffect(() => {
@@ -14,6 +15,7 @@ export default function RootLayout() {
   }, []);
 
   return (
+    <SafeAreaProvider>
     <AuthProvider>
       <DriverProvider>
         <AuthNavigator />
@@ -38,5 +40,6 @@ export default function RootLayout() {
         <JobOfferModal />
       </DriverProvider>
     </AuthProvider>
+    </SafeAreaProvider>
   );
 }

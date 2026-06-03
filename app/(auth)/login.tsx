@@ -16,6 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 function authErrorMessage(err: unknown): string {
   const code = (err as AuthError)?.code ?? '';
@@ -76,8 +77,13 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={sharedStyles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <SafeAreaView style={sharedStyles.screen} edges={['top', 'bottom', 'left', 'right']}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.brand}>
           Booka<Text style={styles.brandAccent}>Waka</Text>
         </Text>
@@ -125,6 +131,7 @@ export default function LoginScreen() {
         </Link>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -132,8 +139,10 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
     gap: 16,
+    minHeight: '100%',
   },
   brand: {
     color: Colors.text,

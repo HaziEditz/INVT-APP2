@@ -4,7 +4,7 @@ import { get, onValue, ref, update } from 'firebase/database';
 import { database } from '@/lib/firebase';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, declineJobOffer } from '@/lib/dispatchApi';
+import { acceptJobOffer, declineJobOffer, notifyServiceOn } from '@/lib/dispatchApi';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import { notifyJobOffer } from '@/services/notificationService';
 import {
@@ -17,6 +17,7 @@ import { useAuth } from '@/context/AuthContext';
 
 interface DriverContextValue {
   presenceStatus: PresenceDisplayStatus;
+  readyForJobs: boolean;
   shiftActive: boolean;
   selectedVehicleId: string;
   vehicles: Vehicle[];
@@ -28,10 +29,8 @@ interface DriverContextValue {
   isOffline: boolean;
   setSelectedVehicleId: (id: string) => void;
   refreshVehicles: () => Promise<void>;
-  startShift: () => Promise<void>;
+  startShift: (vehicleId?: string) => Promise<void>;
   endShift: () => Promise<void>;
-  goOnline: () => Promise<void>;
-  goOffline: () => Promise<void>;
   acceptOffer: () => Promise<void>;
   declineOffer: () => Promise<void>;
   advanceStage: () => Promise<void>;
@@ -42,30 +41,55 @@ interface DriverContextValue {
 
 const DriverContext = createContext<DriverContextValue | null>(null);
 
-const DEFAULT_ZONE: ZoneInfo = {
-  name: 'City Centre',
+const EMPTY_ZONE: ZoneInfo = {
+  name: '',
   position: 0,
   totalInQueue: 0,
   nearbyDrivers: 0,
 };
 
+function parseZoneNode(val: unknown): ZoneInfo {
+  if (!val || typeof val !== 'object') return EMPTY_ZONE;
+  const z = val as Record<string, unknown>;
+  return {
+    name: String(z.name ?? z.zonename ?? z.zoneName ?? z.ZoneName ?? '').trim(),
+    position: Number(z.position ?? z.queue ?? z.zonequeue ?? z.zoneQueue ?? 0),
+    totalInQueue: Number(z.totalInQueue ?? z.total ?? z.queueSize ?? 0),
+    nearbyDrivers: Number(z.nearbyDrivers ?? z.nearby ?? 0),
+  };
+}
+
+function fmtNzDate(d: Date) {
+  return d.toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function fmtNzTime(d: Date) {
+  return d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 export function DriverProvider({ children }: { children: ReactNode }) {
   const { driver } = useAuth();
   const [presenceStatus, setPresenceStatus] = useState<PresenceDisplayStatus>('Offline');
+  const [readyForJobs, setReadyForJobs] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
   const [selectedVehicleId, setSelectedVehicleIdState] = useState('');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [vehiclesLoading, setVehiclesLoading] = useState(false);
-  const [zone, setZone] = useState<ZoneInfo>(DEFAULT_ZONE);
+  const [zone, setZone] = useState<ZoneInfo>(EMPTY_ZONE);
   const [jobOffer, setJobOffer] = useState<JobOffer | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const [completedJobs, setCompletedJobs] = useState<CompletedJob[]>([]);
   const [isOffline, setIsOffline] = useState(false);
   const shiftActiveRef = useRef(false);
+  const readyForJobsRef = useRef(false);
 
   useEffect(() => {
     shiftActiveRef.current = shiftActive;
   }, [shiftActive]);
+
+  useEffect(() => {
+    readyForJobsRef.current = readyForJobs;
+  }, [readyForJobs]);
 
   useEffect(() => {
     getData<string>(STORAGE_KEYS.selectedVehicle).then((v) => v && setSelectedVehicleIdState(v));
@@ -113,31 +137,47 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [driver?.uid, driver?.companyId, driver?.id, driver?.vehicleId]);
 
   useEffect(() => {
-    if (!driver?.companyId || !driver.id) return;
-    const zoneRef = ref(database, `zones/${driver.companyId}/${driver.id}`);
+    if (!driver?.companyId || !selectedVehicleId) {
+      setZone(EMPTY_ZONE);
+      return;
+    }
+
+    const zoneRef = ref(database, `online/${driver.companyId}/${selectedVehicleId}/zone`);
     return onValue(zoneRef, (snap) => {
-      const val = snap.val();
-      if (val) {
-        setZone({
-          name: String(val.name ?? 'Unknown Zone'),
-          position: Number(val.position ?? 0),
-          totalInQueue: Number(val.totalInQueue ?? 0),
-          nearbyDrivers: Number(val.nearbyDrivers ?? 0),
-        });
+      if (snap.exists()) {
+        setZone(parseZoneNode(snap.val()));
+        return;
       }
+      get(ref(database, `online/${driver.companyId}/${selectedVehicleId}/current`)).then((cur) => {
+        if (!cur.exists()) {
+          setZone(EMPTY_ZONE);
+          return;
+        }
+        const d = cur.val() as Record<string, unknown>;
+        setZone({
+          name: String(d.zonename ?? d.zoneName ?? '').trim(),
+          position: Number(d.zonequeue ?? d.zoneQueue ?? 0),
+          totalInQueue: 0,
+          nearbyDrivers: 0,
+        });
+      });
     });
-  }, [driver?.companyId, driver?.id]);
+  }, [driver?.companyId, selectedVehicleId]);
 
   useEffect(() => {
     if (!driver?.companyId || !selectedVehicleId) {
-      setPresenceStatus('Offline');
+      if (!readyForJobsRef.current) setPresenceStatus('Offline');
       return;
     }
 
     const presenceRef = ref(database, `online/${driver.companyId}/${selectedVehicleId}/current`);
     return onValue(presenceRef, (snap) => {
       if (!snap.exists()) {
-        setPresenceStatus(shiftActiveRef.current ? 'Away' : 'Offline');
+        if (readyForJobsRef.current || shiftActiveRef.current) {
+          setPresenceStatus('Online');
+          return;
+        }
+        setPresenceStatus('Offline');
         return;
       }
       const data = snap.val() as Record<string, unknown>;
@@ -146,9 +186,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const nodeDriverId = String(data.driverid ?? '');
       if (nodeDriverId && myId && nodeDriverId !== myId && nodeDriverId !== String(driver.uid)) {
         setPresenceStatus('Offline');
+        setReadyForJobs(false);
         return;
       }
-      setPresenceStatus(mapVehicleStatusToDisplay(rawStatus));
+      const mapped = mapVehicleStatusToDisplay(rawStatus);
+      setPresenceStatus(mapped);
+      if (mapped === 'Online' && shiftActiveRef.current) {
+        setReadyForJobs(true);
+      }
     });
   }, [driver?.companyId, driver?.id, driver?.uid, selectedVehicleId]);
 
@@ -187,8 +232,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const resolveVehicleId = async (): Promise<string> => {
-    let vehicleId = selectedVehicleId || driver?.vehicleId?.trim().toUpperCase() || '';
+  const resolveVehicleId = async (override?: string): Promise<string> => {
+    let vehicleId = (override ?? selectedVehicleId ?? driver?.vehicleId ?? '').trim().toUpperCase();
     if (!vehicleId && driver?.companyId && driver.uid) {
       try {
         const snap = await get(ref(database, `drivers/${driver.companyId}/${driver.uid}`));
@@ -202,15 +247,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return vehicleId;
   };
 
-  const startShift = async () => {
+  const startShift = async (vehicleIdOverride?: string) => {
     if (!driver) return;
 
-    const vehicleId = await resolveVehicleId();
+    const vehicleId = await resolveVehicleId(vehicleIdOverride);
     if (!vehicleId) {
-      Alert.alert(
-        'Vehicle required',
-        'Select a vehicle before starting your shift.',
-      );
+      Alert.alert('Vehicle required', 'Select a vehicle to start your shift.');
       return;
     }
 
@@ -244,11 +286,32 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     try {
       await writeOnlinePresence(driver, vehicleId, 'Available', true);
-      const { startBackgroundTracking } = await import('@/services/locationService');
-      await startBackgroundTracking(driver.id, driver.companyId);
+      setPresenceStatus('Online');
+      setReadyForJobs(true);
     } catch (err) {
-      console.warn('[Shift] presence write failed:', err);
-      Alert.alert('Shift started', 'Could not register online with dispatch. Check your connection.');
+      console.warn('[Shift] Firebase presence write failed:', err);
+      Alert.alert('Connection issue', 'Could not register with dispatch. Check your network and try again.');
+      setShiftActive(false);
+      return;
+    }
+
+    const now = new Date();
+    notifyServiceOn({
+      driverId: driver.id,
+      companyId: driver.companyId,
+      vehicleId,
+      logInDate: fmtNzDate(now),
+      logInTime: fmtNzTime(now),
+      userKey: driver.passforlink,
+    }).catch((err) => console.warn('[Shift] FnServiceON failed (non-blocking):', err));
+
+    const { startBackgroundTracking } = await import('@/services/locationService');
+    const trackingStarted = await startBackgroundTracking(driver.id, driver.companyId, vehicleId);
+    if (!trackingStarted) {
+      Alert.alert(
+        'Location optional',
+        'You are online and ready for jobs. Enable location when prompted so dispatch can see your position on the map.',
+      );
     }
 
     if (driver.companyId) {
@@ -261,6 +324,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const endShift = async () => {
     const vehicleId = await resolveVehicleId();
     setShiftActive(false);
+    setReadyForJobs(false);
 
     if (driver && vehicleId) {
       try {
@@ -275,35 +339,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    setPresenceStatus('Offline');
     const { endShiftClock } = await import('@/services/nztaService');
     await endShiftClock();
-    if (driver) {
-      const { stopBackgroundTracking } = await import('@/services/locationService');
-      await stopBackgroundTracking(driver.id, driver.companyId);
-    }
-  };
-
-  const goOnline = async () => {
-    if (!driver) throw new Error('Not signed in');
-    const vehicleId = await resolveVehicleId();
-    if (!vehicleId) throw new Error('Select a vehicle first');
-    if (!shiftActive) throw new Error('Start your shift first');
-
-    await writeOnlinePresence(driver, vehicleId, 'Available');
-    const { startBackgroundTracking } = await import('@/services/locationService');
-    await startBackgroundTracking(driver.id, driver.companyId);
-  };
-
-  const goOffline = async () => {
-    if (!driver) return;
-    const vehicleId = await resolveVehicleId();
-    if (vehicleId && shiftActive) {
-      await writeOnlinePresence(driver, vehicleId, 'Away');
-    } else if (vehicleId) {
-      await writeOnlinePresence(driver, vehicleId, 'Offline');
-    }
     const { stopBackgroundTracking } = await import('@/services/locationService');
-    await stopBackgroundTracking(driver.id, driver.companyId);
+    await stopBackgroundTracking();
   };
 
   const acceptOffer = async () => {
@@ -369,6 +409,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const vehicleId = await resolveVehicleId();
       if (vehicleId) {
         writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
+        setPresenceStatus('Online');
+        setReadyForJobs(true);
       }
     }
   };
@@ -388,6 +430,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     <DriverContext.Provider
       value={{
         presenceStatus,
+        readyForJobs,
         shiftActive,
         selectedVehicleId,
         vehicles,
@@ -401,8 +444,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         refreshVehicles,
         startShift,
         endShift,
-        goOnline,
-        goOffline,
         acceptOffer,
         declineOffer,
         advanceStage,
