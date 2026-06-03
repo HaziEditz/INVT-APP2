@@ -50,3 +50,8 @@ export const EARNINGS_LABELS: Record<EarningsBucket, string> = {
   tm: 'Total Mobility',
   acc: 'ACC',
 };
+
+export function formatPaymentLabel(raw?: string | PaymentType | null): string {
+  const bucket = normalizePaymentBucket(raw);
+  return EARNINGS_LABELS[bucket];
+}

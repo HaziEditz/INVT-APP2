@@ -165,8 +165,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setCompany(null);
       return;
     }
-    loadCompanyInfo(driver.companyId).then(setCompany);
-  }, [driver?.companyId]);
+    loadCompanyInfo(driver.companyId, driver.uid).then(setCompany);
+  }, [driver?.companyId, driver?.uid]);
 
   const refreshJobHistory = async () => {
     if (!driver?.companyId || !driver.id) {
@@ -175,7 +175,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     setJobHistoryLoading(true);
     try {
-      const rows = await loadDriverJobHistory(driver.companyId, driver.id);
+      const rows = await loadDriverJobHistory(driver.companyId, driver.id, driver.uid);
       setJobHistory(rows);
     } catch (err) {
       console.warn('[Driver] refreshJobHistory failed:', err);
@@ -511,7 +511,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         jobHistory,
         jobHistoryLoading,
         sessionEarnings,
-        historyEarnings: jobHistory.length > 0 ? historyEarnings : sessionEarnings,
+        historyEarnings,
         company,
         activeVehicleBodyType,
         isOffline,

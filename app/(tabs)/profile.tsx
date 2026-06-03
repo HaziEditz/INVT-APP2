@@ -11,6 +11,7 @@ import {
   NZTA_MAX_SHIFT_HOURS,
   NZTA_MAX_WORK_HOURS,
 } from '@/constants/theme';
+import { loadVehicleBodyType } from '@/lib/vehicles';
 import {
   confirmBreakTaken,
   deferBreakReminder,
@@ -23,28 +24,57 @@ import {
 } from '@/services/nztaService';
 import { notifyBreakReminder } from '@/services/notificationService';
 import { NztaHoursState } from '@/types';
-import { Link, router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, RefreshControl, StyleSheet, Switch, Text, View } from 'react-native';
+
+const EMPTY_NZTA: NztaHoursState = {
+  shiftStartedAt: null,
+  workedMinutes: 0,
+  breakMinutes: 0,
+  lastBreakAt: null,
+  breakReminderShown: false,
+  breakDeferredUntil: null,
+};
 
 export default function ProfileScreen() {
   const { driver, signOut } = useAuth();
   const {
     sessionEarnings,
+    historyEarnings,
     completedJobs,
     company,
     activeVehicleBodyType,
     selectedVehicleId,
     vehicles,
     shiftActive,
+    refreshJobHistory,
+    refreshVehicles,
   } = useDriver();
   const [nzta, setNzta] = useState<NztaHoursState | null>(null);
   const [notifications, setNotifications] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [profileBodyType, setProfileBodyType] = useState<string>('');
   const breakAlertOpen = useRef(false);
 
   const refreshNzta = useCallback(() => {
     loadNztaHours().then(setNzta);
   }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([refreshJobHistory(), refreshVehicles()]);
+    refreshNzta();
+    setRefreshing(false);
+  }, [refreshJobHistory, refreshVehicles, refreshNzta]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshNzta();
+      refreshJobHistory().catch(() => undefined);
+    }, [refreshNzta, refreshJobHistory]),
+  );
 
   useEffect(() => {
     refreshNzta();
@@ -57,7 +87,7 @@ export default function ProfileScreen() {
     breakAlertOpen.current = true;
     Alert.alert(
       'Break reminder (NZTA)',
-      `You have been driving for ${NZTA_BREAK_AFTER_HOURS}+ hours. Take a break when it is safe to do so.`,
+      `You have been driving for ${NZTA_BREAK_AFTER_HOURS}+ hours. Choose when to take your break.`,
       [
         {
           text: 'Take break now',
@@ -77,7 +107,7 @@ export default function ProfileScreen() {
           },
         },
         {
-          text: 'Continue',
+          text: 'Continue driving',
           style: 'cancel',
           onPress: async () => {
             const { markBreakReminderShown } = await import('@/services/nztaService');
@@ -92,7 +122,7 @@ export default function ProfileScreen() {
   }, [refreshNzta]);
 
   useEffect(() => {
-    if (!nzta || !shiftActive) return;
+    if (!nzta || !shiftActive || !notifications) return;
     if (needsBreak(nzta)) {
       notifyBreakReminder(
         'Break reminder',
@@ -103,20 +133,37 @@ export default function ProfileScreen() {
     if (exceedsMaxWorkHours(nzta)) {
       Alert.alert(
         'Work hours limit',
-        `You have reached the ${NZTA_MAX_WORK_HOURS}-hour driving limit. End your shift or take a break.`,
+        `Maximum ${NZTA_MAX_WORK_HOURS} hours of driving reached. Take a break or end your shift.`,
       );
     }
     if (exceedsMaxShiftHours(nzta)) {
       Alert.alert(
         'Shift length limit',
-        `Your shift has reached the ${NZTA_MAX_SHIFT_HOURS}-hour maximum (including break time). Please end your shift.`,
+        `Maximum ${NZTA_MAX_SHIFT_HOURS}-hour shift reached (${NZTA_MAX_WORK_HOURS}h work + 1h break). Please end your shift.`,
       );
     }
-  }, [nzta, shiftActive, showBreakChoice]);
+  }, [nzta, shiftActive, notifications, showBreakChoice]);
 
   const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
-  const vehicleNumber = activeVehicle?.number ?? selectedVehicleId ?? '—';
-  const serviceType = activeVehicle?.vehicleType ?? driver?.driverType ?? '—';
+  const vehicleIdForMeta = selectedVehicleId || driver?.vehicleId || '';
+  const vehicleNumber = activeVehicle?.number ?? vehicleIdForMeta || '—';
+  const bodyType =
+    activeVehicle?.bodyType ||
+    profileBodyType ||
+    (activeVehicleBodyType !== '—' ? activeVehicleBodyType : '') ||
+    '—';
+
+  useEffect(() => {
+    if (!driver?.companyId || !vehicleIdForMeta) {
+      setProfileBodyType('');
+      return;
+    }
+    if (activeVehicle?.bodyType) {
+      setProfileBodyType(activeVehicle.bodyType);
+      return;
+    }
+    loadVehicleBodyType(driver.companyId, vehicleIdForMeta).then(setProfileBodyType);
+  }, [driver?.companyId, vehicleIdForMeta, activeVehicle?.bodyType]);
 
   const onSignOut = async () => {
     await signOut();
@@ -124,7 +171,10 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScreenScroll padBottom>
+    <ScreenScroll
+      padBottom
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
+    >
       <ScreenHeader title="Profile" subtitle="Driver info, earnings & compliance" />
 
       <View style={sharedStyles.card}>
@@ -136,38 +186,47 @@ export default function ProfileScreen() {
 
       <View style={sharedStyles.card}>
         <Text style={sharedStyles.cardTitle}>Company</Text>
-        <Text style={styles.companyName}>{company?.name ?? 'Loading…'}</Text>
+        <Text style={styles.companyName}>{company?.name ?? '—'}</Text>
         <Text style={sharedStyles.cardText}>Company ID: {company?.id ?? driver?.companyId ?? '—'}</Text>
       </View>
 
       <View style={sharedStyles.card}>
         <Text style={sharedStyles.cardTitle}>Vehicle</Text>
         <Text style={styles.vehicleNumber}>{vehicleNumber}</Text>
-        <Text style={sharedStyles.cardText}>Type: {activeVehicleBodyType}</Text>
-        <Text style={sharedStyles.cardText}>Service: {serviceType}</Text>
-        {selectedVehicleId ? (
-          <Text style={sharedStyles.cardText}>Vehicle ID: {selectedVehicleId}</Text>
-        ) : null}
+        <Text style={styles.bodyTypeLabel}>Vehicle type: {bodyType}</Text>
+        <Text style={sharedStyles.cardText}>
+          {vehicleIdForMeta ? `Fleet ID: ${vehicleIdForMeta.toUpperCase()}` : 'No vehicle selected'}
+        </Text>
       </View>
 
       <EarningsBreakdownCard
-        title="Earnings (this session)"
-        breakdown={sessionEarnings}
-        jobCount={completedJobs.length}
+        title="Earnings (last 7 days)"
+        breakdown={historyEarnings}
+        jobCount={undefined}
       />
+
+      {completedJobs.length > 0 ? (
+        <EarningsBreakdownCard
+          title="Earnings (this session)"
+          breakdown={sessionEarnings}
+          jobCount={completedJobs.length}
+        />
+      ) : null}
 
       <View style={sharedStyles.card}>
         <Text style={sharedStyles.cardTitle}>NZTA hours</Text>
         <Text style={styles.hours}>{formatHours(nzta?.workedMinutes ?? 0)}</Text>
-        <Text style={sharedStyles.cardText}>Driving time (max {NZTA_MAX_WORK_HOURS}h)</Text>
         <Text style={sharedStyles.cardText}>
-          Shift elapsed: {formatHours(shiftElapsedMinutes(nzta ?? { shiftStartedAt: null, workedMinutes: 0, breakMinutes: 0, lastBreakAt: null, breakReminderShown: false, breakDeferredUntil: null }))} (max {NZTA_MAX_SHIFT_HOURS}h incl. break)
+          Driving: max {NZTA_MAX_WORK_HOURS}h · Shift total: max {NZTA_MAX_SHIFT_HOURS}h ({NZTA_MAX_WORK_HOURS}h work + 1h break)
         </Text>
         <Text style={sharedStyles.cardText}>
-          Break time logged: {formatHours(nzta?.breakMinutes ?? 0)}
+          Shift elapsed: {formatHours(shiftElapsedMinutes(nzta ?? EMPTY_NZTA))}
         </Text>
         <Text style={sharedStyles.cardText}>
-          Break reminder after {NZTA_BREAK_AFTER_HOURS}h — you choose when to break
+          Break logged: {formatHours(nzta?.breakMinutes ?? 0)}
+        </Text>
+        <Text style={sharedStyles.cardText}>
+          Push reminder after {NZTA_BREAK_AFTER_HOURS}h — you choose when to break
         </Text>
         {shiftActive ? (
           <Button
@@ -188,10 +247,6 @@ export default function ProfileScreen() {
         <Switch value={notifications} onValueChange={setNotifications} trackColor={{ true: Colors.accent }} />
       </View>
 
-      <Link href="/(tabs)/chat" asChild>
-        <Button title="Chat with dispatcher" variant="secondary" />
-      </Link>
-
       <Button title="Sign Out" variant="danger" onPress={onSignOut} style={{ marginTop: 12 }} />
     </ScreenScroll>
   );
@@ -200,5 +255,6 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   companyName: { color: Colors.text, fontSize: 20, fontWeight: '700', marginTop: 4 },
   vehicleNumber: { color: Colors.accent, fontSize: 28, fontWeight: '800', marginTop: 4 },
+  bodyTypeLabel: { color: Colors.text, fontSize: 18, fontWeight: '700', marginTop: 8 },
   hours: { color: Colors.accent, fontSize: 28, fontWeight: '800', marginTop: 4 },
 });

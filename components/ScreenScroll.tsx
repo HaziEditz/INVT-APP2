@@ -7,9 +7,10 @@ type Props = ScrollViewProps & {
   children: ReactNode;
   /** Include bottom safe inset (default true). Set false when a tab bar handles bottom inset. */
   padBottom?: boolean;
+  refreshControl?: ScrollViewProps['refreshControl'];
 };
 
-export function ScreenScroll({ children, contentContainerStyle, padBottom = true, ...rest }: Props) {
+export function ScreenScroll({ children, contentContainerStyle, padBottom = true, refreshControl, ...rest }: Props) {
   const insets = useSafeAreaInsets();
   const bottomPad = padBottom ? Math.max(insets.bottom, 16) + 12 : 16;
 
@@ -22,6 +23,7 @@ export function ScreenScroll({ children, contentContainerStyle, padBottom = true
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         nestedScrollEnabled
+        refreshControl={refreshControl}
       >
         {children}
       </ScrollView>

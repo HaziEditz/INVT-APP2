@@ -17,6 +17,44 @@ export interface HistoryJob {
   cancelledBy?: string;
 }
 
+function normalizeDriverId(id: string): string {
+  const s = id.trim();
+  const m = s.match(/^([dD])(\d+)$/i);
+  if (m) return 'D' + String(parseInt(m[2], 10)).padStart(3, '0');
+  return s.toLowerCase();
+}
+
+function driverRecordMatches(
+  r: Record<string, unknown>,
+  driverId: string,
+  driverUid?: string,
+): boolean {
+  const fields = [
+    r.driverId,
+    r.DriverId,
+    r.driverid,
+    r.DriverID,
+    r.assignedDriverId,
+    r.AssignedDriverId,
+  ];
+  const recordIds = fields.map((v) => String(v ?? '').trim()).filter(Boolean);
+  if (!recordIds.length) return false;
+
+  const targets = new Set<string>();
+  if (driverId) {
+    targets.add(normalizeDriverId(driverId));
+    targets.add(driverId.trim().toLowerCase());
+  }
+  if (driverUid) {
+    targets.add(driverUid.trim().toLowerCase());
+  }
+
+  return recordIds.some((rid) => {
+    const n = normalizeDriverId(rid);
+    return targets.has(n) || targets.has(rid.toLowerCase());
+  });
+}
+
 function parseMs(isoOrMs: unknown): number {
   if (typeof isoOrMs === 'number' && Number.isFinite(isoOrMs)) return isoOrMs;
   const ms = Date.parse(String(isoOrMs ?? ''));
@@ -31,9 +69,13 @@ function parseTerminalStatus(raw: string): JobHistoryStatus | null {
   return null;
 }
 
-function mapCompletedRecord(key: string, r: Record<string, unknown>, driverId: string): HistoryJob | null {
-  const rDriverId = String(r.driverId ?? r.DriverId ?? '');
-  if (rDriverId && rDriverId !== driverId) return null;
+function mapCompletedRecord(
+  key: string,
+  r: Record<string, unknown>,
+  driverId: string,
+  driverUid?: string,
+): HistoryJob | null {
+  if (!driverRecordMatches(r, driverId, driverUid)) return null;
 
   const isoStr = r.completedAt_ISO ?? r.completedAt ?? r.CompletedAt_ISO ?? '';
   const completedAt = parseMs(isoStr);
@@ -53,24 +95,33 @@ function mapCompletedRecord(key: string, r: Record<string, unknown>, driverId: s
     pickup: String(r.pickupAddress ?? r.PickAddress ?? r.pickup ?? ''),
     dropoff: String(r.dropAddress ?? r.DropAddress ?? r.dropoff ?? ''),
     fare: parseFloat(fare.toFixed(2)),
-    paymentType: String(r.paymentType ?? r.PaymentType ?? 'Cash') as PaymentType,
+    paymentType: String(r.paymentType ?? r.PaymentType ?? 'Cash'),
     passengerName: String(r.passengerName ?? r.PassengerName ?? ''),
     completedAt,
   };
 }
 
-function mapBookingRecord(key: string, r: Record<string, unknown>, driverId: string): HistoryJob | null {
-  const rDriverId = String(r.driverId ?? r.DriverId ?? r.driverid ?? '');
-  if (rDriverId && rDriverId !== driverId) return null;
+function mapBookingRecord(
+  key: string,
+  r: Record<string, unknown>,
+  driverId: string,
+  driverUid?: string,
+): HistoryJob | null {
+  if (!driverRecordMatches(r, driverId, driverUid)) return null;
 
-  const statusRaw = String(
-    r.BookingStatus ?? r.bookingStatus ?? r.status ?? r.Status ?? '',
-  );
+  const statusRaw = String(r.BookingStatus ?? r.bookingStatus ?? r.status ?? r.Status ?? '');
   const terminal = parseTerminalStatus(statusRaw);
-  if (!terminal || terminal === 'completed') return null;
+  if (!terminal) return null;
 
   const completedAt = parseMs(
-    r.cancelledAt ?? r.CancelledAt ?? r.updatedAt ?? r.UpdatedAt ?? r.createdAt ?? Date.now(),
+    r.completedAt_ISO ??
+      r.completedAt ??
+      r.cancelledAt ??
+      r.CancelledAt ??
+      r.updatedAt ??
+      r.UpdatedAt ??
+      r.createdAt ??
+      Date.now(),
   );
 
   const fare = parseFloat(String(r.fare ?? r.Fare ?? r.TotalFare ?? '0')) || 0;
@@ -81,7 +132,7 @@ function mapBookingRecord(key: string, r: Record<string, unknown>, driverId: str
     type: (String(r.type ?? r.jobType ?? 'Taxi') as JobType) || 'Taxi',
     pickup: String(r.PickAddress ?? r.pickup ?? r.from ?? ''),
     dropoff: String(r.DropAddress ?? r.dropoff ?? r.to ?? ''),
-    fare,
+    fare: terminal === 'completed' ? parseFloat(fare.toFixed(2)) : 0,
     paymentType: String(r.paymentType ?? r.PaymentType ?? ''),
     passengerName: String(r.PassengerName ?? r.passengerName ?? ''),
     completedAt,
@@ -92,20 +143,30 @@ function mapBookingRecord(key: string, r: Record<string, unknown>, driverId: str
 export async function loadDriverJobHistory(
   companyId: string,
   driverId: string,
+  driverUid?: string,
 ): Promise<HistoryJob[]> {
   if (!companyId || !driverId) return [];
 
   const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const byId = new Map<string, HistoryJob>();
 
+  const ingest = (row: HistoryJob | null) => {
+    if (!row || row.completedAt < cutoffMs) return;
+    const existing = byId.get(row.id);
+    if (!existing || row.status === 'completed') {
+      byId.set(row.id, row);
+    }
+  };
+
   try {
     const snap = await get(
-      query(ref(database, `completedJobs/${companyId}`), limitToLast(120)),
+      query(ref(database, `completedJobs/${companyId}`), limitToLast(150)),
     );
     if (snap.exists()) {
       snap.forEach((child) => {
-        const row = mapCompletedRecord(child.key ?? '', (child.val() ?? {}) as Record<string, unknown>, driverId);
-        if (row && row.completedAt >= cutoffMs) byId.set(row.id, row);
+        ingest(
+          mapCompletedRecord(child.key ?? '', (child.val() ?? {}) as Record<string, unknown>, driverId, driverUid),
+        );
       });
     }
   } catch (err) {
@@ -114,14 +175,13 @@ export async function loadDriverJobHistory(
 
   try {
     const snap = await get(
-      query(ref(database, `allbookings/${companyId}`), limitToLast(150)),
+      query(ref(database, `allbookings/${companyId}`), limitToLast(200)),
     );
     if (snap.exists()) {
       snap.forEach((child) => {
-        const row = mapBookingRecord(child.key ?? '', (child.val() ?? {}) as Record<string, unknown>, driverId);
-        if (row && row.completedAt >= cutoffMs && !byId.has(row.id)) {
-          byId.set(row.id, row);
-        }
+        ingest(
+          mapBookingRecord(child.key ?? '', (child.val() ?? {}) as Record<string, unknown>, driverId, driverUid),
+        );
       });
     }
   } catch (err) {

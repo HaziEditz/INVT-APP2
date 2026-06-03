@@ -132,6 +132,21 @@ async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Veh
   });
 }
 
+/** Body class for profile display: Sedan, Van, WAV */
+export async function loadVehicleBodyType(companyId: string, vehicleId: string): Promise<string> {
+  if (!companyId || !vehicleId) return '—';
+  try {
+    const upper = vehicleId.trim().toUpperCase();
+    const snap = await get(ref(database, `vehicles/${companyId}/${upper}`));
+    if (snap.exists()) {
+      return extractBodyType((snap.val() ?? {}) as Record<string, unknown>);
+    }
+  } catch {
+    // non-fatal
+  }
+  return 'Sedan';
+}
+
 export async function loadDriverVehicles(
   companyId: string,
   uid: string,
