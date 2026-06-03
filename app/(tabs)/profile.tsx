@@ -146,7 +146,7 @@ export default function ProfileScreen() {
 
   const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
   const vehicleIdForMeta = selectedVehicleId || driver?.vehicleId || '';
-  const vehicleNumber = activeVehicle?.number ?? vehicleIdForMeta || '—';
+  const vehicleNumber = activeVehicle?.number || vehicleIdForMeta || '—';
   const bodyType =
     activeVehicle?.bodyType ||
     profileBodyType ||
