@@ -1,5 +1,6 @@
 import { AuthProvider } from '@/context/AuthContext';
 import { DriverProvider } from '@/context/DriverContext';
+import { AuthNavigator } from '@/components/AuthNavigator';
 import { Colors } from '@/constants/theme';
 import { JobOfferModal } from '@/components/JobOfferModal';
 import { Stack } from 'expo-router';
@@ -15,6 +16,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <DriverProvider>
+        <AuthNavigator />
         <StatusBar style="light" />
         <Stack
           screenOptions={{

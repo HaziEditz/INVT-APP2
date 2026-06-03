@@ -196,7 +196,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const saved = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
-      if (saved?.uid === user.uid) {
+      const companyId = await resolveCompanyId(user.uid, user.displayName);
+      const profile = await loadDriverProfile(user.uid, companyId, saved?.id ?? '');
+      if (profile) {
+        if (!profile.email && user.email) profile.email = user.email;
+        setDriver(profile);
+        await storeData(STORAGE_KEYS.driverSession, profile);
+      } else if (saved?.uid === user.uid) {
         setDriver(saved);
       }
       setLoading(false);

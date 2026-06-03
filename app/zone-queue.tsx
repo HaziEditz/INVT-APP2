@@ -1,4 +1,5 @@
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
@@ -11,7 +12,8 @@ const NEARBY = [
 ];
 
 export default function ZoneQueueScreen() {
-  const { zone, driver } = useDriver();
+  const { driver } = useAuth();
+  const { zone } = useDriver();
 
   return (
     <ScrollView style={sharedStyles.screen} contentContainerStyle={sharedStyles.content}>

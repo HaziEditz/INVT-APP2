@@ -4,20 +4,40 @@ import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
-import { Link, router } from 'expo-router';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PresenceDisplayStatus } from '@/types';
+import { Link } from 'expo-router';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-const VEHICLES = [
-  { id: 'V001', label: 'Toyota Camry', plate: 'ABC123' },
-  { id: 'V002', label: 'Hyundai Ioniq', plate: 'XYZ789' },
-];
+function statusColor(status: PresenceDisplayStatus) {
+  switch (status) {
+    case 'Online':
+      return Colors.success;
+    case 'Away':
+      return Colors.warning ?? '#e6a700';
+    default:
+      return Colors.textMuted;
+  }
+}
+
+function statusLabel(status: PresenceDisplayStatus) {
+  switch (status) {
+    case 'Online':
+      return '● Online';
+    case 'Away':
+      return '◐ Away';
+    default:
+      return '○ Offline';
+  }
+}
 
 export default function HomeScreen() {
   const { driver } = useAuth();
   const {
-    online,
+    presenceStatus,
     shiftActive,
     selectedVehicleId,
+    vehicles,
+    vehiclesLoading,
     zone,
     activeJob,
     isOffline,
@@ -29,12 +49,26 @@ export default function HomeScreen() {
     pushDemoOffer,
   } = useDriver();
 
-  const toggleOnline = async () => {
+  const canGoOnline = shiftActive && selectedVehicleId && presenceStatus !== 'Online';
+
+  const togglePresence = async () => {
     try {
-      if (online) await goOffline();
+      if (presenceStatus === 'Online') await goOffline();
       else await goOnline();
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not update status');
+    }
+  };
+
+  const handleStartShift = async () => {
+    if (!selectedVehicleId) {
+      Alert.alert('Vehicle required', 'Select your vehicle, then start your shift.');
+      return;
+    }
+    try {
+      await startShift();
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not start shift');
     }
   };
 
@@ -45,14 +79,18 @@ export default function HomeScreen() {
         subtitle={isOffline ? 'Offline mode — changes will sync when connected' : `Driver ID: ${driver?.id ?? '—'}`}
       />
 
-      <View style={[sharedStyles.card, online && styles.onlineCard]}>
+      <View style={[sharedStyles.card, presenceStatus === 'Online' && styles.onlineCard]}>
         <Text style={sharedStyles.cardTitle}>Shift</Text>
         <Text style={sharedStyles.cardText}>
-          {shiftActive ? 'Shift in progress' : 'Start your shift to begin working'}
+          {shiftActive ? 'Shift in progress' : 'Start your shift to register with dispatch'}
         </Text>
         <View style={{ marginTop: 12, gap: 8 }}>
           {!shiftActive ? (
-            <Button title="Start Shift" onPress={startShift} />
+            <Button
+              title="Start Shift"
+              onPress={handleStartShift}
+              disabled={vehiclesLoading || !selectedVehicleId}
+            />
           ) : (
             <Button title="End Shift" variant="danger" onPress={endShift} />
           )}
@@ -61,28 +99,42 @@ export default function HomeScreen() {
 
       <View style={sharedStyles.card}>
         <Text style={sharedStyles.cardTitle}>Vehicle</Text>
-        {VEHICLES.map((v) => (
-          <Pressable
-            key={v.id}
-            onPress={() => setSelectedVehicleId(v.id)}
-            style={[styles.vehicleRow, selectedVehicleId === v.id && styles.vehicleSelected]}
-          >
-            <Text style={styles.vehicleLabel}>{v.label}</Text>
-            <Text style={styles.vehiclePlate}>{v.plate}</Text>
-          </Pressable>
-        ))}
+        {vehiclesLoading ? (
+          <ActivityIndicator color={Colors.accent} style={{ marginTop: 12 }} />
+        ) : vehicles.length === 0 ? (
+          <Text style={sharedStyles.cardText}>
+            No vehicles allocated. Ask your fleet admin to assign vehicles in the driver portal.
+          </Text>
+        ) : (
+          vehicles.map((v) => (
+            <Pressable
+              key={v.id}
+              onPress={() => setSelectedVehicleId(v.id)}
+              style={[styles.vehicleRow, selectedVehicleId === v.id && styles.vehicleSelected]}
+            >
+              <Text style={styles.vehicleLabel}>{v.label}</Text>
+              <Text style={styles.vehiclePlate}>{v.plate}</Text>
+              <Text style={styles.vehicleId}>{v.id}</Text>
+            </Pressable>
+          ))
+        )}
       </View>
 
       <View style={sharedStyles.card}>
         <Text style={sharedStyles.cardTitle}>Status</Text>
-        <Text style={[styles.status, { color: online ? Colors.success : Colors.textMuted }]}>
-          {online ? '● Online' : '○ Offline'}
+        <Text style={[styles.status, { color: statusColor(presenceStatus) }]}>
+          {statusLabel(presenceStatus)}
+        </Text>
+        <Text style={sharedStyles.cardText}>
+          {shiftActive
+            ? 'Synced from Firebase dispatch presence'
+            : 'Start shift to appear on the dispatch board'}
         </Text>
         <View style={{ marginTop: 12 }}>
           <Button
-            title={online ? 'Go Offline' : 'Go Online'}
-            onPress={toggleOnline}
-            disabled={!shiftActive || !selectedVehicleId}
+            title={presenceStatus === 'Online' ? 'Go Away' : 'Go Online'}
+            onPress={togglePresence}
+            disabled={!canGoOnline && presenceStatus !== 'Online'}
           />
         </View>
       </View>
@@ -123,6 +175,7 @@ const styles = StyleSheet.create({
   vehicleSelected: { borderColor: Colors.accent, backgroundColor: Colors.accent + '15' },
   vehicleLabel: { color: Colors.text, fontWeight: '600' },
   vehiclePlate: { color: Colors.textMuted, marginTop: 2 },
+  vehicleId: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
   status: { fontSize: 18, fontWeight: '700' },
   zoneName: { color: Colors.accent, fontSize: 20, fontWeight: '700', marginBottom: 4 },
   quickLinks: { gap: 10, marginTop: 8 },

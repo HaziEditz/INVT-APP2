@@ -21,6 +21,8 @@ export interface Vehicle {
   plate: string;
 }
 
+export type PresenceDisplayStatus = 'Online' | 'Offline' | 'Away';
+
 export interface JobOffer {
   id: string;
   type: JobType;
