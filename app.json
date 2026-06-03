@@ -15,6 +15,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.bookawaka.driver",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "config": {
+        "googleMapsApiKey": "AIzaSyAg5Q5LyM2Bv0xpeHz4gPRG1MwMh71klis"
+      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "BookaWaka Driver needs your location for dispatch and navigation.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "BookaWaka Driver tracks location in the background while you are online or on a job.",
@@ -28,6 +32,12 @@
         "backgroundColor": "#0A0A0F"
       },
       "package": "com.bookawaka.driver",
+      "googleServicesFile": "./google-services.json",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAg5Q5LyM2Bv0xpeHz4gPRG1MwMh71klis"
+        }
+      },
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -59,6 +69,13 @@
         {
           "icon": "./assets/images/icon.png",
           "color": "#1a73e8"
+        }
+      ],
+      [
+        "react-native-maps",
+        {
+          "androidGoogleMapsApiKey": "AIzaSyAg5Q5LyM2Bv0xpeHz4gPRG1MwMh71klis",
+          "iosGoogleMapsApiKey": "AIzaSyAg5Q5LyM2Bv0xpeHz4gPRG1MwMh71klis"
         }
       ]
     ],

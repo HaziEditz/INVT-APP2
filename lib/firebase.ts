@@ -57,16 +57,24 @@ function initAuth(instance: FirebaseApp): Auth {
   }
 }
 
-try {
+function initializeFirebase(): void {
+  if (app && auth && database) return;
+
   const isNewApp = getApps().length === 0;
-  app = isNewApp ? initializeApp(firebaseConfig) : getApps()[0];
-  auth = initAuth(app);
-  database = getDatabase(app);
+  const firebaseApp = isNewApp ? initializeApp(firebaseConfig) : getApps()[0];
+  app = firebaseApp;
+  auth = initAuth(firebaseApp);
+  database = getDatabase(firebaseApp);
+  initError = null;
   console.log('[Firebase] initialized', {
     platform: Platform.OS,
     auth: !!auth?.app,
     database: !!database?.app,
   });
+}
+
+try {
+  initializeFirebase();
 } catch (err) {
   initError = err instanceof Error ? err.message : String(err);
   console.error('[Firebase] fatal init error:', err);

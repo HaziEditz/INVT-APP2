@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "909621127467",
+    "firebase_url": "https://bookawaka2026-564e1-default-rtdb.firebaseio.com",
+    "project_id": "bookawaka2026-564e1",
+    "storage_bucket": "bookawaka2026-564e1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:909621127467:android:504f502a533ca0a216fd6e",
+        "android_client_info": {
+          "package_name": "com.bookawaka.driver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDIVSI_GRYG0hCPvc9h80QXZMxwZoejctQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
