@@ -1,60 +1,53 @@
 import { Button } from '@/components/Button';
-import { ScreenHeader } from '@/components/ScreenHeader';
-import { ScreenScroll } from '@/components/ScreenScroll';
+import { ActiveJobPanel } from '@/components/home/ActiveJobPanel';
+import { FullScreenMapModal } from '@/components/home/FullScreenMapModal';
+import { HomeStatusBar } from '@/components/home/HomeStatusBar';
+import { MeterOverlay } from '@/components/home/MeterOverlay';
+import { TariffPicker } from '@/components/home/TariffPicker';
+import JobMap from '@/components/JobMap';
 import { VehiclePickerModal } from '@/components/VehiclePickerModal';
-import { useAuth } from '@/context/AuthContext';
-import { useDriver } from '@/context/DriverContext';
 import { Colors } from '@/constants/theme';
-import { sharedStyles } from '@/constants/styles';
-import { PresenceDisplayStatus } from '@/types';
-import { Link } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { useDriver } from '@/context/DriverContext';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
-function statusColor(status: PresenceDisplayStatus) {
-  switch (status) {
-    case 'Online':
-      return Colors.success;
-    case 'Away':
-      return Colors.warning;
-    default:
-      return Colors.textMuted;
-  }
-}
-
-function statusLabel(status: PresenceDisplayStatus, ready: boolean) {
-  if (ready && status === 'Online') return '● Online — ready for jobs';
-  switch (status) {
-    case 'Online':
-      return '● Online';
-    case 'Away':
-      return '◐ Away';
-    default:
-      return '○ Offline';
-  }
-}
-
-export default function HomeScreen() {
-  const { driver } = useAuth();
+export default function MainScreen() {
   const {
-    presenceStatus,
-    readyForJobs,
     shiftActive,
-    selectedVehicleId,
+    readyForJobs,
+    presenceStatus,
     vehicles,
     vehiclesLoading,
+    selectedVehicleId,
     zone,
     activeJob,
-    isOffline,
-    setSelectedVehicleId,
+    hailActive,
+    meter,
+    tariffs,
+    selectedTariff,
+    jobEditNotice,
     startShift,
     endShift,
-    pushDemoOffer,
+    startHail,
+    endHail,
+    pauseMeter,
+    toggleWaitMeter,
+    setSelectedTariff,
+    dismissJobEditNotice,
   } = useDriver();
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const [pickerVehicle, setPickerVehicle] = useState(selectedVehicleId);
+  const [tariffOpen, setTariffOpen] = useState(false);
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!hailActive && !activeJob) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [hailActive, activeJob]);
 
   const openStartFlow = () => {
     if (vehiclesLoading) return;
@@ -63,9 +56,7 @@ export default function HomeScreen() {
       return;
     }
     if (vehicles.length === 1) {
-      const id = vehicles[0].id;
-      setPickerVehicle(id);
-      void runStartShift(id);
+      void runStartShift(vehicles[0].id);
       return;
     }
     setPickerVehicle(selectedVehicleId || vehicles[0]?.id || '');
@@ -84,110 +75,112 @@ export default function HomeScreen() {
     }
   };
 
-  const zoneName = zone.name?.trim() || (shiftActive ? 'Awaiting zone assignment' : '—');
+  const onHailPress = () => {
+    if (!shiftActive) {
+      openStartFlow();
+      return;
+    }
+    if (hailActive) {
+      Alert.alert('End hail trip?', 'Finish street hail and return to queue.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'End trip', onPress: endHail },
+      ]);
+      return;
+    }
+    if (activeJob) {
+      Alert.alert('On dispatch job', 'Complete or cancel the active job before hailing.');
+      return;
+    }
+    startHail();
+  };
+
+  const showMeter = hailActive && !!meter;
+  const tripActive = !!activeJob || showMeter;
 
   return (
-    <>
-      <ScreenScroll padBottom>
-        <ScreenHeader
-          title={`Hello, ${driver?.name ?? 'Driver'}`}
-          subtitle={
-            isOffline
-              ? 'Offline mode — changes sync when connected'
-              : `Driver ID: ${driver?.id ?? '—'}`
-          }
+    <View style={styles.root}>
+      <HomeStatusBar />
+
+      {jobEditNotice ? (
+        <Pressable style={styles.notice} onPress={dismissJobEditNotice}>
+          <Text style={styles.noticeText}>Job updated: {jobEditNotice}</Text>
+          <Text style={styles.noticeDismiss}>Tap to dismiss</Text>
+        </Pressable>
+      ) : null}
+
+      <View style={styles.mapSection}>
+        <JobMap
+          pickupLat={activeJob?.pickupLat}
+          pickupLng={activeJob?.pickupLng}
+          dropoffLat={activeJob?.dropoffLat}
+          dropoffLng={activeJob?.dropoffLng}
+          showRoute={!!activeJob}
+          showsUserLocation={shiftActive}
         />
 
-        {readyForJobs && shiftActive ? (
-          <View style={styles.readyBanner}>
-            <Text style={styles.readyTitle}>You are online</Text>
-            <Text style={styles.readyText}>Ready to receive job offers from dispatch.</Text>
+        {showMeter && meter ? (
+          <View style={styles.meterWrap} pointerEvents="box-none">
+            <MeterOverlay
+              meter={meter}
+              onPause={pauseMeter}
+              onWait={toggleWaitMeter}
+              onExpand={() => setMapExpanded(true)}
+            />
           </View>
         ) : null}
 
-        <View style={[sharedStyles.card, (readyForJobs || presenceStatus === 'Online') && styles.onlineCard]}>
-          <Text style={sharedStyles.cardTitle}>Shift</Text>
-          <Text style={[styles.status, { color: statusColor(presenceStatus) }]}>
-            {statusLabel(presenceStatus, readyForJobs)}
-          </Text>
-          <Text style={sharedStyles.cardText}>
-            {shiftActive
-              ? 'Tap End Shift when you finish for the day.'
-              : 'Start shift to select your vehicle and go online automatically.'}
-          </Text>
-          <View style={styles.cardActions}>
-            {!shiftActive ? (
-              <Button title="Start Shift" onPress={openStartFlow} disabled={vehiclesLoading} />
-            ) : (
-              <Button title="End Shift" variant="danger" onPress={endShift} />
-            )}
-          </View>
-        </View>
-
-        {!shiftActive && vehicles.length > 0 ? (
-          <View style={sharedStyles.card}>
-            <Text style={sharedStyles.cardTitle}>Your vehicles</Text>
-            {vehiclesLoading ? (
-              <ActivityIndicator color={Colors.accent} style={{ marginTop: 12 }} />
-            ) : (
-              vehicles.map((v) => (
-                <View key={v.id} style={styles.vehicleRow}>
-                  <View>
-                    <Text style={styles.vehicleNumber}>{v.number}</Text>
-                    <Text style={styles.vehicleType}>{v.bodyType} · {v.vehicleType}</Text>
-                  </View>
-                  <Text style={styles.vehicleId}>{v.id}</Text>
-                </View>
-              ))
-            )}
+        {!shiftActive ? (
+          <View style={styles.offlineOverlay}>
+            <Text style={styles.offlineTitle}>Off shift</Text>
+            <Text style={styles.offlineSub}>Start shift to go online and receive jobs</Text>
+            <Button title="Start Shift" onPress={openStartFlow} disabled={vehiclesLoading} />
+            {vehiclesLoading ? <ActivityIndicator color={Colors.accent} style={{ marginTop: 12 }} /> : null}
           </View>
         ) : null}
+      </View>
 
-        {shiftActive && selectedVehicleId ? (
-          <View style={sharedStyles.card}>
-            <Text style={sharedStyles.cardTitle}>Active vehicle</Text>
-            {(() => {
-              const v = vehicles.find((x) => x.id === selectedVehicleId);
-              return (
-                <>
-                  <Text style={styles.vehicleNumber}>{v?.number ?? selectedVehicleId}</Text>
-                  <Text style={styles.vehicleType}>{v?.bodyType ?? 'Sedan'} · {v?.vehicleType ?? 'Taxi'}</Text>
-                </>
-              );
-            })()}
+      {activeJob ? <ActiveJobPanel /> : null}
+
+      {shiftActive ? (
+        <>
+          <TariffPicker
+            tariffs={tariffs}
+            selected={selectedTariff}
+            open={tariffOpen}
+            onOpen={() => setTariffOpen(true)}
+            onClose={() => setTariffOpen(false)}
+            onSelect={setSelectedTariff}
+          />
+
+          <View style={styles.bottomBar}>
+            <Button
+              title={hailActive ? 'END HAIL TRIP' : 'HAIL PASSENGER'}
+              onPress={onHailPress}
+              style={styles.hailBtn}
+            />
+            <Button title="END SHIFT" variant="danger" onPress={() => {
+              Alert.alert('End shift?', 'You will go offline.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'End shift', style: 'destructive', onPress: endShift },
+              ]);
+            }} />
           </View>
-        ) : null}
 
-        <View style={sharedStyles.card}>
-          <Text style={sharedStyles.cardTitle}>Current zone</Text>
-          <Text style={styles.zoneName}>{zoneName}</Text>
-          {zone.position > 0 ? (
-            <Text style={sharedStyles.cardText}>
-              Queue position: {zone.position}
-              {zone.totalInQueue > 0 ? ` of ${zone.totalInQueue}` : ''}
-            </Text>
-          ) : (
-            <Text style={sharedStyles.cardText}>
-              {shiftActive ? 'Zone will appear when dispatch assigns you.' : 'Start shift to join the queue.'}
-            </Text>
-          )}
-          <Link href="/zone-queue" asChild>
-            <Button title="View Zone Queue" variant="secondary" style={{ marginTop: 12 }} />
-          </Link>
-        </View>
-
-        <View style={styles.quickLinks}>
-          {activeJob ? (
-            <>
-              <Link href="/active-job" asChild><Button title="Active Job" /></Link>
-              <Link href="/meter" asChild><Button title="Meter" variant="secondary" /></Link>
-            </>
+          {readyForJobs && presenceStatus === 'Online' && !tripActive ? (
+            <Text style={styles.hint}>Online · {zone.name || 'Awaiting zone'} · ready for offers</Text>
           ) : null}
-          <Link href="/pre-booking" asChild><Button title="Pre-booking" variant="secondary" /></Link>
-          <Link href="/chat" asChild><Button title="Chat Dispatcher" variant="secondary" /></Link>
-          <Button title="Simulate Job Offer" variant="secondary" onPress={pushDemoOffer} />
-        </View>
-      </ScreenScroll>
+        </>
+      ) : null}
+
+      <FullScreenMapModal
+        visible={mapExpanded}
+        onClose={() => setMapExpanded(false)}
+        activeJob={activeJob}
+        meter={meter}
+        showMeter={showMeter}
+        onPause={pauseMeter}
+        onWait={toggleWaitMeter}
+      />
 
       <VehiclePickerModal
         visible={pickerOpen}
@@ -198,35 +191,35 @@ export default function HomeScreen() {
         onConfirm={() => runStartShift(pickerVehicle)}
         onClose={() => !starting && setPickerOpen(false)}
       />
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  onlineCard: { borderColor: Colors.success },
-  readyBanner: {
-    backgroundColor: Colors.success + '22',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
+  root: { flex: 1, backgroundColor: Colors.background },
+  notice: {
+    backgroundColor: Colors.warning + '33',
+    padding: 10,
+    marginHorizontal: 12,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: Colors.success,
+    borderColor: Colors.warning,
   },
-  readyTitle: { color: Colors.success, fontSize: 18, fontWeight: '800' },
-  readyText: { color: Colors.text, fontSize: 14, marginTop: 4 },
-  status: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  cardActions: { marginTop: 12, gap: 8 },
-  vehicleRow: {
-    flexDirection: 'row',
+  noticeText: { color: Colors.text, fontWeight: '600' },
+  noticeDismiss: { color: Colors.textMuted, fontSize: 11, marginTop: 4 },
+  mapSection: { flex: 1, minHeight: 200, position: 'relative' },
+  meterWrap: { position: 'absolute', left: 0, right: 0, top: 8 },
+  offlineOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.background + 'CC',
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    padding: 24,
+    gap: 12,
   },
-  vehicleNumber: { color: Colors.text, fontSize: 24, fontWeight: '800' },
-  vehicleType: { color: Colors.accent, fontSize: 15, fontWeight: '600', marginTop: 2 },
-  vehicleId: { color: Colors.textMuted, fontSize: 12 },
-  zoneName: { color: Colors.accent, fontSize: 20, fontWeight: '700', marginBottom: 4 },
-  quickLinks: { gap: 10, marginTop: 4, marginBottom: 8 },
+  offlineTitle: { color: Colors.text, fontSize: 22, fontWeight: '800' },
+  offlineSub: { color: Colors.textMuted, textAlign: 'center', marginBottom: 8 },
+  bottomBar: { paddingHorizontal: 12, paddingVertical: 10, gap: 8, borderTopWidth: 1, borderTopColor: Colors.border },
+  hailBtn: { marginBottom: 0 },
+  hint: { color: Colors.textMuted, fontSize: 11, textAlign: 'center', paddingBottom: 6 },
 });

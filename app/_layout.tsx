@@ -3,6 +3,7 @@ import { DriverProvider } from '@/context/DriverContext';
 import { AuthNavigator } from '@/components/AuthNavigator';
 import { Colors } from '@/constants/theme';
 import { JobOfferModal } from '@/components/JobOfferModal';
+import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -37,6 +38,7 @@ export default function RootLayout() {
           <Stack.Screen name="pre-booking" options={{ title: 'Pre-booking' }} />
           <Stack.Screen name="chat" options={{ title: 'Dispatcher Chat' }} />
         </Stack>
+        <ShiftKeepAwake />
         <JobOfferModal />
       </DriverProvider>
     </AuthProvider>

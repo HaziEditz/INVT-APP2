@@ -24,4 +24,7 @@ export const STORAGE_KEYS = {
   activeJob: 'bw_active_job',
   nztaHours: 'bw_nzta_hours',
   selectedVehicle: 'bw_selected_vehicle',
+  shiftActive: 'bw_shift_active',
+  selectedTariffId: 'bw_selected_tariff',
+  meterState: 'bw_meter_state',
 } as const;

@@ -3,18 +3,12 @@ import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { useDriver } from '@/context/DriverContext';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
-import { JobStage } from '@/types';
+import { JobStage, STAGE_LABELS } from '@/types';
 import JobMap from '@/components/JobMap';
 import { Link, router } from 'expo-router';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const STAGES: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
-const STAGE_LABELS: Record<JobStage, string> = {
-  pickup: 'En route to pickup',
-  arrived: 'Arrived at pickup',
-  onboard: 'Passenger onboard',
-  complete: 'Complete job',
-};
 
 const FLOW_HINTS: Record<string, string> = {
   Taxi: 'Use the meter for fare calculation.',
@@ -62,8 +56,10 @@ export default function ActiveJobScreen() {
 
       <View style={styles.mapWrap}>
         <JobMap
-          pickup={{ latitude: -46.4132, longitude: 168.3538 }}
-          dropoff={{ latitude: -46.3874, longitude: 168.3212 }}
+          pickupLat={activeJob.pickupLat}
+          pickupLng={activeJob.pickupLng}
+          dropoffLat={activeJob.dropoffLat}
+          dropoffLng={activeJob.dropoffLng}
         />
       </View>
 

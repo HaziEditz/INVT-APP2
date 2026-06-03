@@ -4,6 +4,8 @@ export type JobType = (typeof JOB_TYPES)[number];
 export type JobStage = (typeof JOB_STAGES)[number];
 export type PaymentType = (typeof PAYMENT_TYPES)[number];
 
+export type HomeMode = 'offline' | 'waiting' | 'dispatch' | 'hail' | 'payment';
+
 export interface DriverProfile {
   uid: string;
   id: string;
@@ -18,11 +20,8 @@ export interface DriverProfile {
 
 export interface Vehicle {
   id: string;
-  /** Display number e.g. 201 */
   number: string;
-  /** Service type: Taxi, Cab */
   vehicleType: string;
-  /** Body class: Sedan, Van, WAV */
   bodyType: string;
   label: string;
   plate: string;
@@ -38,10 +37,24 @@ export interface JobOffer {
   passengerName?: string;
   passengerPhone?: string;
   fixedFare?: number;
+  estimatedFare?: number;
+  estimatedDistanceKm?: number;
   paymentType?: PaymentType;
   isAcc?: boolean;
   isTotalMobility?: boolean;
   expiresAt: number;
+  source?: string;
+  notes?: string;
+  dispatcherName?: string;
+  pickupLat?: number;
+  pickupLng?: number;
+  dropoffLat?: number;
+  dropoffLng?: number;
+  silent?: boolean;
+}
+
+export interface QueuedOffer extends JobOffer {
+  queuedAt: number;
 }
 
 export interface ActiveJob extends JobOffer {
@@ -54,6 +67,25 @@ export interface ActiveJob extends JobOffer {
 
 export interface CompletedJob extends ActiveJob {
   completedAt: number;
+}
+
+export interface Tariff {
+  id: string;
+  name: string;
+  flagFall: number;
+  ratePerKm: number;
+  waitingPerMin: number;
+}
+
+export interface MeterState {
+  running: boolean;
+  paused: boolean;
+  waiting: boolean;
+  startedAt: number;
+  pausedMs: number;
+  waitingMs: number;
+  distanceKm: number;
+  fare: number;
 }
 
 export interface ChatMessage {
@@ -92,7 +124,6 @@ export interface NztaHoursState {
   breakMinutes: number;
   lastBreakAt: number | null;
   breakReminderShown: boolean;
-  /** If set, defer break alert until this timestamp */
   breakDeferredUntil: number | null;
 }
 
@@ -100,3 +131,10 @@ export interface CompanyInfo {
   id: string;
   name: string;
 }
+
+export const STAGE_LABELS: Record<JobStage, string> = {
+  pickup: 'On The Way',
+  arrived: 'Arrived',
+  onboard: 'Passenger On Board',
+  complete: 'Complete',
+};

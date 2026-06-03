@@ -1,8 +1,9 @@
 import { Colors } from '@/constants/theme';
+import type { JobMapProps } from '@/components/JobMap';
 import { StyleSheet, Text, View } from 'react-native';
 
 /** Web stub — maps are only available on iOS/Android. */
-export default function JobMap() {
+export default function JobMap(_props: JobMapProps) {
   return (
     <View style={styles.stub}>
       <Text style={styles.title}>Map preview</Text>

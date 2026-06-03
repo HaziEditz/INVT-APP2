@@ -16,14 +16,18 @@ import {
   mapVehicleStatusToDisplay,
   writeOnlinePresence,
 } from '@/services/presenceService';
+import { calcMeterFare, DEFAULT_TARIFFS } from '@/lib/tariffs';
 import {
   ActiveJob,
   CompanyInfo,
   CompletedJob,
   JobOffer,
   JobStage,
+  MeterState,
   PaymentType,
   PresenceDisplayStatus,
+  QueuedOffer,
+  Tariff,
   Vehicle,
   ZoneInfo,
 } from '@/types';
@@ -39,6 +43,13 @@ interface DriverContextValue {
   zone: ZoneInfo;
   jobOffer: JobOffer | null;
   activeJob: ActiveJob | null;
+  hailActive: boolean;
+  meter: MeterState | null;
+  tariffs: Tariff[];
+  selectedTariff: Tariff;
+  queuedOffers: QueuedOffer[];
+  offersBadgeCount: number;
+  jobEditNotice: string | null;
   completedJobs: CompletedJob[];
   jobHistory: HistoryJob[];
   jobHistoryLoading: boolean;
@@ -52,11 +63,21 @@ interface DriverContextValue {
   refreshJobHistory: () => Promise<void>;
   startShift: (vehicleId?: string) => Promise<void>;
   endShift: () => Promise<void>;
+  togglePresence: () => Promise<void>;
   acceptOffer: () => Promise<void>;
   declineOffer: () => Promise<void>;
   advanceStage: () => Promise<void>;
   setPaymentType: (payment: PaymentType) => void;
   completeJob: () => Promise<void>;
+  cancelActiveJob: () => Promise<void>;
+  noShowActiveJob: () => Promise<void>;
+  recallJob: () => Promise<void>;
+  startHail: () => void;
+  endHail: () => void;
+  pauseMeter: () => void;
+  toggleWaitMeter: () => void;
+  setSelectedTariff: (t: Tariff) => void;
+  dismissJobEditNotice: () => void;
   pushDemoOffer: () => void;
 }
 
@@ -88,6 +109,48 @@ function fmtNzTime(d: Date) {
   return d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+function parseJobOffer(val: Record<string, unknown>): JobOffer {
+  return {
+    id: String(val.id ?? val.jobId ?? Date.now()),
+    type: (val.type as JobOffer['type']) ?? 'Taxi',
+    pickup: String(val.pickup ?? val.from ?? ''),
+    dropoff: String(val.dropoff ?? val.to ?? ''),
+    passengerName: val.passengerName ? String(val.passengerName) : undefined,
+    passengerPhone: val.passengerPhone ? String(val.passengerPhone) : undefined,
+    fixedFare: val.fixedFare != null ? Number(val.fixedFare) : undefined,
+    estimatedFare: val.estimatedFare != null ? Number(val.estimatedFare) : undefined,
+    estimatedDistanceKm:
+      val.estimatedDistanceKm != null
+        ? Number(val.estimatedDistanceKm)
+        : val.distanceKm != null
+          ? Number(val.distanceKm)
+          : undefined,
+    paymentType: val.paymentType as PaymentType | undefined,
+    isAcc: !!val.isAcc,
+    isTotalMobility: !!val.isTotalMobility,
+    expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
+    source: val.source ? String(val.source) : undefined,
+    notes: val.notes ? String(val.notes) : undefined,
+    dispatcherName: val.dispatcherName ? String(val.dispatcherName) : undefined,
+    pickupLat: val.pickupLat != null ? Number(val.pickupLat) : val.lat != null ? Number(val.lat) : undefined,
+    pickupLng: val.pickupLng != null ? Number(val.pickupLng) : val.lng != null ? Number(val.lng) : undefined,
+    dropoffLat: val.dropoffLat != null ? Number(val.dropoffLat) : undefined,
+    dropoffLng: val.dropoffLng != null ? Number(val.dropoffLng) : undefined,
+    silent: !!val.silent,
+  };
+}
+
+const EMPTY_METER: MeterState = {
+  running: false,
+  paused: false,
+  waiting: false,
+  startedAt: 0,
+  pausedMs: 0,
+  waitingMs: 0,
+  distanceKm: 0,
+  fare: 0,
+};
+
 export function DriverProvider({ children }: { children: ReactNode }) {
   const { driver } = useAuth();
   const [presenceStatus, setPresenceStatus] = useState<PresenceDisplayStatus>('Offline');
@@ -104,8 +167,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [jobHistoryLoading, setJobHistoryLoading] = useState(false);
   const [company, setCompany] = useState<CompanyInfo | null>(null);
   const [isOffline, setIsOffline] = useState(false);
+  const [hailActive, setHailActive] = useState(false);
+  const [meter, setMeter] = useState<MeterState | null>(null);
+  const [tariffs] = useState<Tariff[]>(DEFAULT_TARIFFS);
+  const [selectedTariff, setSelectedTariffState] = useState<Tariff>(DEFAULT_TARIFFS[0]);
+  const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
+  const [jobEditNotice, setJobEditNotice] = useState<string | null>(null);
   const shiftActiveRef = useRef(false);
   const readyForJobsRef = useRef(false);
+  const hailActiveRef = useRef(false);
+  const activeJobIdRef = useRef<string | null>(null);
+  const lastOfferIdRef = useRef<string | null>(null);
+  const meterTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waitTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     shiftActiveRef.current = shiftActive;
@@ -116,8 +190,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [readyForJobs]);
 
   useEffect(() => {
+    hailActiveRef.current = hailActive;
+  }, [hailActive]);
+
+  useEffect(() => {
+    activeJobIdRef.current = activeJob?.id ?? null;
+  }, [activeJob?.id]);
+
+  useEffect(() => {
     getData<string>(STORAGE_KEYS.selectedVehicle).then((v) => v && setSelectedVehicleIdState(v));
     getData<ActiveJob>(STORAGE_KEYS.activeJob).then((j) => j && setActiveJob(j));
+    getData<boolean>(STORAGE_KEYS.shiftActive).then((v) => {
+      if (v) {
+        setShiftActive(true);
+        shiftActiveRef.current = true;
+        setReadyForJobs(true);
+        readyForJobsRef.current = true;
+      }
+    });
+    getData<string>(STORAGE_KEYS.selectedTariffId).then((id) => {
+      const t = DEFAULT_TARIFFS.find((x) => x.id === id);
+      if (t) setSelectedTariffState(t);
+    });
+    getData<MeterState>(STORAGE_KEYS.meterState).then((m) => {
+      if (m?.running) {
+        setMeter(m);
+        setHailActive(true);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -265,29 +365,65 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
   }, [driver?.companyId, driver?.id, driver?.uid, selectedVehicleId]);
 
+  const offersBadgeCount = queuedOffers.length;
+
+  const flushQueuedOffer = () => {
+    setQueuedOffers((q) => {
+      if (q.length === 0) return q;
+      const [next, ...rest] = q;
+      setJobOffer({ ...next, silent: false });
+      return rest;
+    });
+  };
+
+  const enqueueOffer = (offer: JobOffer) => {
+    const queued: QueuedOffer = { ...offer, queuedAt: Date.now(), silent: true };
+    setQueuedOffers((prev) => {
+      const isTaxi = offer.type === 'Taxi';
+      if (isTaxi && prev.length >= 1) return prev;
+      if (prev.some((o) => o.id === offer.id)) return prev;
+      return [...prev, queued];
+    });
+  };
+
+  const handleIncomingOffer = async (val: Record<string, unknown>) => {
+    const offer = parseJobOffer(val);
+    if (offer.id === lastOfferIdRef.current) return;
+    lastOfferIdRef.current = offer.id;
+
+    const onHail = hailActiveRef.current;
+    const onJob = !!activeJobIdRef.current;
+    const onboard = activeJob?.stage === 'onboard';
+
+    if (onHail || (onJob && !onboard && activeJob?.type === 'Taxi')) {
+      enqueueOffer(offer);
+      await notifyJobOffer('Queued offer', `${offer.type} waiting in queue`);
+      return;
+    }
+
+    if (onJob && onboard) {
+      enqueueOffer(offer);
+      return;
+    }
+
+    setJobOffer(offer);
+    await notifyJobOffer('New Job Offer', `${offer.type}: ${offer.pickup}`);
+  };
+
   useEffect(() => {
     if (!driver?.companyId || !driver.id) return;
     const offerRef = ref(database, `jobOffers/${driver.companyId}/${driver.id}`);
     return onValue(offerRef, async (snap) => {
       const val = snap.val();
-      if (!val) return;
-      const offer: JobOffer = {
-        id: String(val.id ?? val.jobId ?? Date.now()),
-        type: val.type ?? 'Taxi',
-        pickup: String(val.pickup ?? val.from ?? ''),
-        dropoff: String(val.dropoff ?? val.to ?? ''),
-        passengerName: val.passengerName,
-        passengerPhone: val.passengerPhone,
-        fixedFare: val.fixedFare,
-        paymentType: val.paymentType,
-        isAcc: !!val.isAcc,
-        isTotalMobility: !!val.isTotalMobility,
-        expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
-      };
-      setJobOffer(offer);
-      await notifyJobOffer('New Job Offer', `${offer.type}: ${offer.pickup}`);
+      if (!val || typeof val !== 'object') return;
+      if (val.editNotice && activeJobIdRef.current === String(val.jobId ?? val.id)) {
+        setJobEditNotice(String(val.editNotice));
+      }
+      if (val.removed || val.declined) return;
+      await handleIncomingOffer(val as Record<string, unknown>);
     });
-  }, [driver?.companyId, driver?.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.companyId, driver?.id, activeJob?.stage]);
 
   const setSelectedVehicleId = async (id: string) => {
     const normalized = id.trim().toUpperCase();
@@ -349,6 +485,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     setShiftActive(true);
+    shiftActiveRef.current = true;
+    await storeData(STORAGE_KEYS.shiftActive, true);
     const { startShiftClock } = await import('@/services/nztaService');
     await startShiftClock();
 
@@ -360,6 +498,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.warn('[Shift] Firebase presence write failed:', err);
       Alert.alert('Connection issue', 'Could not register with dispatch. Check your network and try again.');
       setShiftActive(false);
+      shiftActiveRef.current = false;
+      await storeData(STORAGE_KEYS.shiftActive, false);
       return;
     }
 
@@ -389,10 +529,31 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const togglePresence = async () => {
+    if (!driver || !shiftActive) return;
+    const vehicleId = await resolveVehicleId();
+    if (!vehicleId) return;
+    if (presenceStatus === 'Online') {
+      await writeOnlinePresence(driver, vehicleId, 'Away');
+      setPresenceStatus('Away');
+      setReadyForJobs(false);
+      readyForJobsRef.current = false;
+    } else {
+      await writeOnlinePresence(driver, vehicleId, 'Available');
+      setPresenceStatus('Online');
+      setReadyForJobs(true);
+      readyForJobsRef.current = true;
+    }
+  };
+
   const endShift = async () => {
     const vehicleId = await resolveVehicleId();
     setShiftActive(false);
+    shiftActiveRef.current = false;
+    await storeData(STORAGE_KEYS.shiftActive, false);
     setReadyForJobs(false);
+    readyForJobsRef.current = false;
+    endHailInternal();
 
     if (driver && vehicleId) {
       try {
@@ -430,6 +591,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       fare: jobOffer.fixedFare ?? 0,
     };
     setActiveJob(job);
+    activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
     setJobOffer(null);
 
@@ -471,6 +633,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const done: CompletedJob = { ...activeJob, stage: 'complete', completedAt: Date.now() };
     setCompletedJobs((prev) => [done, ...prev]);
     setActiveJob(null);
+    activeJobIdRef.current = null;
     await storeData(STORAGE_KEYS.activeJob, null);
     refreshJobHistory().catch(() => undefined);
 
@@ -480,9 +643,129 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
         setPresenceStatus('Online');
         setReadyForJobs(true);
+        readyForJobsRef.current = true;
       }
     }
+    if (queuedOffers.length > 0) {
+      setTimeout(flushQueuedOffer, 400);
+    }
   };
+
+  const cancelActiveJob = async () => {
+    setActiveJob(null);
+    activeJobIdRef.current = null;
+    await storeData(STORAGE_KEYS.activeJob, null);
+    if (driver && shiftActive) {
+      const vehicleId = await resolveVehicleId();
+      if (vehicleId) writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
+    }
+  };
+
+  const noShowActiveJob = async () => {
+    await cancelActiveJob();
+    Alert.alert('No show', 'Job marked as no show.');
+  };
+
+  const recallJob = async () => {
+    if (!activeJob) return;
+    const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
+    const idx = order.indexOf(activeJob.stage);
+    if (idx <= 0) return;
+    const updated = { ...activeJob, stage: order[idx - 1] };
+    setActiveJob(updated);
+    await storeData(STORAGE_KEYS.activeJob, updated);
+  };
+
+  const stopMeterTimers = () => {
+    if (meterTickRef.current) clearInterval(meterTickRef.current);
+    if (waitTickRef.current) clearInterval(waitTickRef.current);
+    meterTickRef.current = null;
+    waitTickRef.current = null;
+  };
+
+  const endHailInternal = () => {
+    stopMeterTimers();
+    setHailActive(false);
+    hailActiveRef.current = false;
+    setMeter(null);
+    storeData(STORAGE_KEYS.meterState, null).catch(() => undefined);
+  };
+
+  const startHail = () => {
+    if (!shiftActive) {
+      Alert.alert('Start shift', 'Start your shift before hailing a passenger.');
+      return;
+    }
+    const m: MeterState = {
+      running: true,
+      paused: false,
+      waiting: false,
+      startedAt: Date.now(),
+      pausedMs: 0,
+      waitingMs: 0,
+      distanceKm: 0,
+      fare: selectedTariff.flagFall,
+    };
+    setMeter(m);
+    setHailActive(true);
+    hailActiveRef.current = true;
+    storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
+
+    stopMeterTimers();
+    meterTickRef.current = setInterval(() => {
+      setMeter((prev) => {
+        if (!prev?.running || prev.paused) return prev;
+        const km = prev.distanceKm + 0.008;
+        const waitMin = prev.waitingMs / 60000;
+        const fare = calcMeterFare(selectedTariff, km, waitMin);
+        const next = { ...prev, distanceKm: km, fare };
+        storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
+        return next;
+      });
+    }, 3000);
+  };
+
+  const endHail = () => {
+    endHailInternal();
+    if (queuedOffers.length > 0) flushQueuedOffer();
+  };
+
+  const pauseMeter = () => {
+    setMeter((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, paused: !prev.paused };
+      storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
+      return next;
+    });
+  };
+
+  const toggleWaitMeter = () => {
+    setMeter((prev) => {
+      if (!prev) return prev;
+      const waiting = !prev.waiting;
+      if (waiting) {
+        waitTickRef.current = setInterval(() => {
+          setMeter((m) => {
+            if (!m?.waiting) return m;
+            const next = { ...m, waitingMs: m.waitingMs + 1000 };
+            const fare = calcMeterFare(selectedTariff, next.distanceKm, next.waitingMs / 60000);
+            return { ...next, fare };
+          });
+        }, 1000);
+      } else if (waitTickRef.current) {
+        clearInterval(waitTickRef.current);
+        waitTickRef.current = null;
+      }
+      return { ...prev, waiting };
+    });
+  };
+
+  const setSelectedTariff = (t: Tariff) => {
+    setSelectedTariffState(t);
+    storeData(STORAGE_KEYS.selectedTariffId, t.id).catch(() => undefined);
+  };
+
+  const dismissJobEditNotice = () => setJobEditNotice(null);
 
   const pushDemoOffer = () => {
     setJobOffer({
@@ -491,7 +774,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       pickup: '123 Dee Street, Invercargill',
       dropoff: 'Invercargill Airport',
       passengerName: 'Demo Passenger',
-      expiresAt: Date.now() + 30000,
+      passengerPhone: '021 000 0000',
+      estimatedFare: 28.5,
+      estimatedDistanceKm: 8.2,
+      paymentType: 'Cash',
+      source: 'Dispatch',
+      dispatcherName: 'Demo Dispatch',
+      expiresAt: Date.now() + 45000,
     });
   };
 
@@ -507,6 +796,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         zone,
         jobOffer,
         activeJob,
+        hailActive,
+        meter,
+        tariffs,
+        selectedTariff,
+        queuedOffers,
+        offersBadgeCount,
+        jobEditNotice,
         completedJobs,
         jobHistory,
         jobHistoryLoading,
@@ -520,11 +816,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         refreshJobHistory,
         startShift,
         endShift,
+        togglePresence,
         acceptOffer,
         declineOffer,
         advanceStage,
         setPaymentType,
         completeJob,
+        cancelActiveJob,
+        noShowActiveJob,
+        recallJob,
+        startHail,
+        endHail,
+        pauseMeter,
+        toggleWaitMeter,
+        setSelectedTariff,
+        dismissJobEditNotice,
         pushDemoOffer,
       }}
     >

@@ -1,9 +1,16 @@
 import { Platform } from 'react-native';
 import type { ComponentType } from 'react';
+import type { MapCoord } from './JobMap.native';
 
-type JobMapProps = {
-  pickup: { latitude: number; longitude: number };
-  dropoff: { latitude: number; longitude: number };
+export type JobMapProps = {
+  pickup?: MapCoord;
+  dropoff?: MapCoord;
+  pickupLat?: number;
+  pickupLng?: number;
+  dropoffLat?: number;
+  dropoffLng?: number;
+  showRoute?: boolean;
+  showsUserLocation?: boolean;
 };
 
 const JobMap: ComponentType<JobMapProps> =

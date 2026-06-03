@@ -1,13 +1,17 @@
 import { Colors } from '@/constants/theme';
+import { useDriver } from '@/context/DriverContext';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const { offersBadgeCount } = useDriver();
+
   return (
     <Tabs
       screenOptions={{
+        headerShown: false,
         headerStyle: { backgroundColor: Colors.background },
         headerTintColor: Colors.text,
         tabBarStyle: {
@@ -23,15 +27,15 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+          title: 'Main',
+          tabBarBadge: offersBadgeCount > 0 ? offersBadgeCount : undefined,
+          tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="history"
         options={{
-          title: 'History',
-          tabBarIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} />,
+          href: null,
         }}
       />
       <Tabs.Screen
