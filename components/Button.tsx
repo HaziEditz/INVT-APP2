@@ -13,9 +13,16 @@ export function Button({ title, onPress, variant = 'primary', disabled, style }:
   const bg =
     variant === 'primary' ? Colors.accent : variant === 'danger' ? Colors.danger : Colors.surfaceElevated;
   const textColor = variant === 'secondary' ? Colors.text : '#fff';
+
+  const handlePress = () => {
+    if (disabled) return;
+    console.log('[Button] pressed:', title);
+    onPress?.();
+  };
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       disabled={disabled}
       style={({ pressed }) => [
         styles.base,
