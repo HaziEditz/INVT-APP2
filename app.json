@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "BookaWaka Driver",
-    "slug": "bookawaka-driver",
+    "slug": "taxi360-driver",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
