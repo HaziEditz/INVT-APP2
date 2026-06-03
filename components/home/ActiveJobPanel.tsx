@@ -15,7 +15,6 @@ export function ActiveJobPanel() {
     cancelActiveJob,
     noShowActiveJob,
     recallJob,
-    setPaymentType,
   } = useDriver();
 
   if (!activeJob) return null;
