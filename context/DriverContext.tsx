@@ -3,8 +3,12 @@ import { Alert } from 'react-native';
 import { get, onValue, ref, update } from 'firebase/database';
 import { database } from '@/lib/firebase';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
+import { loadCompanyInfo } from '@/lib/company';
+import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
+import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
 import { acceptJobOffer, declineJobOffer, notifyServiceOn } from '@/lib/dispatchApi';
+import { tickWorkedMinutes } from '@/services/nztaService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import { notifyJobOffer } from '@/services/notificationService';
 import {
@@ -12,7 +16,17 @@ import {
   mapVehicleStatusToDisplay,
   writeOnlinePresence,
 } from '@/services/presenceService';
-import { ActiveJob, CompletedJob, JobOffer, JobStage, PaymentType, PresenceDisplayStatus, Vehicle, ZoneInfo } from '@/types';
+import {
+  ActiveJob,
+  CompanyInfo,
+  CompletedJob,
+  JobOffer,
+  JobStage,
+  PaymentType,
+  PresenceDisplayStatus,
+  Vehicle,
+  ZoneInfo,
+} from '@/types';
 import { useAuth } from '@/context/AuthContext';
 
 interface DriverContextValue {
@@ -26,9 +40,16 @@ interface DriverContextValue {
   jobOffer: JobOffer | null;
   activeJob: ActiveJob | null;
   completedJobs: CompletedJob[];
+  jobHistory: HistoryJob[];
+  jobHistoryLoading: boolean;
+  sessionEarnings: EarningsBreakdown;
+  historyEarnings: EarningsBreakdown;
+  company: CompanyInfo | null;
+  activeVehicleBodyType: string;
   isOffline: boolean;
   setSelectedVehicleId: (id: string) => void;
   refreshVehicles: () => Promise<void>;
+  refreshJobHistory: () => Promise<void>;
   startShift: (vehicleId?: string) => Promise<void>;
   endShift: () => Promise<void>;
   acceptOffer: () => Promise<void>;
@@ -79,6 +100,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [jobOffer, setJobOffer] = useState<JobOffer | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const [completedJobs, setCompletedJobs] = useState<CompletedJob[]>([]);
+  const [jobHistory, setJobHistory] = useState<HistoryJob[]>([]);
+  const [jobHistoryLoading, setJobHistoryLoading] = useState(false);
+  const [company, setCompany] = useState<CompanyInfo | null>(null);
   const [isOffline, setIsOffline] = useState(false);
   const shiftActiveRef = useRef(false);
   const readyForJobsRef = useRef(false);
@@ -135,6 +159,50 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     refreshVehicles();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.uid, driver?.companyId, driver?.id, driver?.vehicleId]);
+
+  useEffect(() => {
+    if (!driver?.companyId) {
+      setCompany(null);
+      return;
+    }
+    loadCompanyInfo(driver.companyId).then(setCompany);
+  }, [driver?.companyId]);
+
+  const refreshJobHistory = async () => {
+    if (!driver?.companyId || !driver.id) {
+      setJobHistory([]);
+      return;
+    }
+    setJobHistoryLoading(true);
+    try {
+      const rows = await loadDriverJobHistory(driver.companyId, driver.id);
+      setJobHistory(rows);
+    } catch (err) {
+      console.warn('[Driver] refreshJobHistory failed:', err);
+    } finally {
+      setJobHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshJobHistory();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.companyId, driver?.id]);
+
+  useEffect(() => {
+    if (!shiftActive) return;
+    const id = setInterval(() => {
+      tickWorkedMinutes(1).catch(() => undefined);
+    }, 60000);
+    return () => clearInterval(id);
+  }, [shiftActive]);
+
+  const sessionEarnings = sumBreakdown(completedJobs);
+  const historyEarnings = sumBreakdown(
+    jobHistory.filter((j) => j.status === 'completed').map((j) => ({ fare: j.fare, paymentType: j.paymentType })),
+  );
+  const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
+  const activeVehicleBodyType = activeVehicle?.bodyType ?? '—';
 
   useEffect(() => {
     if (!driver?.companyId || !selectedVehicleId) {
@@ -404,6 +472,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setCompletedJobs((prev) => [done, ...prev]);
     setActiveJob(null);
     await storeData(STORAGE_KEYS.activeJob, null);
+    refreshJobHistory().catch(() => undefined);
 
     if (driver && shiftActive) {
       const vehicleId = await resolveVehicleId();
@@ -439,9 +508,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         jobOffer,
         activeJob,
         completedJobs,
+        jobHistory,
+        jobHistoryLoading,
+        sessionEarnings,
+        historyEarnings: jobHistory.length > 0 ? historyEarnings : sessionEarnings,
+        company,
+        activeVehicleBodyType,
         isOffline,
         setSelectedVehicleId,
         refreshVehicles,
+        refreshJobHistory,
         startShift,
         endShift,
         acceptOffer,

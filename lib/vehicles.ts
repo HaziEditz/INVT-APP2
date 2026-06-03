@@ -72,23 +72,34 @@ function extractVehicleNumber(id: string, meta: Record<string, unknown>): string
   return id;
 }
 
-function extractVehicleType(meta: Record<string, unknown>): string {
+function extractServiceType(meta: Record<string, unknown>): string {
   const raw = String(
-    meta.vehicleType ??
-      meta.vehicletype ??
-      meta.VehicleType ??
-      meta.type ??
-      meta.serviceType ??
-      meta.service ??
-      meta.category ??
-      'Taxi',
+    meta.serviceType ?? meta.service ?? meta.category ?? meta.vehicleType ?? meta.vehicletype ?? 'Taxi',
   ).trim();
-  if (!raw) return 'Taxi';
   const lower = raw.toLowerCase();
   if (lower.includes('cab')) return 'Cab';
   if (lower.includes('taxi')) return 'Taxi';
-  if (lower.includes('van')) return 'Van';
-  return raw.charAt(0).toUpperCase() + raw.slice(1);
+  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Taxi';
+}
+
+function extractBodyType(meta: Record<string, unknown>): string {
+  const raw = String(
+    meta.bodyType ??
+      meta.BodyType ??
+      meta.vehicleClass ??
+      meta.class ??
+      meta.VehicleType ??
+      meta.vehicletype ??
+      meta.type ??
+      '',
+  ).trim();
+  const lower = raw.toLowerCase();
+  if (lower.includes('wav') || lower.includes('wheelchair')) return 'WAV';
+  if (lower.includes('van') || lower.includes('minibus')) return 'Van';
+  if (lower.includes('sedan') || lower.includes('car') || lower.includes('saloon')) return 'Sedan';
+  if (lower.includes('suv')) return 'SUV';
+  if (raw) return raw.charAt(0).toUpperCase() + raw.slice(1);
+  return 'Sedan';
 }
 
 async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Vehicle[]> {
@@ -107,12 +118,14 @@ async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Veh
     const upper = id.toUpperCase();
     const meta = registry[upper] ?? registry[id] ?? {};
     const number = extractVehicleNumber(upper, meta);
-    const vehicleType = extractVehicleType(meta);
+    const vehicleType = extractServiceType(meta);
+    const bodyType = extractBodyType(meta);
     const plate = String(meta.plate ?? meta.registration ?? meta.plateNumber ?? '').trim();
     return {
       id: upper,
       number,
       vehicleType,
+      bodyType,
       label: `${number} · ${vehicleType}`,
       plate: plate || '—',
     };

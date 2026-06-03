@@ -134,7 +134,7 @@ export default function HomeScreen() {
                 <View key={v.id} style={styles.vehicleRow}>
                   <View>
                     <Text style={styles.vehicleNumber}>{v.number}</Text>
-                    <Text style={styles.vehicleType}>{v.vehicleType}</Text>
+                    <Text style={styles.vehicleType}>{v.bodyType} · {v.vehicleType}</Text>
                   </View>
                   <Text style={styles.vehicleId}>{v.id}</Text>
                 </View>
@@ -151,7 +151,7 @@ export default function HomeScreen() {
               return (
                 <>
                   <Text style={styles.vehicleNumber}>{v?.number ?? selectedVehicleId}</Text>
-                  <Text style={styles.vehicleType}>{v?.vehicleType ?? 'Taxi'}</Text>
+                  <Text style={styles.vehicleType}>{v?.bodyType ?? 'Sedan'} · {v?.vehicleType ?? 'Taxi'}</Text>
                 </>
               );
             })()}

@@ -49,7 +49,7 @@ export function VehiclePickerModal({
               >
                 <View>
                   <Text style={styles.number}>{v.number}</Text>
-                  <Text style={styles.type}>{v.vehicleType}</Text>
+                  <Text style={styles.type}>{v.bodyType} · {v.vehicleType}</Text>
                 </View>
                 <Text style={styles.idHint}>{v.id}</Text>
               </Pressable>

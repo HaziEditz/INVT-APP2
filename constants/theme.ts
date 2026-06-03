@@ -34,5 +34,10 @@ export const JOB_TYPES = ['Taxi', 'Freight', 'Food', 'Tow'] as const;
 
 export const JOB_STAGES = ['pickup', 'arrived', 'onboard', 'complete'] as const;
 
-export const NZTA_MAX_HOURS = 13;
+/** Maximum driving/work time before mandatory break consideration */
+export const NZTA_MAX_WORK_HOURS = 13;
+/** Maximum total shift length (work + break time) */
+export const NZTA_MAX_SHIFT_HOURS = 14;
 export const NZTA_BREAK_AFTER_HOURS = 5;
+/** @deprecated use NZTA_MAX_WORK_HOURS */
+export const NZTA_MAX_HOURS = NZTA_MAX_WORK_HOURS;

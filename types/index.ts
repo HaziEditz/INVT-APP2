@@ -20,8 +20,10 @@ export interface Vehicle {
   id: string;
   /** Display number e.g. 201 */
   number: string;
-  /** Taxi, Cab, Van, etc. */
+  /** Service type: Taxi, Cab */
   vehicleType: string;
+  /** Body class: Sedan, Van, WAV */
+  bodyType: string;
   label: string;
   plate: string;
 }
@@ -87,6 +89,14 @@ export interface OfflineQueueItem {
 export interface NztaHoursState {
   shiftStartedAt: number | null;
   workedMinutes: number;
+  breakMinutes: number;
   lastBreakAt: number | null;
   breakReminderShown: boolean;
+  /** If set, defer break alert until this timestamp */
+  breakDeferredUntil: number | null;
+}
+
+export interface CompanyInfo {
+  id: string;
+  name: string;
 }
