@@ -69,14 +69,16 @@
       "policy": "appVersion"
     },
     "updates": {
+      "url": "https://u.expo.dev/8cf080aa-8fbc-4bce-b653-6c865d1db592",
       "fallbackToCacheTimeout": 0
     },
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "00000000-0000-0000-0000-000000000000"
+        "projectId": "8cf080aa-8fbc-4bce-b653-6c865d1db592"
       },
       "dispatchApiUrl": "https://invt-production.up.railway.app"
-    }
+    },
+    "owner": "lovesaf"
   }
 }
