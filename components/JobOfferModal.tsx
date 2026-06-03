@@ -26,8 +26,8 @@ export function JobOfferModal() {
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
 
   return (
-    <Modal visible transparent animationType="slide" statusBarTranslucent>
-      <View style={styles.overlay}>
+    <Modal visible transparent animationType="slide" statusBarTranslucent presentationStyle="overFullScreen">
+      <View style={styles.overlay} pointerEvents="box-none">
         <View style={styles.card}>
           <Text style={styles.title}>Job offer</Text>
           <Text style={styles.timer}>{secondsLeft}s to respond</Text>
@@ -83,7 +83,7 @@ export function JobOfferModal() {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'flex-end',
   },
   card: {

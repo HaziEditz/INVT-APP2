@@ -1,15 +1,25 @@
 import { Button } from '@/components/Button';
 import { ActiveJobPanel } from '@/components/home/ActiveJobPanel';
+import { DispatchTripOverlay } from '@/components/home/DispatchTripOverlay';
 import { FullScreenMapModal } from '@/components/home/FullScreenMapModal';
 import { HomeStatusBar } from '@/components/home/HomeStatusBar';
 import { MeterOverlay } from '@/components/home/MeterOverlay';
+import { QueuedOffersSheet } from '@/components/home/QueuedOffersSheet';
 import { TariffPicker } from '@/components/home/TariffPicker';
 import JobMap from '@/components/JobMap';
 import { VehiclePickerModal } from '@/components/VehiclePickerModal';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 export default function MainScreen() {
   const {
@@ -41,6 +51,7 @@ export default function MainScreen() {
   const [pickerVehicle, setPickerVehicle] = useState(selectedVehicleId);
   const [tariffOpen, setTariffOpen] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
+  const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -94,12 +105,14 @@ export default function MainScreen() {
     startHail();
   };
 
-  const showMeter = hailActive && !!meter;
-  const tripActive = !!activeJob || showMeter;
+  const showHailMeter = hailActive && !!meter;
+  const showDispatchMeter = !!activeJob && !hailActive;
+  const tripActive = showHailMeter || showDispatchMeter;
+  const mapShowsRoute = !!activeJob;
 
   return (
     <View style={styles.root}>
-      <HomeStatusBar />
+      <HomeStatusBar onOffersPress={() => setQueueSheetOpen(true)} />
 
       {jobEditNotice ? (
         <Pressable style={styles.notice} onPress={dismissJobEditNotice}>
@@ -114,12 +127,12 @@ export default function MainScreen() {
           pickupLng={activeJob?.pickupLng}
           dropoffLat={activeJob?.dropoffLat}
           dropoffLng={activeJob?.dropoffLng}
-          showRoute={!!activeJob}
+          showRoute={mapShowsRoute}
           showsUserLocation={shiftActive}
         />
 
-        {showMeter && meter ? (
-          <View style={styles.meterWrap} pointerEvents="box-none">
+        {showHailMeter && meter ? (
+          <View style={styles.overlayTop} pointerEvents="box-none">
             <MeterOverlay
               meter={meter}
               onPause={pauseMeter}
@@ -129,58 +142,82 @@ export default function MainScreen() {
           </View>
         ) : null}
 
-        {!shiftActive ? (
-          <View style={styles.offlineOverlay}>
-            <Text style={styles.offlineTitle}>Off shift</Text>
-            <Text style={styles.offlineSub}>Start shift to go online and receive jobs</Text>
-            <Button title="Start Shift" onPress={openStartFlow} disabled={vehiclesLoading} />
-            {vehiclesLoading ? <ActivityIndicator color={Colors.accent} style={{ marginTop: 12 }} /> : null}
+        {showDispatchMeter && activeJob ? (
+          <View style={styles.overlayTop} pointerEvents="box-none">
+            <DispatchTripOverlay job={activeJob} onExpand={() => setMapExpanded(true)} />
           </View>
+        ) : null}
+
+        {tripActive ? (
+          <Pressable style={styles.expandFab} onPress={() => setMapExpanded(true)}>
+            <Text style={styles.expandFabText}>⛶ Full screen</Text>
+          </Pressable>
         ) : null}
       </View>
 
-      {activeJob ? <ActiveJobPanel /> : null}
+      <ScrollView
+        style={styles.lower}
+        contentContainerStyle={styles.lowerContent}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+      >
+        {activeJob ? <ActiveJobPanel /> : null}
 
-      {shiftActive ? (
-        <>
-          <TariffPicker
-            tariffs={tariffs}
-            selected={selectedTariff}
-            open={tariffOpen}
-            onOpen={() => setTariffOpen(true)}
-            onClose={() => setTariffOpen(false)}
-            onSelect={setSelectedTariff}
-          />
-
-          <View style={styles.bottomBar}>
-            <Button
-              title={hailActive ? 'END HAIL TRIP' : 'HAIL PASSENGER'}
-              onPress={onHailPress}
-              style={styles.hailBtn}
+        {shiftActive ? (
+          <>
+            <TariffPicker
+              tariffs={tariffs}
+              selected={selectedTariff}
+              open={tariffOpen}
+              onOpen={() => setTariffOpen(true)}
+              onClose={() => setTariffOpen(false)}
+              onSelect={setSelectedTariff}
             />
-            <Button title="END SHIFT" variant="danger" onPress={() => {
-              Alert.alert('End shift?', 'You will go offline.', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'End shift', style: 'destructive', onPress: endShift },
-              ]);
-            }} />
+            <View style={styles.bottomBar}>
+              <Button
+                title={hailActive ? 'END HAIL TRIP' : 'HAIL PASSENGER'}
+                onPress={onHailPress}
+              />
+              <Button
+                title="END SHIFT"
+                variant="danger"
+                onPress={() => {
+                  Alert.alert('End shift?', 'You will go offline.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'End shift', style: 'destructive', onPress: endShift },
+                  ]);
+                }}
+              />
+            </View>
+            {readyForJobs && presenceStatus === 'Online' && !tripActive && !activeJob ? (
+              <Text style={styles.hint}>
+                Online · {zone.name || 'Awaiting zone'} · ready for offers
+              </Text>
+            ) : null}
+          </>
+        ) : (
+          <View style={styles.offlineBar}>
+            <Text style={styles.offlineTitle}>Off shift</Text>
+            <Text style={styles.offlineSub}>Start shift to go online</Text>
+            <Button title="Start Shift" onPress={openStartFlow} disabled={vehiclesLoading} />
+            {vehiclesLoading ? (
+              <ActivityIndicator color={Colors.accent} style={{ marginTop: 8 }} />
+            ) : null}
           </View>
-
-          {readyForJobs && presenceStatus === 'Online' && !tripActive ? (
-            <Text style={styles.hint}>Online · {zone.name || 'Awaiting zone'} · ready for offers</Text>
-          ) : null}
-        </>
-      ) : null}
+        )}
+      </ScrollView>
 
       <FullScreenMapModal
         visible={mapExpanded}
         onClose={() => setMapExpanded(false)}
         activeJob={activeJob}
         meter={meter}
-        showMeter={showMeter}
+        showMeter={showHailMeter}
         onPause={pauseMeter}
         onWait={toggleWaitMeter}
       />
+
+      <QueuedOffersSheet visible={queueSheetOpen} onClose={() => setQueueSheetOpen(false)} />
 
       <VehiclePickerModal
         visible={pickerOpen}
@@ -201,25 +238,41 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.warning + '33',
     padding: 10,
     marginHorizontal: 12,
+    marginTop: 4,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: Colors.warning,
   },
   noticeText: { color: Colors.text, fontWeight: '600' },
   noticeDismiss: { color: Colors.textMuted, fontSize: 11, marginTop: 4 },
-  mapSection: { flex: 1, minHeight: 200, position: 'relative' },
-  meterWrap: { position: 'absolute', left: 0, right: 0, top: 8 },
-  offlineOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: Colors.background + 'CC',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-    gap: 12,
+  mapSection: { flex: 1, minHeight: 180, position: 'relative' },
+  overlayTop: { position: 'absolute', left: 0, right: 0, top: 4 },
+  expandFab: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    backgroundColor: Colors.surface + 'DD',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-  offlineTitle: { color: Colors.text, fontSize: 22, fontWeight: '800' },
-  offlineSub: { color: Colors.textMuted, textAlign: 'center', marginBottom: 8 },
-  bottomBar: { paddingHorizontal: 12, paddingVertical: 10, gap: 8, borderTopWidth: 1, borderTopColor: Colors.border },
-  hailBtn: { marginBottom: 0 },
-  hint: { color: Colors.textMuted, fontSize: 11, textAlign: 'center', paddingBottom: 6 },
+  expandFabText: { color: Colors.accent, fontWeight: '700', fontSize: 12 },
+  lower: { flexGrow: 0, maxHeight: '42%' },
+  lowerContent: { paddingBottom: 4 },
+  offlineBar: {
+    padding: 16,
+    marginHorizontal: 12,
+    marginTop: 8,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 8,
+  },
+  offlineTitle: { color: Colors.text, fontSize: 18, fontWeight: '800' },
+  offlineSub: { color: Colors.textMuted, fontSize: 14 },
+  bottomBar: { paddingHorizontal: 12, paddingTop: 6, gap: 8 },
+  hint: { color: Colors.textMuted, fontSize: 11, textAlign: 'center', paddingBottom: 8 },
 });

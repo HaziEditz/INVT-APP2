@@ -1,7 +1,8 @@
 import { jobCoords, regionForRoute } from '@/lib/geo';
+import { shouldUseGoogleMapsProvider } from '@/lib/mapConfig';
 import { Colors } from '@/constants/theme';
 import { useEffect, useRef } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 export type MapCoord = { latitude: number; longitude: number };
@@ -41,7 +42,7 @@ export default function JobMap({
       <MapView
         ref={mapRef}
         style={styles.map}
-        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+        provider={shouldUseGoogleMapsProvider() ? PROVIDER_GOOGLE : undefined}
         initialRegion={region}
         showsUserLocation={showsUserLocation}
         showsMyLocationButton={false}

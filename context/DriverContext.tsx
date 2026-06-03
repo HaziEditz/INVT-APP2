@@ -78,6 +78,7 @@ interface DriverContextValue {
   toggleWaitMeter: () => void;
   setSelectedTariff: (t: Tariff) => void;
   dismissJobEditNotice: () => void;
+  promoteQueuedOffer: (offerId: string) => void;
   pushDemoOffer: () => void;
 }
 
@@ -177,7 +178,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const readyForJobsRef = useRef(false);
   const hailActiveRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
-  const lastOfferIdRef = useRef<string | null>(null);
+  const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
   const meterTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const waitTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -206,6 +207,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         shiftActiveRef.current = true;
         setReadyForJobs(true);
         readyForJobsRef.current = true;
+        setPresenceStatus('Online');
       }
     });
     getData<string>(STORAGE_KEYS.selectedTariffId).then((id) => {
@@ -388,8 +390,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const handleIncomingOffer = async (val: Record<string, unknown>) => {
     const offer = parseJobOffer(val);
-    if (offer.id === lastOfferIdRef.current) return;
-    lastOfferIdRef.current = offer.id;
+    const seen = lastOfferSeenRef.current;
+    if (seen?.id === offer.id && Date.now() - seen.at < 2500) return;
+    lastOfferSeenRef.current = { id: offer.id, at: Date.now() };
 
     const onHail = hailActiveRef.current;
     const onJob = !!activeJobIdRef.current;
@@ -486,6 +489,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     setShiftActive(true);
     shiftActiveRef.current = true;
+    setReadyForJobs(true);
+    readyForJobsRef.current = true;
+    setPresenceStatus('Online');
     await storeData(STORAGE_KEYS.shiftActive, true);
     const { startShiftClock } = await import('@/services/nztaService');
     await startShiftClock();
@@ -609,6 +615,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       await enqueueOfflineItem({ type: 'job_update', payload: { action: 'decline', jobId: jobOffer.id } });
     }
     setJobOffer(null);
+    lastOfferSeenRef.current = null;
+  };
+
+  const promoteQueuedOffer = (offerId: string) => {
+    const offer = queuedOffers.find((o) => o.id === offerId);
+    if (!offer) return;
+    setQueuedOffers((prev) => prev.filter((o) => o.id !== offerId));
+    setJobOffer({ ...offer, silent: false });
   };
 
   const advanceStage = async () => {
@@ -831,6 +845,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         toggleWaitMeter,
         setSelectedTariff,
         dismissJobEditNotice,
+        promoteQueuedOffer,
         pushDemoOffer,
       }}
     >

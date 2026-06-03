@@ -11,12 +11,15 @@ function toggleLabel(status: PresenceDisplayStatus, shiftActive: boolean) {
   return 'Online';
 }
 
-export function HomeStatusBar() {
+type Props = {
+  onOffersPress?: () => void;
+};
+
+export function HomeStatusBar({ onOffersPress }: Props) {
   const insets = useSafeAreaInsets();
   const {
     presenceStatus,
     shiftActive,
-    readyForJobs,
     zone,
     selectedVehicleId,
     vehicles,
@@ -26,13 +29,11 @@ export function HomeStatusBar() {
 
   const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
   const vehicleLabel = vehicle?.number ?? selectedVehicleId ?? '—';
-  const zoneName = zone.name?.trim() || (shiftActive ? 'No zone' : '—');
-  const queue =
+  const zoneName = zone.name?.trim() || (shiftActive ? 'Awaiting zone' : '—');
+  const queueLabel =
     zone.position > 0
-      ? `#${zone.position}${zone.totalInQueue > 0 ? ` / ${zone.totalInQueue}` : ''}`
-      : shiftActive
-        ? '—'
-        : '';
+      ? `${zone.position}${zone.totalInQueue > 0 ? ` of ${zone.totalInQueue}` : ''}`
+      : '—';
 
   const isOnline = presenceStatus === 'Online' && shiftActive;
   const isAway = presenceStatus === 'Away' && shiftActive;
@@ -49,14 +50,23 @@ export function HomeStatusBar() {
       </Pressable>
 
       <View style={styles.meta}>
-        <Text style={styles.zone} numberOfLines={1}>{zoneName}</Text>
-        <Text style={styles.sub}>
-          {vehicleLabel}
-          {queue ? ` · Queue ${queue}` : ''}
-          {offersBadgeCount > 0 ? ` · ${offersBadgeCount} offer(s)` : ''}
-        </Text>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Zone</Text>
+          <Text style={styles.zone} numberOfLines={1}>{zoneName}</Text>
+        </View>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Vehicle</Text>
+          <Text style={styles.metaValue}>{vehicleLabel}</Text>
+          <Text style={styles.metaLabel}>Queue</Text>
+          <Text style={styles.metaValue}>{queueLabel}</Text>
+        </View>
       </View>
 
+      {offersBadgeCount > 0 && onOffersPress ? (
+        <Pressable style={styles.badge} onPress={onOffersPress}>
+          <Text style={styles.badgeText}>{offersBadgeCount}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -84,7 +94,18 @@ const styles = StyleSheet.create({
   toggleOff: { backgroundColor: Colors.textMuted },
   toggleText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   toggleHint: { color: 'rgba(255,255,255,0.8)', fontSize: 10 },
-  meta: { flex: 1 },
-  zone: { color: Colors.text, fontSize: 16, fontWeight: '700' },
-  sub: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
+  meta: { flex: 1, gap: 2 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  metaLabel: { color: Colors.textMuted, fontSize: 10, textTransform: 'uppercase' },
+  metaValue: { color: Colors.text, fontSize: 13, fontWeight: '600', marginRight: 8 },
+  zone: { color: Colors.text, fontSize: 15, fontWeight: '700', flex: 1 },
+  badge: {
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: '#fff', fontWeight: '800', fontSize: 13 },
 });

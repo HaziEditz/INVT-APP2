@@ -33,7 +33,7 @@ export function ActiveJobPanel() {
   };
 
   return (
-    <View style={styles.panel}>
+    <ScrollView style={styles.panel} nestedScrollEnabled showsVerticalScrollIndicator={false}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
         {STAGES.map((s, i) => (
           <View key={s} style={styles.stageChip}>
@@ -71,7 +71,7 @@ export function ActiveJobPanel() {
           <Button title="Recall" variant="secondary" onPress={recallJob} />
         ) : null}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     padding: 12,
-    maxHeight: 220,
+    maxHeight: 200,
   },
   stageScroll: { marginBottom: 8 },
   stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
