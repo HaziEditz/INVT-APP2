@@ -60,8 +60,7 @@
           "icon": "./assets/images/icon.png",
           "color": "#1a73e8"
         }
-      ],
-      "react-native-maps"
+      ]
     ],
     "experiments": {
       "typedRoutes": true
