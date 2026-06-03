@@ -1,8 +1,7 @@
 import { jobCoords, regionForRoute } from '@/lib/geo';
 import { Colors } from '@/constants/theme';
-import { MapErrorFallback } from '@/components/MapErrorFallback';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
@@ -33,7 +32,6 @@ export default function JobMap({
   showsUserLocation = true,
 }: Props) {
   const mapRef = useRef<MapView | null>(null);
-  const [mapBroken, setMapBroken] = useState(false);
 
   const p = pickup ?? jobCoords(pickupLat, pickupLng);
   const d = dropoff ?? jobCoords(dropoffLat, dropoffLng, p.latitude + 0.02, p.longitude + 0.02);
@@ -47,10 +45,6 @@ export default function JobMap({
     }
   }, [p.latitude, p.longitude, d.latitude, d.longitude], 'JobMap-animate');
 
-  if (mapBroken) {
-    return <MapErrorFallback />;
-  }
-
   return (
     <View style={styles.wrap}>
       <MapView
@@ -63,10 +57,6 @@ export default function JobMap({
         loadingEnabled
         mapType="standard"
         onMapReady={() => console.log('[JobMap] map ready', { provider: MAP_PROVIDER, platform: Platform.OS })}
-        onError={(e) => {
-          console.error('[JobMap] native error:', e?.nativeEvent?.error ?? e);
-          setMapBroken(true);
-        }}
       >
         <Marker coordinate={p} title="Pickup" pinColor={Colors.accent} />
         <Marker coordinate={d} title="Dropoff" pinColor={Colors.success} />
