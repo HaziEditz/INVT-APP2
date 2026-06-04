@@ -1,67 +1,130 @@
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+type NotificationsModule = typeof import('expo-notifications');
 
-export async function registerForPushNotifications() {
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('job-offers', {
-      name: 'Job Offers',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#1a73e8',
-    });
-    await Notifications.setNotificationChannelAsync('compliance', {
-      name: 'NZTA & Break Reminders',
-      importance: Notifications.AndroidImportance.HIGH,
-    });
-  }
+let notificationsModule: NotificationsModule | null | undefined;
 
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  let finalStatus = existing;
-  if (existing !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-  if (finalStatus !== 'granted') return null;
-
-  const token = await Notifications.getExpoPushTokenAsync();
-  return token.data;
+function isExpoGo(): boolean {
+  return Constants.appOwnership === 'expo';
 }
 
-export async function notifyJobOffer(title: string, body: string) {
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      sound: true,
-      data: { type: 'job_offer' },
-      ...(Platform.OS === 'android' ? { channelId: 'job-offers' } : {}),
-    },
-    trigger: null,
-  });
+function pushNotificationsSupported(): boolean {
+  return !isExpoGo();
 }
 
-export async function notifyBreakReminder(title: string, body: string, delayMinutes?: number) {
-  const trigger =
-    delayMinutes && delayMinutes > 0
-      ? { seconds: Math.max(60, delayMinutes * 60), repeats: false as const }
-      : null;
+function loadNotifications(): NotificationsModule | null {
+  if (!pushNotificationsSupported()) {
+    return null;
+  }
+  if (notificationsModule !== undefined) {
+    return notificationsModule;
+  }
 
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      sound: true,
-      data: { type: 'break_reminder' },
-      ...(Platform.OS === 'android' ? { channelId: 'compliance' } : {}),
-    },
-    trigger,
-  });
+  try {
+    // Lazy load — push tokens are not supported in Expo Go (SDK 53+).
+    const mod = require('expo-notifications') as NotificationsModule;
+    mod.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+    notificationsModule = mod;
+    return mod;
+  } catch {
+    notificationsModule = null;
+    return null;
+  }
+}
+
+export async function registerForPushNotifications(): Promise<string | null> {
+  const Notifications = loadNotifications();
+  if (!Notifications) {
+    return null;
+  }
+
+  try {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('job-offers', {
+        name: 'Job Offers',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#1a73e8',
+      });
+      await Notifications.setNotificationChannelAsync('compliance', {
+        name: 'NZTA & Break Reminders',
+        importance: Notifications.AndroidImportance.HIGH,
+      });
+    }
+
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
+    if (existing !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') {
+      return null;
+    }
+
+    const token = await Notifications.getExpoPushTokenAsync();
+    return token.data;
+  } catch {
+    return null;
+  }
+}
+
+export async function notifyJobOffer(title: string, body: string): Promise<void> {
+  const Notifications = loadNotifications();
+  if (!Notifications) {
+    return;
+  }
+
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: true,
+        data: { type: 'job_offer' },
+        ...(Platform.OS === 'android' ? { channelId: 'job-offers' } : {}),
+      },
+      trigger: null,
+    });
+  } catch {
+    // Optional — ignore when notifications unavailable
+  }
+}
+
+export async function notifyBreakReminder(
+  title: string,
+  body: string,
+  delayMinutes?: number
+): Promise<void> {
+  const Notifications = loadNotifications();
+  if (!Notifications) {
+    return;
+  }
+
+  try {
+    const trigger =
+      delayMinutes && delayMinutes > 0
+        ? { seconds: Math.max(60, delayMinutes * 60), repeats: false as const }
+        : null;
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: true,
+        data: { type: 'break_reminder' },
+        ...(Platform.OS === 'android' ? { channelId: 'compliance' } : {}),
+      },
+      trigger,
+    });
+  } catch {
+    // Optional — ignore when notifications unavailable
+  }
 }
