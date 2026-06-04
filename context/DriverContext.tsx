@@ -11,10 +11,11 @@ import { loadDriverVehicles } from '@/lib/vehicles';
 import { acceptJobOffer, declineJobOffer } from '@/lib/dispatchApi';
 import { tickWorkedMinutes } from '@/services/nztaService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
+import { subscribePendingJobs } from '@/lib/pendingJobs';
 import {
   clearOnlinePresence,
   isVehicleStatusAvailable,
-  mapVehicleStatusToDisplay,
+  moveDriverToEndOfQueue,
   startShiftOnline,
   writeOnlinePresence,
 } from '@/services/presenceService';
@@ -56,7 +57,9 @@ interface DriverContextValue {
   tariffs: Tariff[];
   selectedTariff: Tariff;
   queuedOffers: QueuedOffer[];
+  pendingOffers: JobOffer[];
   offersBadgeCount: number;
+  activeVehicle: Vehicle | undefined;
   jobEditNotice: string | null;
   completedJobs: CompletedJob[];
   jobHistory: HistoryJob[];
@@ -89,7 +92,10 @@ interface DriverContextValue {
   setSelectedTariff: (t: Tariff) => void;
   dismissJobEditNotice: () => void;
   promoteQueuedOffer: (offerId: string) => void;
+  pickOfferFromList: (offerId: string) => Promise<void>;
   canReceiveJobOffers: boolean;
+  goAway: () => Promise<void>;
+  goAvailable: () => Promise<void>;
 }
 
 const DriverContext = createContext<DriverContextValue | null>(null);
@@ -168,8 +174,22 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     dropoffLat: val.dropoffLat != null ? Number(val.dropoffLat) : undefined,
     dropoffLng: val.dropoffLng != null ? Number(val.dropoffLng) : undefined,
     silent: !!val.silent,
+    vehicleTypeRequired: val.VehicleType
+      ? String(val.VehicleType)
+      : val.vehicleType
+        ? String(val.vehicleType)
+        : undefined,
+    passengers:
+      val.Passengers != null
+        ? Number(val.Passengers)
+        : val.passengers != null
+          ? Number(val.passengers)
+          : undefined,
+    serviceTypeRaw: val.ServiceType ? String(val.ServiceType) : val.serviceType ? String(val.serviceType) : undefined,
   };
 }
+
+type AwayIntent = 'none' | 'manual' | 'missed';
 
 const EMPTY_METER: MeterState = {
   running: false,
@@ -204,6 +224,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [tariffs, setTariffsState] = useState<Tariff[]>([]);
   const [selectedTariff, setSelectedTariffState] = useState<Tariff>(NO_TARIFF_CONFIGURED);
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
+  const [pendingOffers, setPendingOffers] = useState<JobOffer[]>([]);
+  const awayIntentRef = useRef<AwayIntent>('none');
   const [jobEditNotice, setJobEditNotice] = useState<string | null>(null);
   const shiftActiveRef = useRef(false);
   const readyForJobsRef = useRef(false);
@@ -370,6 +392,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const activeVehicleBodyType = activeVehicle?.bodyType ?? '—';
 
   useSafeEffect(() => {
+    if (!shiftActive || !driver?.companyId || !activeVehicle) {
+      setPendingOffers([]);
+      return;
+    }
+    try {
+      return subscribePendingJobs(driver.companyId, activeVehicle, setPendingOffers);
+    } catch (err) {
+      console.error('[Driver] pending jobs subscribe failed', err);
+    }
+  }, [shiftActive, driver?.companyId, selectedVehicleId, activeVehicle?.id], 'Driver-pendingJobs');
+
+  useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
       setZone(EMPTY_ZONE);
       return;
@@ -416,13 +450,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return onValue(presenceRef, (snap) => {
         try {
           if (!snap.exists()) {
-            setPresenceStatus(shiftActiveRef.current ? 'Away' : 'Offline');
-            setReadyForJobs(false);
-            readyForJobsRef.current = false;
+            if (!shiftActiveRef.current) {
+              setPresenceStatus('Offline');
+              setReadyForJobs(false);
+              readyForJobsRef.current = false;
+            }
             return;
           }
           const data = snap.val() as Record<string, unknown>;
-          const rawStatus = String(data.vehiclestatus ?? data.VehicleStatus ?? '');
+          const rawStatus = String(data.vehiclestatus ?? data.VehicleStatus ?? '').toLowerCase();
           const myId = String(driver.id ?? '');
           const nodeDriverId = String(data.driverid ?? data.driverId ?? '');
           if (nodeDriverId && myId && nodeDriverId !== myId && nodeDriverId !== String(driver.uid)) {
@@ -431,15 +467,31 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             readyForJobsRef.current = false;
             return;
           }
-          const mapped = mapVehicleStatusToDisplay(rawStatus);
-          setPresenceStatus(mapped);
-          const available = isVehicleStatusAvailable(rawStatus);
-          if (shiftActiveRef.current && available) {
-            setReadyForJobs(true);
-            readyForJobsRef.current = true;
-          } else {
-            setReadyForJobs(false);
-            readyForJobsRef.current = false;
+
+          if (rawStatus === 'away' || rawStatus === 'offline') {
+            if (awayIntentRef.current !== 'none') {
+              setPresenceStatus('Away');
+              setReadyForJobs(false);
+              readyForJobsRef.current = false;
+            }
+            return;
+          }
+
+          if (isVehicleStatusAvailable(rawStatus)) {
+            if (awayIntentRef.current === 'none' && shiftActiveRef.current) {
+              setPresenceStatus('Online');
+              setReadyForJobs(true);
+              readyForJobsRef.current = true;
+            }
+            return;
+          }
+
+          if (rawStatus === 'picking' || rawStatus === 'assigned' || rawStatus === 'busy') {
+            if (awayIntentRef.current === 'none') {
+              setPresenceStatus('Online');
+              setReadyForJobs(false);
+              readyForJobsRef.current = false;
+            }
           }
         } catch (err) {
           console.error('[Driver] presence listener', err);
@@ -452,9 +504,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const canReceiveJobOffers =
     shiftActive && readyForJobs && presenceStatus === 'Online';
-  const offersBadgeCount = canReceiveJobOffers
-    ? queuedOffers.length + (jobOffer && !jobOffer.silent ? 1 : 0)
-    : 0;
+  const offersBadgeCount = shiftActive ? pendingOffers.length : 0;
   const nextQueuedOffer = canReceiveJobOffers ? (queuedOffers[0] ?? null) : null;
 
   useSafeEffect(() => {
@@ -626,7 +676,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     shiftActiveRef.current = true;
     setReadyForJobs(false);
     readyForJobsRef.current = false;
-    setPresenceStatus('Away');
+    awayIntentRef.current = 'none';
+    setPresenceStatus('Offline');
     await storeData(STORAGE_KEYS.shiftActive, true);
 
     try {
@@ -681,20 +732,48 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     console.log('[Shift] startShift complete — safe to navigate to tabs');
   };
 
-  const togglePresence = async () => {
+  const goAway = async () => {
     if (!driver || !shiftActive) return;
     const vehicleId = await resolveVehicleId();
     if (!vehicleId) return;
-    if (presenceStatus === 'Online') {
-      await writeOnlinePresence(driver, vehicleId, 'Away');
-      setPresenceStatus('Away');
-      setReadyForJobs(false);
-      readyForJobsRef.current = false;
+    awayIntentRef.current = 'manual';
+    await writeOnlinePresence(driver, vehicleId, 'Away');
+    setPresenceStatus('Away');
+    setReadyForJobs(false);
+    readyForJobsRef.current = false;
+  };
+
+  const goAvailable = async () => {
+    if (!driver || !shiftActive) return;
+    const vehicleId = await resolveVehicleId();
+    if (!vehicleId) return;
+    const wasMissed = awayIntentRef.current === 'missed';
+    awayIntentRef.current = 'none';
+    await writeOnlinePresence(driver, vehicleId, 'Available');
+    if (wasMissed) {
+      await moveDriverToEndOfQueue(driver, vehicleId);
+    }
+    setPresenceStatus('Online');
+    setReadyForJobs(true);
+    readyForJobsRef.current = true;
+  };
+
+  const setAwayAfterMissedOffer = async () => {
+    if (!driver || !shiftActive) return;
+    const vehicleId = await resolveVehicleId();
+    if (!vehicleId) return;
+    awayIntentRef.current = 'missed';
+    await writeOnlinePresence(driver, vehicleId, 'Away');
+    setPresenceStatus('Away');
+    setReadyForJobs(false);
+    readyForJobsRef.current = false;
+  };
+
+  const togglePresence = async () => {
+    if (presenceStatus === 'Online' && readyForJobs) {
+      await goAway();
     } else {
-      await writeOnlinePresence(driver, vehicleId, 'Available');
-      setPresenceStatus('Online');
-      setReadyForJobs(true);
-      readyForJobsRef.current = true;
+      await goAvailable();
     }
   };
 
@@ -702,10 +781,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const vehicleId = await resolveVehicleId();
     setShiftActive(false);
     shiftActiveRef.current = false;
+    awayIntentRef.current = 'none';
     await storeData(STORAGE_KEYS.shiftActive, false);
     await storeData(STORAGE_KEYS.vehicleSessionReady, false);
     setReadyForJobs(false);
     readyForJobsRef.current = false;
+    setPendingOffers([]);
     endHailInternal();
 
     if (driver && vehicleId) {
@@ -763,6 +844,44 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     setJobOffer(null);
     lastOfferSeenRef.current = null;
+    if (shiftActive) {
+      await setAwayAfterMissedOffer();
+    }
+  };
+
+  const pickOfferFromList = async (offerId: string) => {
+    const offer = pendingOffers.find((o) => o.id === offerId);
+    if (!offer || !driver) return;
+
+    const onTrip = hailActiveRef.current || !!activeJobIdRef.current;
+    if (onTrip) {
+      enqueueOffer(offer);
+      return;
+    }
+
+    try {
+      await acceptJobOffer(offer.id, driver.id);
+    } catch {
+      await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offer.id } });
+    }
+
+    const job: ActiveJob = {
+      ...offer,
+      stage: 'pickup',
+      startedAt: Date.now(),
+      distanceKm: 0,
+      durationMin: 0,
+      fare: offer.fixedFare ?? offer.estimatedFare ?? 0,
+    };
+    setActiveJob(job);
+    activeJobIdRef.current = job.id;
+    await storeData(STORAGE_KEYS.activeJob, job);
+    setJobOffer(null);
+
+    const vehicleId = await resolveVehicleId();
+    if (vehicleId) {
+      writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+    }
   };
 
   const promoteQueuedOffer = (offerId: string) => {
@@ -999,7 +1118,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         tariffs,
         selectedTariff,
         queuedOffers,
+        pendingOffers,
         offersBadgeCount,
+        activeVehicle,
         jobEditNotice,
         completedJobs,
         jobHistory,
@@ -1032,7 +1153,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         setSelectedTariff,
         dismissJobEditNotice,
         promoteQueuedOffer,
+        pickOfferFromList,
         canReceiveJobOffers,
+        goAway,
+        goAvailable,
       }}
     >
       {children}

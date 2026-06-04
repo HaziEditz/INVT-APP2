@@ -68,7 +68,7 @@ export default function BookingsTab() {
 
   return (
     <ScrollView style={sharedStyles.screen} contentContainerStyle={sharedStyles.content}>
-      <ScreenHeader title="Bookings" subtitle="Create a pre-booking for a passenger" />
+      <ScreenHeader title="Add Booking" subtitle="Create a pre-booking for a passenger" />
       <Text style={styles.hint}>Works while on trip — booking goes to company dispatch.</Text>
 
       <Input label="Passenger name" value={form.passengerName} onChangeText={(v) => update('passengerName', v)} />

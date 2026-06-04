@@ -1,19 +1,11 @@
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Colors } from '@/constants/theme';
-import { useDriver } from '@/context/DriverContext';
-import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
-  const { offersBadgeCount } = useDriver();
-
-  useSafeEffect(() => {
-    console.log('[TabLayout] mounted', { offersBadgeCount });
-    return () => console.log('[TabLayout] unmounted');
-  }, [], 'TabLayout-mount');
 
   return (
     <ErrorBoundary name="Tabs">
@@ -36,15 +28,14 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Main',
-          tabBarBadge: offersBadgeCount > 0 ? offersBadgeCount : undefined,
           tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="bookings"
         options={{
-          title: 'Bookings',
-          tabBarIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
+          title: 'Add Booking',
+          tabBarIcon: ({ color, size }) => <Ionicons name="add-circle" size={size} color={color} />,
         }}
       />
       <Tabs.Screen

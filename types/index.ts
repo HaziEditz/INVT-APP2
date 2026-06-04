@@ -25,7 +25,13 @@ export interface Vehicle {
   bodyType: string;
   label: string;
   plate: string;
+  seatCapacity: number;
+  hasFoodService: boolean;
+  hasFreightService: boolean;
+  isWav: boolean;
 }
+
+export type MainPanelTab = 'offers' | 'current' | 'queue';
 
 export type PresenceDisplayStatus = 'Online' | 'Offline' | 'Away';
 
@@ -52,6 +58,9 @@ export interface JobOffer {
   dropoffLat?: number;
   dropoffLng?: number;
   silent?: boolean;
+  vehicleTypeRequired?: string;
+  passengers?: number;
+  serviceTypeRaw?: string;
 }
 
 export interface QueuedOffer extends JobOffer {

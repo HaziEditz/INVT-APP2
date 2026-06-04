@@ -196,6 +196,26 @@ export async function writeOnlinePresence(
   });
 }
 
+/** After missed offer — driver re-joins zone at end of queue. */
+export async function moveDriverToEndOfQueue(driver: DriverProfile, vehicleId: string): Promise<void> {
+  if (!driver.companyId || !vehicleId) return;
+  const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+  const endPos = 9999;
+  try {
+    await update(ref(database, `${onlinePath}/current`), {
+      zonequeue: endPos,
+      zoneQueue: endPos,
+    });
+    await update(ref(database, `${onlinePath}/zone`), {
+      position: endPos,
+      queue: endPos,
+      zonequeue: endPos,
+    });
+  } catch (err) {
+    console.warn('[Presence] moveDriverToEndOfQueue failed:', err);
+  }
+}
+
 export async function clearOnlinePresence(driver: DriverProfile, vehicleId: string) {
   if (!driver.companyId || !vehicleId) return;
 

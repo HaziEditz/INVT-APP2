@@ -121,6 +121,10 @@ async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Veh
     const vehicleType = extractServiceType(meta);
     const bodyType = extractBodyType(meta);
     const plate = String(meta.plate ?? meta.registration ?? meta.plateNumber ?? '').trim();
+    const seatCapacity =
+      parseInt(String(meta.seatCapacity ?? meta.capacity ?? meta.SeatCapacity ?? '4'), 10) || 4;
+    const vLower = vehicleType.toLowerCase();
+    const bodyLower = bodyType.toLowerCase();
     return {
       id: upper,
       number,
@@ -128,6 +132,11 @@ async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Veh
       bodyType,
       label: `${number} · ${vehicleType}`,
       plate: plate || '—',
+      seatCapacity,
+      hasFoodService: vLower.includes('food') || meta.foodService === true || meta.hasFood === true,
+      hasFreightService:
+        vLower.includes('freight') || meta.freightService === true || meta.hasFreight === true,
+      isWav: bodyLower.includes('wav') || meta.wav === true || meta.isWav === true,
     };
   });
 }

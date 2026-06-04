@@ -1,7 +1,10 @@
-import { ActiveJobPanel } from '@/components/home/ActiveJobPanel';
-import { QueuedOffersSheet } from '@/components/home/QueuedOffersSheet';
+import { CurrentTripPanel } from '@/components/home/CurrentTripPanel';
 import { HomeBottomBar } from '@/components/home/HomeBottomBar';
+import { HomeMainTabs } from '@/components/home/HomeMainTabs';
 import { HomeStatusBar } from '@/components/home/HomeStatusBar';
+import { OffersPanel } from '@/components/home/OffersPanel';
+import { QueuePanel } from '@/components/home/QueuePanel';
+import { TariffPicker } from '@/components/home/TariffPicker';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MapErrorFallback } from '@/components/MapErrorFallback';
 import JobMap from '@/components/JobMap';
@@ -9,6 +12,7 @@ import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
+import { MainPanelTab } from '@/types';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,11 +24,6 @@ import {
 } from 'react-native';
 
 export default function MainScreen() {
-  useSafeEffect(() => {
-    console.log('[MainScreen] mounted');
-    return () => console.log('[MainScreen] unmounted');
-  }, [], 'MainScreen-mount');
-
   const { firebaseUser, driver, profileLoading, refreshDriver } = useAuth();
   const {
     shiftActive,
@@ -33,18 +32,32 @@ export default function MainScreen() {
     meter,
     startHail,
     endHail,
+    tariffs,
+    selectedTariff,
+    setSelectedTariff,
+    pendingOffers,
+    queuedOffers,
+    offersBadgeCount,
   } = useDriver();
 
-  const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const [mainTab, setMainTab] = useState<MainPanelTab>('offers');
+  const [tariffOpen, setTariffOpen] = useState(false);
+
+  const hasCurrent = !!activeJob || hailActive;
 
   useSafeEffect(() => {
     if (!firebaseUser) return;
     refreshDriver().catch((err) => console.error('[Main] refreshDriver failed:', err));
   }, [firebaseUser?.uid], 'MainScreen-loadProfile');
 
+  useSafeEffect(() => {
+    if (hasCurrent) setMainTab('current');
+    else if (queuedOffers.length > 0) setMainTab('queue');
+  }, [hasCurrent, queuedOffers.length], 'MainScreen-autoTab');
+
   const onHailPress = () => {
     if (!shiftActive) {
-      Alert.alert('Off shift', 'End shift is in Profile. Sign in again to start a new shift.');
+      Alert.alert('Off shift', 'Start your shift from Profile or sign in again.');
       return;
     }
     if (hailActive) {
@@ -59,10 +72,10 @@ export default function MainScreen() {
       return;
     }
     startHail();
+    setMainTab('current');
   };
 
   const mapShowsRoute = !!activeJob || hailActive;
-  const tripActive = !!activeJob || hailActive;
 
   if (profileLoading || (firebaseUser && !driver)) {
     return (
@@ -76,7 +89,7 @@ export default function MainScreen() {
   return (
     <View style={styles.root}>
       <ErrorBoundary name="HomeTopBar">
-        <HomeStatusBar onOffersPress={() => setQueueSheetOpen(true)} />
+        <HomeStatusBar />
       </ErrorBoundary>
 
       <View style={styles.mapSection}>
@@ -90,19 +103,38 @@ export default function MainScreen() {
             showsUserLocation={shiftActive}
           />
         </ErrorBoundary>
-        {hailActive && meter ? (
+        {meter?.running ? (
           <View style={styles.meterBadge}>
             <Text style={styles.meterFare}>${meter.fare.toFixed(2)}</Text>
-            <Text style={styles.meterSub}>{meter.distanceKm.toFixed(1)} km · meter running</Text>
+            <Text style={styles.meterSub}>
+              {meter.distanceKm.toFixed(1)} km · {hailActive ? 'hail' : 'meter'}
+            </Text>
           </View>
         ) : null}
       </View>
 
-      {activeJob ? (
-        <ErrorBoundary name="ActiveJobPanel">
-          <ActiveJobPanel />
-        </ErrorBoundary>
-      ) : null}
+      <TariffPicker
+        tariffs={tariffs}
+        selected={selectedTariff}
+        open={tariffOpen}
+        onOpen={() => setTariffOpen(true)}
+        onClose={() => setTariffOpen(false)}
+        onSelect={setSelectedTariff}
+      />
+
+      <HomeMainTabs
+        active={mainTab}
+        offersCount={offersBadgeCount || pendingOffers.length}
+        hasCurrent={hasCurrent}
+        queueCount={queuedOffers.length}
+        onChange={setMainTab}
+      />
+
+      <ErrorBoundary name="MainPanel">
+        {mainTab === 'offers' ? <OffersPanel /> : null}
+        {mainTab === 'current' ? <CurrentTripPanel /> : null}
+        {mainTab === 'queue' ? <QueuePanel /> : null}
+      </ErrorBoundary>
 
       <HomeBottomBar />
 
@@ -114,10 +146,8 @@ export default function MainScreen() {
       </Pressable>
 
       {!shiftActive ? (
-        <Text style={styles.offHint}>You are off shift. Open Profile to sign out and sign in again to start a new shift.</Text>
+        <Text style={styles.offHint}>You are off shift. Open Profile to end shift or sign out.</Text>
       ) : null}
-
-      <QueuedOffersSheet visible={queueSheetOpen} onClose={() => setQueueSheetOpen(false)} />
     </View>
   );
 }
@@ -132,7 +162,7 @@ const styles = StyleSheet.create({
   },
   loadingText: { color: Colors.textMuted, fontSize: 16 },
   root: { flex: 1, backgroundColor: Colors.background },
-  mapSection: { flex: 1, minHeight: 220, position: 'relative' },
+  mapSection: { flex: 1, minHeight: 200, position: 'relative' },
   meterBadge: {
     position: 'absolute',
     top: 8,
@@ -147,13 +177,13 @@ const styles = StyleSheet.create({
   meterSub: { color: Colors.textMuted, fontSize: 13 },
   hailBtn: {
     marginHorizontal: 14,
-    marginVertical: 10,
+    marginVertical: 8,
     backgroundColor: Colors.accent,
     borderRadius: 14,
-    paddingVertical: 18,
+    paddingVertical: 16,
     alignItems: 'center',
   },
   hailBtnActive: { backgroundColor: Colors.danger },
-  hailBtnText: { color: '#fff', fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
+  hailBtnText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.5 },
   offHint: { color: Colors.textMuted, fontSize: 13, textAlign: 'center', paddingHorizontal: 16, paddingBottom: 8 },
 });
