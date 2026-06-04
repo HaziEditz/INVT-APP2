@@ -12,15 +12,21 @@ type Props = {
 };
 
 export function TariffPicker({ tariffs, selected, open, onOpen, onClose, onSelect }: Props) {
+  const hasTariffs = tariffs.length > 0;
+
   return (
     <>
-      <Pressable style={styles.dropdown} onPress={onOpen}>
+      <Pressable style={styles.dropdown} onPress={hasTariffs ? onOpen : undefined} disabled={!hasTariffs}>
         <Text style={styles.name}>{selected.name}</Text>
-        <Text style={styles.rates}>
-          ${selected.flagFall.toFixed(2)} flag · ${selected.ratePerKm.toFixed(2)}/km · $
-          {selected.waitingPerMin.toFixed(2)}/min wait
-        </Text>
-        <Text style={styles.chevron}>▼</Text>
+        {hasTariffs ? (
+          <Text style={styles.rates}>
+            ${selected.flagFall.toFixed(2)} flag · ${selected.ratePerKm.toFixed(2)}/km · $
+            {selected.waitingPerMin.toFixed(2)}/min wait
+          </Text>
+        ) : (
+          <Text style={styles.rates}>Configure tariffs in Firebase for your company</Text>
+        )}
+        {hasTariffs ? <Text style={styles.chevron}>▼</Text> : null}
       </Pressable>
 
       <Modal visible={open} transparent animationType="fade">
@@ -28,6 +34,9 @@ export function TariffPicker({ tariffs, selected, open, onOpen, onClose, onSelec
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>Select tariff</Text>
             <ScrollView style={styles.list}>
+              {tariffs.length === 0 ? (
+                <Text style={styles.empty}>No tariff configured</Text>
+              ) : null}
               {tariffs.map((t) => (
                 <Pressable
                   key={t.id}
@@ -82,6 +91,7 @@ const styles = StyleSheet.create({
   },
   sheetTitle: { color: Colors.text, fontSize: 18, fontWeight: '700', marginBottom: 12 },
   list: { maxHeight: 280 },
+  empty: { color: Colors.textMuted, fontSize: 15, padding: 16, textAlign: 'center' },
   option: {
     padding: 14,
     borderRadius: 10,

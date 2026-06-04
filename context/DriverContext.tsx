@@ -11,9 +11,9 @@ import { loadDriverVehicles } from '@/lib/vehicles';
 import { acceptJobOffer, declineJobOffer } from '@/lib/dispatchApi';
 import { tickWorkedMinutes } from '@/services/nztaService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
-import { notifyJobOffer } from '@/services/notificationService';
 import {
   clearOnlinePresence,
+  isVehicleStatusAvailable,
   mapVehicleStatusToDisplay,
   startShiftOnline,
   writeOnlinePresence,
@@ -21,7 +21,7 @@ import {
 import { loadCompanyTariffs } from '@/lib/companyTariffs';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { completeJobPayment } from '@/lib/dispatchApi';
-import { calcMeterFare, DEFAULT_TARIFFS } from '@/lib/tariffs';
+import { calcMeterFare, isTariffConfigured, NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
 import { PaymentExtras } from '@/types';
 import {
   ActiveJob,
@@ -89,7 +89,7 @@ interface DriverContextValue {
   setSelectedTariff: (t: Tariff) => void;
   dismissJobEditNotice: () => void;
   promoteQueuedOffer: (offerId: string) => void;
-  pushDemoOffer: () => void;
+  canReceiveJobOffers: boolean;
 }
 
 const DriverContext = createContext<DriverContextValue | null>(null);
@@ -182,8 +182,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [isOffline, setIsOffline] = useState(false);
   const [hailActive, setHailActive] = useState(false);
   const [meter, setMeter] = useState<MeterState | null>(null);
-  const [tariffs, setTariffsState] = useState<Tariff[]>(DEFAULT_TARIFFS);
-  const [selectedTariff, setSelectedTariffState] = useState<Tariff>(DEFAULT_TARIFFS[0]);
+  const [tariffs, setTariffsState] = useState<Tariff[]>([]);
+  const [selectedTariff, setSelectedTariffState] = useState<Tariff>(NO_TARIFF_CONFIGURED);
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
   const [jobEditNotice, setJobEditNotice] = useState<string | null>(null);
   const shiftActiveRef = useRef(false);
@@ -219,9 +219,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (j) setActiveJob(j);
         // Do not restore shift as "online" on launch — driver must confirm vehicle each session.
         await storeData(STORAGE_KEYS.shiftActive, false);
-        const tariffId = await getData<string>(STORAGE_KEYS.selectedTariffId);
-        const t = DEFAULT_TARIFFS.find((x) => x.id === tariffId);
-        if (t) setSelectedTariffState(t);
         const m = await getData<MeterState>(STORAGE_KEYS.meterState);
         if (m?.running) {
           setMeter(m);
@@ -284,18 +281,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (!driver?.companyId) {
-      setSelectedTariffState(DEFAULT_TARIFFS[0]);
+      setTariffsState([]);
+      setSelectedTariffState(NO_TARIFF_CONFIGURED);
       return;
     }
     loadCompanyTariffs(driver.companyId)
       .then(async (list) => {
         setTariffsState(list);
+        if (list.length === 0) {
+          setSelectedTariffState(NO_TARIFF_CONFIGURED);
+          return;
+        }
         const savedId = await getData<string>(STORAGE_KEYS.selectedTariffId);
         const match = savedId ? list.find((t) => t.id === savedId) : null;
         if (match) setSelectedTariffState(match);
-        else if (list[0]) setSelectedTariffState(list[0]);
+        else setSelectedTariffState(list[0]);
       })
-      .catch((err) => console.error('[Driver] loadCompanyTariffs', err));
+      .catch((err) => {
+        console.error('[Driver] loadCompanyTariffs', err);
+        setTariffsState([]);
+        setSelectedTariffState(NO_TARIFF_CONFIGURED);
+      });
   }, [driver?.companyId], 'Driver-tariffs');
 
   useSafeEffect(() => {
@@ -345,7 +351,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const activeVehicleBodyType = activeVehicle?.bodyType ?? '—';
 
   useSafeEffect(() => {
-    if (!isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
+    if (!shiftActive || !isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
       setZone(EMPTY_ZONE);
       return;
     }
@@ -379,7 +385,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('[Driver] zone subscribe failed', err);
     }
-  }, [driver?.companyId, selectedVehicleId], 'Driver-zone');
+  }, [shiftActive, driver?.companyId, selectedVehicleId], 'Driver-zone');
 
   useSafeEffect(() => {
     if (!isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
@@ -391,26 +397,30 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return onValue(presenceRef, (snap) => {
         try {
           if (!snap.exists()) {
-            if (readyForJobsRef.current || shiftActiveRef.current) {
-              setPresenceStatus('Online');
-              return;
-            }
-            setPresenceStatus('Offline');
+            setPresenceStatus(shiftActiveRef.current ? 'Away' : 'Offline');
+            setReadyForJobs(false);
+            readyForJobsRef.current = false;
             return;
           }
           const data = snap.val() as Record<string, unknown>;
           const rawStatus = String(data.vehiclestatus ?? data.VehicleStatus ?? '');
           const myId = String(driver.id ?? '');
-          const nodeDriverId = String(data.driverid ?? '');
+          const nodeDriverId = String(data.driverid ?? data.driverId ?? '');
           if (nodeDriverId && myId && nodeDriverId !== myId && nodeDriverId !== String(driver.uid)) {
             setPresenceStatus('Offline');
             setReadyForJobs(false);
+            readyForJobsRef.current = false;
             return;
           }
           const mapped = mapVehicleStatusToDisplay(rawStatus);
           setPresenceStatus(mapped);
-          if (mapped === 'Online' && shiftActiveRef.current) {
+          const available = isVehicleStatusAvailable(rawStatus);
+          if (shiftActiveRef.current && available) {
             setReadyForJobs(true);
+            readyForJobsRef.current = true;
+          } else {
+            setReadyForJobs(false);
+            readyForJobsRef.current = false;
           }
         } catch (err) {
           console.error('[Driver] presence listener', err);
@@ -421,8 +431,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [driver?.companyId, driver?.id, driver?.uid, selectedVehicleId], 'Driver-presence');
 
-  const offersBadgeCount = queuedOffers.length + (jobOffer && !jobOffer.silent ? 1 : 0);
-  const nextQueuedOffer = queuedOffers[0] ?? null;
+  const canReceiveJobOffers =
+    shiftActive && readyForJobs && presenceStatus === 'Online';
+  const offersBadgeCount = canReceiveJobOffers
+    ? queuedOffers.length + (jobOffer && !jobOffer.silent ? 1 : 0)
+    : 0;
+  const nextQueuedOffer = canReceiveJobOffers ? (queuedOffers[0] ?? null) : null;
+
+  useSafeEffect(() => {
+    if (canReceiveJobOffers) return;
+    setJobOffer(null);
+    setQueuedOffers([]);
+    lastOfferSeenRef.current = null;
+  }, [canReceiveJobOffers], 'Driver-clearOffersWhenOffline');
 
   const flushQueuedOffer = () => {
     setQueuedOffers((q) => {
@@ -444,6 +465,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const handleIncomingOffer = async (val: Record<string, unknown>) => {
+    if (!shiftActiveRef.current || !readyForJobsRef.current) return;
+
     const offer = parseJobOffer(val);
     const seen = lastOfferSeenRef.current;
     if (seen?.id === offer.id && Date.now() - seen.at < 2500) return;
@@ -455,7 +478,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     if (onHail || (onJob && !onboard && activeJob?.type === 'Taxi')) {
       enqueueOffer(offer);
-      await notifyJobOffer('Queued offer', `${offer.type} waiting in queue`);
       return;
     }
 
@@ -465,10 +487,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     setJobOffer(offer);
-    await notifyJobOffer('New Job Offer', `${offer.type}: ${offer.pickup}`);
   };
 
   const processOfferPayload = async (val: Record<string, unknown>) => {
+    if (!shiftActiveRef.current || !readyForJobsRef.current) return;
+
     if (val.editNotice && activeJobIdRef.current === String(val.jobId ?? val.id)) {
       setJobEditNotice(String(val.editNotice));
     }
@@ -477,7 +500,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   useSafeEffect(() => {
-    if (!isFirebaseReady || !driver?.companyId || !driver.id) return;
+    if (!canReceiveJobOffers || !isFirebaseReady || !driver?.companyId || !driver.id) return;
     try {
       const offerRef = ref(database, `jobOffers/${driver.companyId}/${driver.id}`);
       return onValue(offerRef, async (snap) => {
@@ -493,10 +516,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] job offer subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.companyId, driver?.id, activeJob?.stage], 'Driver-jobOffers');
+  }, [canReceiveJobOffers, driver?.companyId, driver?.id, activeJob?.stage], 'Driver-jobOffers');
 
   useSafeEffect(() => {
-    if (!isFirebaseReady || !driver?.id) return;
+    if (!canReceiveJobOffers || !isFirebaseReady || !driver?.id) return;
     try {
       const notifyRef = ref(database, `notification/${driver.id}`);
       return onValue(notifyRef, async (snap) => {
@@ -512,7 +535,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] notification subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.id], 'Driver-notification');
+  }, [canReceiveJobOffers, driver?.id], 'Driver-notification');
 
   const setSelectedVehicleId = async (id: string) => {
     const normalized = id.trim().toUpperCase();
@@ -575,18 +598,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     setShiftActive(true);
     shiftActiveRef.current = true;
-    setReadyForJobs(true);
-    readyForJobsRef.current = true;
-    setPresenceStatus('Online');
+    setReadyForJobs(false);
+    readyForJobsRef.current = false;
+    setPresenceStatus('Away');
     await storeData(STORAGE_KEYS.shiftActive, true);
-    const { startShiftClock } = await import('@/services/nztaService');
-    await startShiftClock();
 
     try {
       console.log('[Shift] startShift — profile uid:', driver.uid, 'vehicle:', vehicleId);
       await startShiftOnline(driver, vehicleId);
       setPresenceStatus('Online');
       setReadyForJobs(true);
+      readyForJobsRef.current = true;
     } catch (err) {
       console.warn('[Shift] Firebase online status write failed:', err);
       Alert.alert('Connection issue', 'Could not register with dispatch. Check your network and try again.');
@@ -596,14 +618,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const { startBackgroundTracking } = await import('@/services/locationService');
-    const trackingStarted = await startBackgroundTracking(driver.id, driver.companyId, vehicleId);
-    if (!trackingStarted) {
-      Alert.alert(
-        'Location optional',
-        'You are online and ready for jobs. Enable location when prompted so dispatch can see your position on the map.',
-      );
-    }
+    void import('@/services/nztaService').then(({ startShiftClock }) =>
+      startShiftClock().catch((err) => console.error('[Driver] startShiftClock', err)),
+    );
+
+    void import('@/services/locationService').then(async ({ startBackgroundTracking }) => {
+      const trackingStarted = await startBackgroundTracking(driver.id, driver.companyId, vehicleId);
+      if (!trackingStarted) {
+        Alert.alert(
+          'Location optional',
+          'You are online and ready for jobs. Enable location when prompted so dispatch can see your position on the map.',
+        );
+      }
+    });
 
     if (driver.companyId) {
       update(ref(database, `vehicles/${driver.companyId}/${vehicleId}`), {
@@ -836,6 +863,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('Start shift', 'Start your shift before hailing a passenger.');
       return;
     }
+    if (!isTariffConfigured(selectedTariff)) {
+      Alert.alert('No tariff configured', 'Ask dispatch to set up tariffs for your company in Firebase.');
+      return;
+    }
     const m: MeterState = {
       running: true,
       paused: false,
@@ -907,23 +938,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const dismissJobEditNotice = () => setJobEditNotice(null);
 
-  const pushDemoOffer = () => {
-    setJobOffer({
-      id: `demo-${Date.now()}`,
-      type: 'Taxi',
-      pickup: '123 Dee Street, Invercargill',
-      dropoff: 'Invercargill Airport',
-      passengerName: 'Demo Passenger',
-      passengerPhone: '021 000 0000',
-      estimatedFare: 28.5,
-      estimatedDistanceKm: 8.2,
-      paymentType: 'Cash',
-      source: 'Dispatch',
-      dispatcherName: 'Demo Dispatch',
-      expiresAt: Date.now() + 45000,
-    });
-  };
-
   return (
     <DriverContext.Provider
       value={{
@@ -976,7 +990,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         setSelectedTariff,
         dismissJobEditNotice,
         promoteQueuedOffer,
-        pushDemoOffer,
+        canReceiveJobOffers,
       }}
     >
       {children}

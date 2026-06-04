@@ -9,7 +9,12 @@ export function mapVehicleStatusToDisplay(raw: string | undefined | null): Prese
   const s = String(raw ?? '').trim();
   if (!s || s.toLowerCase() === 'offline') return 'Offline';
   if (s.toLowerCase() === 'away') return 'Away';
+  if (s.toLowerCase() === 'available') return 'Online';
   return 'Online';
+}
+
+export function isVehicleStatusAvailable(raw: string | undefined | null): boolean {
+  return String(raw ?? '').trim().toLowerCase() === 'available';
 }
 
 function parseDriverId(rawId: string) {
@@ -76,34 +81,81 @@ function fmtNzTime(d: Date): string {
   return d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-/** Start shift: Firebase presence only (replaces legacy FnServiceON). */
+/** Non-blocking enrichment after shift essentials are written. */
+function enrichShiftPresenceInBackground(driver: DriverProfile, vehicleId: string, startedAt: Date) {
+  void (async () => {
+    try {
+      const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+      await ensureAuthUserForRtdbWrite(`enrichShiftPresence → ${onlinePath}`);
+
+      const { lat, lng } = await getGps();
+      const record = buildPresenceRecord(driver, vehicleId, 'Available', lat, lng);
+      const presencePath = ref(database, `${onlinePath}/current`);
+
+      try {
+        await onDisconnect(presencePath).update({ lastSeen: Date.now() });
+      } catch (err) {
+        console.warn('[Presence] onDisconnect failed (non-fatal):', err);
+      }
+
+      const nowIso = startedAt.toISOString();
+      await update(presencePath, {
+        ...record,
+        shiftStarted: true,
+        shiftStartedAt: nowIso,
+      });
+
+      await update(ref(database, onlinePath), {
+        VehicleStatus: 'Available',
+        status: 'Available',
+        online: true,
+        shiftStartedAt: nowIso,
+        logInDate: fmtNzDate(startedAt),
+        logInTime: fmtNzTime(startedAt),
+        vehiclenumber: vehicleId,
+        vehicleId,
+        updatedAt: nowIso,
+        lat: lat || 0,
+        lng: lng || 0,
+      });
+    } catch (err) {
+      console.warn('[Presence] enrichShiftPresenceInBackground failed:', err);
+    }
+  })();
+}
+
+/** Start shift: minimal RTDB write first, then enrich in background. */
 export async function startShiftOnline(driver: DriverProfile, vehicleId: string): Promise<void> {
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
   const authUser = await ensureAuthUserForRtdbWrite(`startShiftOnline → ${onlinePath}`);
   console.log('[Presence] startShiftOnline auth uid:', authUser.uid, 'driver profile uid:', driver.uid);
 
-  const now = new Date();
-  const nowIso = now.toISOString();
+  const startedAt = new Date();
+  const baseRef = ref(database, onlinePath);
+  const currentRef = ref(database, `${onlinePath}/current`);
 
-  await writeOnlinePresence(driver, vehicleId, 'Available', true);
-
-  await update(ref(database, `online/${driver.companyId}/${vehicleId}`), {
+  await update(baseRef, {
     vehiclestatus: 'Available',
-    VehicleStatus: 'Available',
-    status: 'Available',
-    online: true,
-    shiftStarted: true,
-    shiftStartedAt: nowIso,
-    logInDate: fmtNzDate(now),
-    logInTime: fmtNzTime(now),
     driverId: driver.id,
     driverid: parseDriverId(driver.id),
-    vehicleId,
-    vehiclenumber: vehicleId,
     companyId: driver.companyId,
     CompanyId: driver.companyId,
-    updatedAt: nowIso,
+    shiftStarted: true,
   });
+
+  await set(currentRef, {
+    vehiclestatus: 'Available',
+    VehicleStatus: 'Available',
+    driverid: parseDriverId(driver.id),
+    driverId: driver.id,
+    companyId: driver.companyId,
+    CompanyId: driver.companyId,
+    shiftStarted: true,
+    online: true,
+    lastSeen: Date.now(),
+  });
+
+  enrichShiftPresenceInBackground(driver, vehicleId, startedAt);
 }
 
 export async function writeOnlinePresence(
@@ -123,7 +175,7 @@ export async function writeOnlinePresence(
 
   const { lat, lng } = await getGps();
   const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
-  const presencePath = ref(database, `online/${driver.companyId}/${vehicleId}/current`);
+  const presencePath = ref(database, `${onlinePath}/current`);
 
   try {
     await onDisconnect(presencePath).update({ lastSeen: Date.now() });
@@ -138,7 +190,7 @@ export async function writeOnlinePresence(
   }
 
   const topStatus = status === 'Assigned' ? 'Picking' : status;
-  await update(ref(database, `online/${driver.companyId}/${vehicleId}`), {
+  await update(ref(database, onlinePath), {
     vehiclestatus: topStatus,
   });
 }

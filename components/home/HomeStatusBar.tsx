@@ -18,9 +18,10 @@ export function HomeStatusBar({ onOffersPress }: Props) {
     offersBadgeCount,
     nextQueuedOffer,
     togglePresence,
+    canReceiveJobOffers,
   } = useDriver();
 
-  const isOnline = presenceStatus === 'Online' && shiftActive;
+  const isOnline = presenceStatus === 'Online' && shiftActive && canReceiveJobOffers;
   const isAway = presenceStatus === 'Away' && shiftActive;
 
   return (
@@ -36,7 +37,7 @@ export function HomeStatusBar({ onOffersPress }: Props) {
         {shiftActive ? <Text style={styles.toggleHint}>tap</Text> : null}
       </Pressable>
 
-      {offersBadgeCount > 0 && onOffersPress ? (
+      {canReceiveJobOffers && offersBadgeCount > 0 && onOffersPress ? (
         <Pressable style={styles.offerPill} onPress={onOffersPress}>
           <Text style={styles.offerPillText}>Offers {offersBadgeCount}</Text>
         </Pressable>
@@ -46,7 +47,7 @@ export function HomeStatusBar({ onOffersPress }: Props) {
         </View>
       )}
 
-      {nextQueuedOffer ? (
+      {canReceiveJobOffers && nextQueuedOffer ? (
         <View style={styles.nextWrap}>
           <Text style={styles.nextLabel}>Next</Text>
           <Text style={styles.nextValue} numberOfLines={1}>

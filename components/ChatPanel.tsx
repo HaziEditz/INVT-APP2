@@ -14,18 +14,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const INITIAL: ChatMessage[] = [
-  {
-    id: '1',
-    sender: 'dispatcher',
-    text: 'You are next in queue. Message us here if you need help.',
-    timestamp: Date.now() - 60000,
-  },
-];
-
 export function ChatPanel() {
   const insets = useSafeAreaInsets();
-  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState('');
 
   const send = () => {
@@ -46,7 +37,10 @@ export function ChatPanel() {
       <FlatList
         data={messages}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={[styles.list, { paddingBottom: 8 }]}
+        contentContainerStyle={[styles.list, { paddingBottom: 8, flexGrow: 1 }]}
+        ListEmptyComponent={
+          <Text style={styles.empty}>No messages yet. Send a note to dispatch when you need help.</Text>
+        }
         renderItem={({ item }) => (
           <View style={[styles.bubble, item.sender === 'driver' ? styles.mine : styles.theirs]}>
             <Text style={styles.sender}>{item.sender === 'driver' ? 'You' : 'Dispatcher'}</Text>
@@ -63,7 +57,8 @@ export function ChatPanel() {
 }
 
 const styles = StyleSheet.create({
-  list: { padding: 16, flexGrow: 1 },
+  list: { padding: 16 },
+  empty: { color: Colors.textMuted, fontSize: 15, textAlign: 'center', paddingVertical: 32, lineHeight: 22 },
   bubble: { maxWidth: '85%', borderRadius: 14, padding: 12, marginBottom: 8 },
   mine: {
     alignSelf: 'flex-end',

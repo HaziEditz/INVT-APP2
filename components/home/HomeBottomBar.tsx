@@ -6,11 +6,13 @@ export function HomeBottomBar() {
   const { shiftActive, presenceStatus, zone, readyForJobs } = useDriver();
 
   const online = shiftActive && presenceStatus === 'Online' && readyForJobs;
-  const zoneName = zone.name?.trim() || (shiftActive ? 'Awaiting zone' : '—');
+  const zoneName = zone.name?.trim() || (shiftActive ? 'No zone assigned' : '—');
   const queue =
     zone.position > 0
       ? `#${zone.position}${zone.totalInQueue > 0 ? ` of ${zone.totalInQueue}` : ''}`
-      : '—';
+      : shiftActive
+        ? 'No queue data'
+        : '—';
 
   return (
     <View style={styles.bar}>
