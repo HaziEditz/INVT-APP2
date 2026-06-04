@@ -68,6 +68,40 @@ function buildPresenceRecord(
   };
 }
 
+function fmtNzDate(d: Date): string {
+  return d.toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function fmtNzTime(d: Date): string {
+  return d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+/** Start shift: Firebase presence only (replaces legacy FnServiceON). */
+export async function startShiftOnline(driver: DriverProfile, vehicleId: string): Promise<void> {
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  await writeOnlinePresence(driver, vehicleId, 'Available', true);
+
+  await update(ref(database, `online/${driver.companyId}/${vehicleId}`), {
+    vehiclestatus: 'Available',
+    VehicleStatus: 'Available',
+    status: 'Available',
+    online: true,
+    shiftStarted: true,
+    shiftStartedAt: nowIso,
+    logInDate: fmtNzDate(now),
+    logInTime: fmtNzTime(now),
+    driverId: driver.id,
+    driverid: parseDriverId(driver.id),
+    vehicleId,
+    vehiclenumber: vehicleId,
+    companyId: driver.companyId,
+    CompanyId: driver.companyId,
+    updatedAt: nowIso,
+  });
+}
+
 export async function writeOnlinePresence(
   driver: DriverProfile,
   vehicleId: string,

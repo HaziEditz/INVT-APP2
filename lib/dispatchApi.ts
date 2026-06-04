@@ -58,28 +58,19 @@ export async function legacyDispatchPost(params: {
   }
 }
 
-export async function notifyServiceOn(payload: {
+/**
+ * Legacy FnServiceON — no longer called. Shift start uses Firebase
+ * `online/{companyId}/{vehicleId}` via startShiftOnline() in presenceService.
+ */
+export async function notifyServiceOn(_payload: {
   driverId: string;
   companyId: string;
   vehicleId: string;
   logInDate: string;
   logInTime: string;
   userKey?: string;
-}) {
-  const parms = [
-    `DriverId,,${payload.driverId}`,
-    `CompanyId,,${payload.companyId}`,
-    `VehicleId,,${payload.vehicleId}`,
-    `Status,,Available`,
-    `LogInDate,,${payload.logInDate}`,
-    `LogInTime,,${payload.logInTime}`,
-  ].join('&&');
-
-  return legacyDispatchPost({
-    action: 'FnServiceON',
-    parms,
-    userKey: payload.userKey,
-  });
+}): Promise<string> {
+  return '';
 }
 
 export interface DriverLocationPayload {

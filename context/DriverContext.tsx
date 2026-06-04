@@ -8,13 +8,14 @@ import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, declineJobOffer, notifyServiceOn } from '@/lib/dispatchApi';
+import { acceptJobOffer, declineJobOffer } from '@/lib/dispatchApi';
 import { tickWorkedMinutes } from '@/services/nztaService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import { notifyJobOffer } from '@/services/notificationService';
 import {
   clearOnlinePresence,
   mapVehicleStatusToDisplay,
+  startShiftOnline,
   writeOnlinePresence,
 } from '@/services/presenceService';
 import { loadCompanyTariffs } from '@/lib/companyTariffs';
@@ -582,27 +583,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await startShiftClock();
 
     try {
-      await writeOnlinePresence(driver, vehicleId, 'Available', true);
+      await startShiftOnline(driver, vehicleId);
       setPresenceStatus('Online');
       setReadyForJobs(true);
     } catch (err) {
-      console.warn('[Shift] Firebase presence write failed:', err);
+      console.warn('[Shift] Firebase online status write failed:', err);
       Alert.alert('Connection issue', 'Could not register with dispatch. Check your network and try again.');
       setShiftActive(false);
       shiftActiveRef.current = false;
       await storeData(STORAGE_KEYS.shiftActive, false);
       return;
     }
-
-    const now = new Date();
-    notifyServiceOn({
-      driverId: driver.id,
-      companyId: driver.companyId,
-      vehicleId,
-      logInDate: fmtNzDate(now),
-      logInTime: fmtNzTime(now),
-      userKey: driver.passforlink,
-    }).catch((err) => console.warn('[Shift] FnServiceON failed (non-blocking):', err));
 
     const { startBackgroundTracking } = await import('@/services/locationService');
     const trackingStarted = await startBackgroundTracking(driver.id, driver.companyId, vehicleId);
