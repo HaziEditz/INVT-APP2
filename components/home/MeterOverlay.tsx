@@ -45,8 +45,16 @@ export function MeterOverlay({ meter, onPause, onWait, onExpand, compact }: Prop
         <Pressable style={[styles.btn, meter.paused && styles.btnActive]} onPress={onPause}>
           <Text style={styles.btnText}>{meter.paused ? 'Resume' : 'Pause'}</Text>
         </Pressable>
-        <Pressable style={[styles.btn, meter.waiting && styles.btnWait]} onPress={onWait}>
-          <Text style={styles.btnText}>{meter.waiting ? 'End Wait' : 'Wait'}</Text>
+        <Pressable
+          style={[
+            styles.btn,
+            meter.mode === 'waiting' && !meter.paused && styles.btnWait,
+          ]}
+          onPress={onWait}
+        >
+          <Text style={styles.btnText}>
+            {meter.mode === 'moving' ? 'MOVING' : 'WAITING'}
+          </Text>
         </Pressable>
       </View>
     </View>

@@ -6,17 +6,19 @@ type Props = {
   tariffs: Tariff[];
   selected: Tariff;
   open: boolean;
+  locked?: boolean;
   onOpen: () => void;
   onClose: () => void;
   onSelect: (t: Tariff) => void;
 };
 
-export function TariffPicker({ tariffs, selected, open, onOpen, onClose, onSelect }: Props) {
+export function TariffPicker({ tariffs, selected, open, locked, onOpen, onClose, onSelect }: Props) {
   const hasTariffs = tariffs.length > 0;
+  const canOpen = hasTariffs && !locked;
 
   return (
     <>
-      <Pressable style={styles.dropdown} onPress={hasTariffs ? onOpen : undefined} disabled={!hasTariffs}>
+      <Pressable style={styles.dropdown} onPress={canOpen ? onOpen : undefined} disabled={!canOpen}>
         <Text style={styles.name}>{selected.name}</Text>
         {hasTariffs ? (
           <Text style={styles.rates}>
@@ -26,7 +28,8 @@ export function TariffPicker({ tariffs, selected, open, onOpen, onClose, onSelec
         ) : (
           <Text style={styles.rates}>Configure tariffs in Firebase for your company</Text>
         )}
-        {hasTariffs ? <Text style={styles.chevron}>▼</Text> : null}
+        {locked ? <Text style={styles.locked}>Locked</Text> : null}
+        {canOpen ? <Text style={styles.chevron}>▼</Text> : null}
       </Pressable>
 
       <Modal visible={open} transparent animationType="fade">
@@ -77,6 +80,7 @@ const styles = StyleSheet.create({
   name: { color: Colors.text, fontWeight: '700', fontSize: 15, flex: 1 },
   rates: { color: Colors.textMuted, fontSize: 12, flexBasis: '100%' },
   chevron: { color: Colors.accent, fontSize: 12, marginLeft: 8 },
+  locked: { color: Colors.textMuted, fontSize: 11, marginLeft: 8 },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',

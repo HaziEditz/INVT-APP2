@@ -31,15 +31,19 @@ import { Alert, RefreshControl, StyleSheet, Switch, Text, View } from 'react-nat
 
 const EMPTY_NZTA: NztaHoursState = {
   shiftStartedAt: null,
+  shiftWindowEndsAt: null,
   workedMinutes: 0,
+  weeklyWorkedMinutes: 0,
   breakMinutes: 0,
   lastBreakAt: null,
   breakReminderShown: false,
   breakDeferredUntil: null,
+  lastShiftEndAt: null,
+  continuedWindow: false,
 };
 
 export default function ProfileScreen() {
-  const { driver, signOut } = useAuth();
+  const { driver } = useAuth();
   const {
     sessionEarnings,
     historyEarnings,
@@ -49,7 +53,7 @@ export default function ProfileScreen() {
     selectedVehicleId,
     vehicles,
     shiftActive,
-    endShift,
+    endShiftAndSignOut,
     refreshJobHistory,
     refreshVehicles,
   } = useDriver();
@@ -149,6 +153,7 @@ export default function ProfileScreen() {
   const vehicleIdForMeta = selectedVehicleId || driver?.vehicleId || '';
   const vehicleNumber = activeVehicle?.number || vehicleIdForMeta || '—';
   const bodyType =
+    activeVehicle?.displayType ||
     activeVehicle?.bodyType ||
     profileBodyType ||
     (activeVehicleBodyType !== '—' ? activeVehicleBodyType : '') ||
@@ -165,14 +170,6 @@ export default function ProfileScreen() {
     }
     loadVehicleBodyType(driver.companyId, vehicleIdForMeta).then(setProfileBodyType);
   }, [driver?.companyId, vehicleIdForMeta, activeVehicle?.bodyType]);
-
-  const onSignOut = async () => {
-    if (shiftActive) {
-      await endShift();
-    }
-    await signOut();
-    console.log('[Profile] signed out — AuthNavigator routes to login');
-  };
 
   return (
     <ScreenScroll
@@ -251,21 +248,25 @@ export default function ProfileScreen() {
         <Switch value={notifications} onValueChange={setNotifications} trackColor={{ true: Colors.accent }} />
       </View>
 
-      {shiftActive ? (
-        <Button
-          title="End Shift"
-          variant="danger"
-          style={{ marginTop: 16 }}
-          onPress={() => {
-            Alert.alert('End shift?', 'You will go offline until you sign in and choose a vehicle again.', [
+      <Button
+        title="End Shift"
+        variant="danger"
+        style={{ marginTop: 16 }}
+        onPress={() => {
+          Alert.alert(
+            'End shift?',
+            'Your shift will end, you will be signed out, and returned to the login screen.',
+            [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'End shift', style: 'destructive', onPress: () => void endShift() },
-            ]);
-          }}
-        />
-      ) : null}
-
-      <Button title="Sign Out" variant="danger" onPress={onSignOut} style={{ marginTop: 12 }} />
+              {
+                text: 'End Shift',
+                style: 'destructive',
+                onPress: () => void endShiftAndSignOut(),
+              },
+            ],
+          );
+        }}
+      />
     </ScreenScroll>
   );
 }

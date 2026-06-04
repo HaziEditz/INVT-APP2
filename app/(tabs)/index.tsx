@@ -4,6 +4,7 @@ import { HomeMainTabs } from '@/components/home/HomeMainTabs';
 import { HomeStatusBar } from '@/components/home/HomeStatusBar';
 import { OffersPanel } from '@/components/home/OffersPanel';
 import { QueuePanel } from '@/components/home/QueuePanel';
+import { NztaHoursBar } from '@/components/home/NztaHoursBar';
 import { TariffPicker } from '@/components/home/TariffPicker';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MapErrorFallback } from '@/components/MapErrorFallback';
@@ -35,6 +36,7 @@ export default function MainScreen() {
     tariffs,
     selectedTariff,
     setSelectedTariff,
+    tariffLocked,
     pendingOffers,
     queuedOffers,
     offersBadgeCount,
@@ -106,18 +108,29 @@ export default function MainScreen() {
         {meter?.running ? (
           <View style={styles.meterBadge}>
             <Text style={styles.meterFare}>${meter.fare.toFixed(2)}</Text>
+            <Text
+              style={[
+                styles.modeTag,
+                meter.mode === 'moving' ? styles.modeMoving : styles.modeWaiting,
+              ]}
+            >
+              {meter.paused ? 'PAUSED' : meter.mode === 'moving' ? 'MOVING' : 'WAITING'}
+            </Text>
             <Text style={styles.meterSub}>
-              {meter.distanceKm.toFixed(1)} km · {hailActive ? 'hail' : 'meter'}
+              {meter.distanceKm.toFixed(1)} km · wait {(meter.waitingMs / 60000).toFixed(0)}m
             </Text>
           </View>
         ) : null}
       </View>
 
+      <NztaHoursBar />
+
       <TariffPicker
         tariffs={tariffs}
         selected={selectedTariff}
         open={tariffOpen}
-        onOpen={() => setTariffOpen(true)}
+        locked={tariffLocked}
+        onOpen={() => !tariffLocked && setTariffOpen(true)}
         onClose={() => setTariffOpen(false)}
         onSelect={setSelectedTariff}
       />
@@ -146,7 +159,7 @@ export default function MainScreen() {
       </Pressable>
 
       {!shiftActive ? (
-        <Text style={styles.offHint}>You are off shift. Open Profile to end shift or sign out.</Text>
+        <Text style={styles.offHint}>You are off shift. Start a shift from Profile or vehicle selection.</Text>
       ) : null}
     </View>
   );
@@ -174,6 +187,9 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   meterFare: { color: Colors.success, fontSize: 22, fontWeight: '800' },
+  modeTag: { fontSize: 11, fontWeight: '800', marginTop: 2 },
+  modeMoving: { color: Colors.success },
+  modeWaiting: { color: Colors.warning },
   meterSub: { color: Colors.textMuted, fontSize: 13 },
   hailBtn: {
     marginHorizontal: 14,

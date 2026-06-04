@@ -22,8 +22,15 @@ import {
 import { loadCompanyTariffs } from '@/lib/companyTariffs';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { completeJobPayment } from '@/lib/dispatchApi';
-import { calcMeterFare, isTariffConfigured, NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
-import { PaymentExtras } from '@/types';
+import {
+  diffBookingChanges,
+  stageAllowsMeter,
+  subscribeBooking,
+} from '@/lib/bookingSync';
+import { initializeNztaOnLogin } from '@/services/nztaService';
+import { createInitialMeter, watchMeter } from '@/services/meterEngine';
+import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
+import { JobStepTimes, PaymentExtras, TariffChangeRecord } from '@/types';
 import {
   ActiveJob,
   CompanyInfo,
@@ -74,6 +81,7 @@ interface DriverContextValue {
   refreshJobHistory: () => Promise<void>;
   startShift: (vehicleId?: string) => Promise<void>;
   endShift: () => Promise<void>;
+  endShiftAndSignOut: () => Promise<void>;
   togglePresence: () => Promise<void>;
   acceptOffer: () => Promise<void>;
   declineOffer: () => Promise<void>;
@@ -89,6 +97,7 @@ interface DriverContextValue {
   endHail: () => void;
   pauseMeter: () => void;
   toggleWaitMeter: () => void;
+  tariffLocked: boolean;
   setSelectedTariff: (t: Tariff) => void;
   dismissJobEditNotice: () => void;
   promoteQueuedOffer: (offerId: string) => void;
@@ -191,19 +200,24 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
 
 type AwayIntent = 'none' | 'manual' | 'missed';
 
-const EMPTY_METER: MeterState = {
-  running: false,
-  paused: false,
-  waiting: false,
-  startedAt: 0,
-  pausedMs: 0,
-  waitingMs: 0,
-  distanceKm: 0,
-  fare: 0,
-};
+const EMPTY_STEP_TIMES: JobStepTimes = {};
+
+function defaultActiveJob(offer: JobOffer): ActiveJob {
+  const now = Date.now();
+  return {
+    ...offer,
+    stage: 'pickup',
+    startedAt: now,
+    distanceKm: 0,
+    durationMin: 0,
+    fare: offer.fixedFare ?? offer.estimatedFare ?? 0,
+    stepTimes: { acceptedAt: now, onWayAt: now },
+    tariffChanges: [],
+  };
+}
 
 export function DriverProvider({ children }: { children: ReactNode }) {
-  const { driver } = useAuth();
+  const { driver, signOut } = useAuth();
   const [presenceStatus, setPresenceStatus] = useState<PresenceDisplayStatus>('Offline');
   const [readyForJobs, setReadyForJobs] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
@@ -232,8 +246,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const hailActiveRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
-  const meterTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const waitTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const meterRef = useRef<MeterState | null>(null);
+  const meterStopRef = useRef<(() => void) | null>(null);
+  const paymentJobRef = useRef(false);
+  const bookingRawRef = useRef<Record<string, unknown> | null>(null);
 
   useSafeEffect(() => {
     shiftActiveRef.current = shiftActive;
@@ -252,17 +268,39 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [activeJob?.id], 'Driver-activeJobRef');
 
   useSafeEffect(() => {
+    paymentJobRef.current = !!paymentJob;
+  }, [paymentJob], 'Driver-paymentRef');
+
+  useSafeEffect(() => {
+    meterRef.current = meter;
+  }, [meter], 'Driver-meterRef');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !driver.uid) return;
+    initializeNztaOnLogin(driver.companyId, driver.uid).catch((err) =>
+      console.error('[Driver] initializeNztaOnLogin', err),
+    );
+  }, [driver?.companyId, driver?.uid], 'Driver-nztaInit');
+
+  useSafeEffect(() => {
     void (async () => {
       try {
         const v = await getData<string>(STORAGE_KEYS.selectedVehicle);
         if (v) setSelectedVehicleIdState(v);
         const j = await getData<ActiveJob>(STORAGE_KEYS.activeJob);
-        if (j) setActiveJob(j);
+        if (j) {
+          setActiveJob({
+            ...j,
+            stepTimes: j.stepTimes ?? EMPTY_STEP_TIMES,
+            tariffChanges: j.tariffChanges ?? [],
+          });
+        }
         // Do not restore shift as "online" on launch — driver must confirm vehicle each session.
         await storeData(STORAGE_KEYS.shiftActive, false);
         const m = await getData<MeterState>(STORAGE_KEYS.meterState);
-        if (m?.running) {
+        if (m?.running && m.mode && m.breakdown) {
           setMeter(m);
+          meterRef.current = m;
           setHailActive(true);
         }
       } catch (err) {
@@ -389,7 +427,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     jobHistory.filter((j) => j.status === 'completed').map((j) => ({ fare: j.fare, paymentType: j.paymentType })),
   );
   const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
-  const activeVehicleBodyType = activeVehicle?.bodyType ?? '—';
+  const activeVehicleBodyType = activeVehicle?.displayType ?? activeVehicle?.bodyType ?? '—';
+  const tariffLocked = !!paymentJob;
 
   useSafeEffect(() => {
     if (!shiftActive || !driver?.companyId || !activeVehicle) {
@@ -503,7 +542,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [driver?.companyId, driver?.id, driver?.uid, selectedVehicleId], 'Driver-presence');
 
   const canReceiveJobOffers =
-    shiftActive && readyForJobs && presenceStatus === 'Online';
+    shiftActive && readyForJobs && presenceStatus === 'Online' && !paymentJob;
   const offersBadgeCount = shiftActive ? pendingOffers.length : 0;
   const nextQueuedOffer = canReceiveJobOffers ? (queuedOffers[0] ?? null) : null;
 
@@ -539,7 +578,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const handleIncomingOffer = async (val: Record<string, unknown>) => {
-    if (!shiftActiveRef.current || !readyForJobsRef.current) return;
+    if (!shiftActiveRef.current || !readyForJobsRef.current || paymentJobRef.current) return;
 
     const offer = parseJobOffer(val);
     const seen = lastOfferSeenRef.current;
@@ -612,6 +651,72 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canReceiveJobOffers, driver?.id], 'Driver-notification');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !activeJob?.id) {
+      bookingRawRef.current = null;
+      return;
+    }
+    bookingRawRef.current = null;
+    return subscribeBooking(driver.companyId, activeJob.id, (update) => {
+      if (update.cancelled) {
+        Alert.alert('Job cancelled', 'This booking was cancelled by dispatch.');
+        void cancelActiveJobInternal();
+        return;
+      }
+      const meterStarted = stageAllowsMeter(activeJob?.stage ?? 'pickup');
+      const { allowed, blocked, changes } = diffBookingChanges(
+        bookingRawRef.current,
+        update.raw,
+        meterStarted,
+      );
+      bookingRawRef.current = update.raw;
+      if (changes.length === 0) return;
+
+      if (blocked.length > 0) {
+        Alert.alert(
+          'Job update blocked',
+          `Changes to ${blocked.join(', ')} cannot be applied while passenger is on board. Notes and payment type can still change.`,
+        );
+      }
+
+      const patch: Partial<ActiveJob> = {};
+      if (allowed.pickup) patch.pickup = allowed.pickup;
+      if (allowed.dropoff) patch.dropoff = allowed.dropoff;
+      if (allowed.passengerName) patch.passengerName = allowed.passengerName;
+      if (allowed.passengerPhone) patch.passengerPhone = allowed.passengerPhone;
+      if (allowed.notes) patch.notes = allowed.notes;
+      if (allowed.paymentType) patch.paymentType = allowed.paymentType as ActiveJob['paymentType'];
+
+      if (Object.keys(patch).length > 0) {
+        setActiveJob((prev) => {
+          if (!prev) return prev;
+          const merged = { ...prev, ...patch };
+          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+          return merged;
+        });
+      }
+
+      if (changes.length > 0 && blocked.length === 0) {
+        setJobEditNotice(`Job updated:\n${changes.join('\n')}`);
+      } else if (changes.some((c) => c.startsWith('Notes') || c.startsWith('Payment'))) {
+        setJobEditNotice(changes.filter((c) => c.startsWith('Notes') || c.startsWith('Payment')).join('\n'));
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.companyId, activeJob?.id, activeJob?.stage], 'Driver-bookingSync');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || queuedOffers.length === 0) return;
+    const unsubs = queuedOffers.map((o) =>
+      subscribeBooking(driver.companyId!, o.id, (update) => {
+        if (!update.cancelled) return;
+        Alert.alert('Queued job cancelled', 'A queued booking was cancelled.');
+        setQueuedOffers((prev) => prev.filter((q) => q.id !== o.id));
+      }),
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [driver?.companyId, queuedOffers], 'Driver-queuedBookingSync');
 
   const setSelectedVehicleId = async (id: string) => {
     const normalized = id.trim().toUpperCase();
@@ -700,7 +805,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     console.log('[Shift] scheduling NZTA clock + location (background)');
 
     void import('@/services/nztaService').then(({ startShiftClock }) =>
-      startShiftClock()
+      startShiftClock(driver.companyId, driver.uid)
         .then(() => console.log('[Shift] NZTA clock started'))
         .catch((err) => console.error('[Driver] startShiftClock', err)),
     );
@@ -803,10 +908,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     setPresenceStatus('Offline');
-    const { endShiftClock } = await import('@/services/nztaService');
-    await endShiftClock();
+    setJobOffer(null);
+    setQueuedOffers([]);
+    setActiveJob(null);
+    activeJobIdRef.current = null;
+    setPaymentJob(null);
+    await storeData(STORAGE_KEYS.activeJob, null);
+
+    if (driver?.companyId && driver.uid) {
+      const { endShiftClock } = await import('@/services/nztaService');
+      await endShiftClock(driver.companyId, driver.uid, driver.id);
+    }
     const { stopBackgroundTracking } = await import('@/services/locationService');
     await stopBackgroundTracking();
+  };
+
+  const endShiftAndSignOut = async () => {
+    await endShift();
+    await signOut();
   };
 
   const acceptOffer = async () => {
@@ -816,14 +935,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     } catch {
       await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: jobOffer.id } });
     }
-    const job: ActiveJob = {
-      ...jobOffer,
-      stage: 'pickup',
-      startedAt: Date.now(),
-      distanceKm: 0,
-      durationMin: 0,
-      fare: jobOffer.fixedFare ?? 0,
-    };
+    const job = defaultActiveJob(jobOffer);
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
@@ -865,14 +977,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offer.id } });
     }
 
-    const job: ActiveJob = {
-      ...offer,
-      stage: 'pickup',
-      startedAt: Date.now(),
-      distanceKm: 0,
-      durationMin: 0,
-      fare: offer.fixedFare ?? offer.estimatedFare ?? 0,
-    };
+    const job = defaultActiveJob(offer);
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
@@ -891,12 +996,79 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setJobOffer({ ...offer, silent: false });
   };
 
+  const startMeterForJob = () => {
+    if (!isTariffConfigured(selectedTariff)) {
+      Alert.alert('No tariff', 'Select a tariff before starting the meter.');
+      return;
+    }
+    const m = createInitialMeter(selectedTariff);
+    setMeter(m);
+    meterRef.current = m;
+    storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
+    startMeterWatch();
+  };
+
+  const stopMeterForJob = () => {
+    if (meterStopRef.current) {
+      meterStopRef.current();
+      meterStopRef.current = null;
+    }
+    setMeter((prev) => {
+      if (!prev) return null;
+      const stopped = { ...prev, running: false, finishedAt: Date.now() };
+      storeData(STORAGE_KEYS.meterState, stopped).catch(() => undefined);
+      return stopped;
+    });
+  };
+
+  const startMeterWatch = () => {
+    if (meterStopRef.current) meterStopRef.current();
+    void watchMeter(
+      selectedTariff,
+      () => meterRef.current,
+      (result) => {
+        setMeter(result.meter);
+        meterRef.current = result.meter;
+        storeData(STORAGE_KEYS.meterState, result.meter).catch(() => undefined);
+        if (result.autoUnpaused) {
+          Alert.alert('Meter unpaused', 'Car is moving — fare is accumulating again.');
+        }
+      },
+    ).then((stop) => {
+      meterStopRef.current = stop;
+    });
+  };
+
   const advanceStage = async () => {
     if (!activeJob) return;
     const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
     const idx = order.indexOf(activeJob.stage);
     const nextStage = order[Math.min(idx + 1, order.length - 1)];
-    const updated = { ...activeJob, stage: nextStage };
+    const now = Date.now();
+    const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
+    if (nextStage === 'arrived') stepTimes.arrivedAt = now;
+    if (nextStage === 'onboard') {
+      stepTimes.onboardAt = now;
+      startMeterForJob();
+    }
+    if (nextStage === 'complete') {
+      stepTimes.completeAt = now;
+      stopMeterForJob();
+    }
+
+    let meterSnapshot = meterRef.current;
+    if (nextStage === 'complete' && meterSnapshot) {
+      meterSnapshot = { ...meterSnapshot, running: false, finishedAt: now };
+    }
+
+    const updated: ActiveJob = {
+      ...activeJob,
+      stage: nextStage,
+      stepTimes,
+      meterSnapshot: meterSnapshot ?? activeJob.meterSnapshot,
+      fare: meterSnapshot?.fare ?? activeJob.fare,
+      distanceKm: meterSnapshot?.distanceKm ?? activeJob.distanceKm,
+    };
     setActiveJob(updated);
     await storeData(STORAGE_KEYS.activeJob, updated);
     if (nextStage === 'complete') {
@@ -913,7 +1085,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const completeJob = async () => {
     if (!activeJob) return;
-    setPaymentJob(activeJob.stage === 'complete' ? activeJob : { ...activeJob, stage: 'complete' });
+    stopMeterForJob();
+    const now = Date.now();
+    const stepTimes = { ...activeJob.stepTimes, completeAt: now };
+    const meterSnapshot = meterRef.current
+      ? { ...meterRef.current, running: false, finishedAt: now }
+      : activeJob.meterSnapshot;
+    const closed: ActiveJob = {
+      ...activeJob,
+      stage: 'complete',
+      stepTimes,
+      meterSnapshot,
+      fare: meterSnapshot?.fare ?? activeJob.fare,
+    };
+    setActiveJob(closed);
+    setPaymentJob(closed);
+    await storeData(STORAGE_KEYS.activeJob, closed);
   };
 
   const dismissPayment = () => {
@@ -933,6 +1120,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       stage: 'complete',
       fare: totalFare,
       paymentType: paymentType as PaymentType,
+      meterSnapshot: job.meterSnapshot ?? meterRef.current ?? undefined,
+      distanceKm: job.meterSnapshot?.distanceKm ?? job.distanceKm,
+      durationMin: job.meterSnapshot?.startedAt
+        ? Math.round(
+            ((job.meterSnapshot.finishedAt ?? Date.now()) - job.meterSnapshot.startedAt) / 60000,
+          )
+        : job.durationMin,
     };
 
     try {
@@ -979,14 +1173,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const cancelActiveJob = async () => {
+  const cancelActiveJobInternal = async () => {
+    stopMeterForJob();
+    setMeter(null);
+    meterRef.current = null;
     setActiveJob(null);
     activeJobIdRef.current = null;
+    bookingRawRef.current = null;
     await storeData(STORAGE_KEYS.activeJob, null);
+    await storeData(STORAGE_KEYS.meterState, null);
     if (driver && shiftActive) {
       const vehicleId = await resolveVehicleId();
       if (vehicleId) writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
     }
+    if (queuedOffers.length > 0) setTimeout(flushQueuedOffer, 400);
+  };
+
+  const cancelActiveJob = async () => {
+    await cancelActiveJobInternal();
   };
 
   const noShowActiveJob = async () => {
@@ -1005,10 +1209,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const stopMeterTimers = () => {
-    if (meterTickRef.current) clearInterval(meterTickRef.current);
-    if (waitTickRef.current) clearInterval(waitTickRef.current);
-    meterTickRef.current = null;
-    waitTickRef.current = null;
+    if (meterStopRef.current) {
+      meterStopRef.current();
+      meterStopRef.current = null;
+    }
   };
 
   const endHailInternal = () => {
@@ -1016,6 +1220,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setHailActive(false);
     hailActiveRef.current = false;
     setMeter(null);
+    meterRef.current = null;
     storeData(STORAGE_KEYS.meterState, null).catch(() => undefined);
   };
 
@@ -1028,73 +1233,84 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('No tariff configured', 'Ask dispatch to set up tariffs for your company in Firebase.');
       return;
     }
-    const m: MeterState = {
-      running: true,
-      paused: false,
-      waiting: false,
-      startedAt: Date.now(),
-      pausedMs: 0,
-      waitingMs: 0,
-      distanceKm: 0,
-      fare: selectedTariff.flagFall,
-    };
+    const m = createInitialMeter(selectedTariff);
     setMeter(m);
+    meterRef.current = m;
     setHailActive(true);
     hailActiveRef.current = true;
     storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
-
-    stopMeterTimers();
-    meterTickRef.current = setInterval(() => {
-      setMeter((prev) => {
-        if (!prev?.running || prev.paused) return prev;
-        const km = prev.distanceKm + 0.008;
-        const waitMin = prev.waitingMs / 60000;
-        const fare = calcMeterFare(selectedTariff, km, waitMin);
-        const next = { ...prev, distanceKm: km, fare };
-        storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
-        return next;
-      });
-    }, 3000);
+    startMeterWatch();
   };
 
   const endHail = () => {
-    endHailInternal();
+    setMeter((prev) => {
+      if (!prev) return prev;
+      const ended = { ...prev, running: false, finishedAt: Date.now() };
+      storeData(STORAGE_KEYS.meterState, ended).catch(() => undefined);
+      return ended;
+    });
+    stopMeterTimers();
+    setHailActive(false);
+    hailActiveRef.current = false;
     if (queuedOffers.length > 0) flushQueuedOffer();
   };
 
   const pauseMeter = () => {
     setMeter((prev) => {
       if (!prev) return prev;
-      const next = { ...prev, paused: !prev.paused };
+      const pausing = !prev.paused;
+      const next: MeterState = {
+        ...prev,
+        paused: pausing,
+        pauseAccumulatedAt: Date.now(),
+        pauseAnchorLat: pausing ? prev.lastLat : undefined,
+        pauseAnchorLng: pausing ? prev.lastLng : undefined,
+      };
+      meterRef.current = next;
       storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
       return next;
     });
   };
 
   const toggleWaitMeter = () => {
-    setMeter((prev) => {
-      if (!prev) return prev;
-      const waiting = !prev.waiting;
-      if (waiting) {
-        waitTickRef.current = setInterval(() => {
-          setMeter((m) => {
-            if (!m?.waiting) return m;
-            const next = { ...m, waitingMs: m.waitingMs + 1000 };
-            const fare = calcMeterFare(selectedTariff, next.distanceKm, next.waitingMs / 60000);
-            return { ...next, fare };
-          });
-        }, 1000);
-      } else if (waitTickRef.current) {
-        clearInterval(waitTickRef.current);
-        waitTickRef.current = null;
-      }
-      return { ...prev, waiting };
-    });
+    Alert.alert('Automatic meter', 'Waiting and moving rates switch automatically from GPS speed.');
   };
 
   const setSelectedTariff = (t: Tariff) => {
+    if (paymentJobRef.current) {
+      Alert.alert('Tariff locked', 'Tariff cannot be changed during payment.');
+      return;
+    }
+    const prevId = selectedTariff.id;
     setSelectedTariffState(t);
     storeData(STORAGE_KEYS.selectedTariffId, t.id).catch(() => undefined);
+
+    if (meterRef.current?.running && prevId !== t.id) {
+      const change: TariffChangeRecord = { tariffId: t.id, tariffName: t.name, at: Date.now() };
+      setMeter((prev) => {
+        if (!prev) return prev;
+        const waitMin = prev.waitingMs / 60000;
+        const mode = prev.paused ? 'waiting' : prev.mode;
+        const breakdown = calcMeterBreakdown(t, prev.distanceKm, waitMin, mode);
+        const next = {
+          ...prev,
+          tariffId: t.id,
+          tariffName: t.name,
+          tariffChanges: [...prev.tariffChanges, change],
+          breakdown,
+          fare: breakdown.total,
+        };
+        meterRef.current = next;
+        return next;
+      });
+      if (activeJob) {
+        const changes = [...(activeJob.tariffChanges ?? []), change];
+        const updated = { ...activeJob, tariffChanges: changes };
+        setActiveJob(updated);
+        storeData(STORAGE_KEYS.activeJob, updated).catch(() => undefined);
+      }
+      startMeterWatch();
+    }
   };
 
   const dismissJobEditNotice = () => setJobEditNotice(null);
@@ -1135,7 +1351,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         refreshJobHistory,
         startShift,
         endShift,
+        endShiftAndSignOut,
         togglePresence,
+        tariffLocked,
         acceptOffer,
         declineOffer,
         advanceStage,

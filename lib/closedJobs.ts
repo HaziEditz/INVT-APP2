@@ -14,6 +14,7 @@ export async function writeClosedJob(
   const entryRef = push(ref(database, `closedJobs/${companyId}`));
   const id = entryRef.key ?? job.id;
   const now = Date.now();
+  const meter = job.meterSnapshot;
 
   await set(entryRef, {
     jobId: job.id,
@@ -27,8 +28,20 @@ export async function writeClosedJob(
     fare: totalFare,
     baseFare: job.fare,
     extras,
-    distanceKm: job.distanceKm,
+    distanceKm: meter?.distanceKm ?? job.distanceKm,
     durationMin: job.durationMin,
+    waitingMs: meter?.waitingMs,
+    pausedMs: meter?.pausedMs,
+    movingMs: meter?.movingMs,
+    totalRideMs: meter?.startedAt
+      ? (meter.finishedAt ?? now) - meter.startedAt
+      : undefined,
+    stepTimes: job.stepTimes,
+    tariffId: meter?.tariffId,
+    tariffName: meter?.tariffName,
+    tariffChanges: job.tariffChanges?.length ? job.tariffChanges : meter?.tariffChanges,
+    fareBreakdown: meter?.breakdown,
+    meterFare: meter?.fare,
     source: job.source ?? '',
     notes: job.notes ?? '',
     completedAt: now,

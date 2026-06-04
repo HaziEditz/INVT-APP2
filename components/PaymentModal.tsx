@@ -30,7 +30,8 @@ export function PaymentModal() {
 
   if (!paymentJob) return null;
 
-  const base = paymentJob.fare ?? paymentJob.fixedFare ?? paymentJob.estimatedFare ?? 0;
+  const meter = paymentJob.meterSnapshot;
+  const base = meter?.fare ?? paymentJob.fare ?? paymentJob.fixedFare ?? paymentJob.estimatedFare ?? 0;
   const extrasTotal =
     extras.bikeCarry + extras.airportFee + extras.eftposSurcharge + extras.tolls + extras.other;
   const total = +(base + extrasTotal).toFixed(2);
@@ -55,7 +56,31 @@ export function PaymentModal() {
         <View style={styles.sheet}>
           <Text style={styles.title}>Collect payment</Text>
           <Text style={styles.sub}>{paymentJob.pickup} → {paymentJob.dropoff}</Text>
-          <Text style={styles.fare}>Trip ${base.toFixed(2)} · Total ${total.toFixed(2)}</Text>
+
+          {meter?.breakdown ? (
+            <View style={styles.breakdownBox}>
+              <Text style={styles.breakdownTitle}>Fare breakdown</Text>
+              <Text style={styles.breakdownLine}>Flag fall ${meter.breakdown.flagFall.toFixed(2)}</Text>
+              <Text style={styles.breakdownLine}>
+                Distance {meter.breakdown.distanceKm.toFixed(1)} km × rate = $
+                {meter.breakdown.distanceCharge.toFixed(2)}
+              </Text>
+              <Text style={styles.breakdownLine}>
+                Waiting {meter.breakdown.waitingMinutes.toFixed(0)} min × rate = $
+                {meter.breakdown.waitingCharge.toFixed(2)}
+              </Text>
+              <Text style={styles.breakdownTotal}>Trip ${meter.breakdown.total.toFixed(2)}</Text>
+              <Text style={styles.meta}>
+                {meter.distanceKm.toFixed(1)} km · wait {(meter.waitingMs / 60000).toFixed(0)} min · pause{' '}
+                {(meter.pausedMs / 60000).toFixed(0)} min
+              </Text>
+              {meter.tariffName ? (
+                <Text style={styles.meta}>Tariff: {meter.tariffName}</Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          <Text style={styles.fare}>Total due ${total.toFixed(2)}</Text>
 
           <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
             <Text style={styles.section}>Payment type</Text>
@@ -115,6 +140,18 @@ const styles = StyleSheet.create({
   },
   title: { color: Colors.text, fontSize: 22, fontWeight: '800' },
   sub: { color: Colors.textMuted, fontSize: 14, marginTop: 4 },
+  breakdownBox: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  breakdownTitle: { color: Colors.text, fontWeight: '700', marginBottom: 6 },
+  breakdownLine: { color: Colors.textMuted, fontSize: 13, marginBottom: 2 },
+  breakdownTotal: { color: Colors.success, fontSize: 18, fontWeight: '800', marginTop: 6 },
+  meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
   fare: { color: Colors.success, fontSize: 18, fontWeight: '800', marginVertical: 10 },
   scroll: { maxHeight: 360, marginBottom: 12 },
   section: { color: Colors.text, fontWeight: '700', fontSize: 15, marginTop: 8, marginBottom: 8 },

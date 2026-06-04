@@ -72,34 +72,42 @@ function extractVehicleNumber(id: string, meta: Record<string, unknown>): string
   return id;
 }
 
-function extractServiceType(meta: Record<string, unknown>): string {
+/** Single vehicle type string from Firebase — prefer explicit type fields, never combine. */
+function extractDisplayType(meta: Record<string, unknown>): string {
   const raw = String(
-    meta.serviceType ?? meta.service ?? meta.category ?? meta.vehicleType ?? meta.vehicletype ?? 'Taxi',
-  ).trim();
-  const lower = raw.toLowerCase();
-  if (lower.includes('cab')) return 'Cab';
-  if (lower.includes('taxi')) return 'Taxi';
-  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Taxi';
-}
-
-function extractBodyType(meta: Record<string, unknown>): string {
-  const raw = String(
-    meta.bodyType ??
+    meta.vehicleType ??
+      meta.VehicleType ??
+      meta.bodyType ??
       meta.BodyType ??
       meta.vehicleClass ??
       meta.class ??
-      meta.VehicleType ??
-      meta.vehicletype ??
       meta.type ??
-      '',
+      'Taxi',
   ).trim();
+  if (!raw) return 'Taxi';
   const lower = raw.toLowerCase();
   if (lower.includes('wav') || lower.includes('wheelchair')) return 'WAV';
   if (lower.includes('van') || lower.includes('minibus')) return 'Van';
-  if (lower.includes('sedan') || lower.includes('car') || lower.includes('saloon')) return 'Sedan';
+  if (lower.includes('sedan') || lower.includes('saloon')) return 'Sedan';
   if (lower.includes('suv')) return 'SUV';
-  if (raw) return raw.charAt(0).toUpperCase() + raw.slice(1);
-  return 'Sedan';
+  if (lower.includes('food')) return 'Food';
+  if (lower.includes('freight')) return 'Freight';
+  if (lower.includes('tow')) return 'Tow';
+  if (lower.includes('taxi') || lower.includes('cab')) return 'Taxi';
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function extractServiceType(meta: Record<string, unknown>): string {
+  const display = extractDisplayType(meta);
+  const lower = display.toLowerCase();
+  if (lower.includes('food')) return 'Food';
+  if (lower.includes('freight')) return 'Freight';
+  if (lower.includes('tow')) return 'Tow';
+  return 'Taxi';
+}
+
+function extractBodyType(meta: Record<string, unknown>): string {
+  return extractDisplayType(meta);
 }
 
 async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Vehicle[]> {
@@ -125,12 +133,14 @@ async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Veh
       parseInt(String(meta.seatCapacity ?? meta.capacity ?? meta.SeatCapacity ?? '4'), 10) || 4;
     const vLower = vehicleType.toLowerCase();
     const bodyLower = bodyType.toLowerCase();
+    const displayType = extractDisplayType(meta);
     return {
       id: upper,
       number,
+      displayType,
       vehicleType,
-      bodyType,
-      label: `${number} · ${vehicleType}`,
+      bodyType: displayType,
+      label: number,
       plate: plate || '—',
       seatCapacity,
       hasFoodService: vLower.includes('food') || meta.foodService === true || meta.hasFood === true,

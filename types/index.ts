@@ -21,6 +21,8 @@ export interface DriverProfile {
 export interface Vehicle {
   id: string;
   number: string;
+  /** Single display type from Firebase (not combined). */
+  displayType: string;
   vehicleType: string;
   bodyType: string;
   label: string;
@@ -67,12 +69,64 @@ export interface QueuedOffer extends JobOffer {
   queuedAt: number;
 }
 
+export interface JobStepTimes {
+  acceptedAt?: number;
+  onWayAt?: number;
+  arrivedAt?: number;
+  onboardAt?: number;
+  completeAt?: number;
+  hailStartedAt?: number;
+  hailEndedAt?: number;
+}
+
+export interface TariffChangeRecord {
+  tariffId: string;
+  tariffName: string;
+  at: number;
+}
+
+export interface MeterFareBreakdown {
+  flagFall: number;
+  distanceKm: number;
+  distanceCharge: number;
+  waitingMinutes: number;
+  waitingCharge: number;
+  total: number;
+}
+
+export type MeterMode = 'moving' | 'waiting';
+
+export interface MeterState {
+  running: boolean;
+  paused: boolean;
+  mode: MeterMode;
+  startedAt: number;
+  finishedAt?: number;
+  pausedMs: number;
+  pauseAccumulatedAt?: number;
+  movingMs: number;
+  waitingMs: number;
+  distanceKm: number;
+  lastLat?: number;
+  lastLng?: number;
+  pauseAnchorLat?: number;
+  pauseAnchorLng?: number;
+  tariffId: string;
+  tariffName: string;
+  tariffChanges: TariffChangeRecord[];
+  breakdown: MeterFareBreakdown;
+  fare: number;
+}
+
 export interface ActiveJob extends JobOffer {
   stage: JobStage;
   startedAt: number;
   distanceKm: number;
   durationMin: number;
   fare: number;
+  stepTimes: JobStepTimes;
+  tariffChanges: TariffChangeRecord[];
+  meterSnapshot?: MeterState | null;
 }
 
 export interface CompletedJob extends ActiveJob {
@@ -87,15 +141,17 @@ export interface Tariff {
   waitingPerMin: number;
 }
 
-export interface MeterState {
-  running: boolean;
-  paused: boolean;
-  waiting: boolean;
-  startedAt: number;
-  pausedMs: number;
-  waitingMs: number;
-  distanceKm: number;
-  fare: number;
+export interface NztaHoursState {
+  shiftStartedAt: number | null;
+  shiftWindowEndsAt: number | null;
+  workedMinutes: number;
+  weeklyWorkedMinutes: number;
+  breakMinutes: number;
+  lastBreakAt: number | null;
+  breakReminderShown: boolean;
+  breakDeferredUntil: number | null;
+  lastShiftEndAt: number | null;
+  continuedWindow: boolean;
 }
 
 export interface ChatMessage {
@@ -126,15 +182,6 @@ export interface OfflineQueueItem {
   type: 'job_update' | 'location' | 'chat';
   payload: Record<string, unknown>;
   createdAt: number;
-}
-
-export interface NztaHoursState {
-  shiftStartedAt: number | null;
-  workedMinutes: number;
-  breakMinutes: number;
-  lastBreakAt: number | null;
-  breakReminderShown: boolean;
-  breakDeferredUntil: number | null;
 }
 
 export interface CompanyInfo {

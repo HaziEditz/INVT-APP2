@@ -1,6 +1,5 @@
-import { Tariff } from '@/types';
+import { MeterFareBreakdown, Tariff } from '@/types';
 
-/** Shown in UI when `tariffs/{companyId}` has no configured tariffs. */
 export const NO_TARIFF_CONFIGURED: Tariff = {
   id: '__none__',
   name: 'No tariff configured',
@@ -13,10 +12,32 @@ export function isTariffConfigured(tariff: Tariff): boolean {
   return tariff.id !== NO_TARIFF_CONFIGURED.id;
 }
 
+/** Exclusive: moving uses km rate only; waiting uses per-minute rate only. */
+export function calcMeterBreakdown(
+  tariff: Tariff,
+  distanceKm: number,
+  waitingMinutes: number,
+  mode: 'moving' | 'waiting',
+): MeterFareBreakdown {
+  const flagFall = tariff.flagFall;
+  const distanceCharge = mode === 'moving' ? distanceKm * tariff.ratePerKm : 0;
+  const waitingCharge = mode === 'waiting' ? waitingMinutes * tariff.waitingPerMin : 0;
+  const total = flagFall + distanceCharge + waitingCharge;
+  return {
+    flagFall,
+    distanceKm,
+    distanceCharge,
+    waitingMinutes,
+    waitingCharge,
+    total,
+  };
+}
+
 export function calcMeterFare(
   tariff: Tariff,
   distanceKm: number,
   waitingMinutes: number,
+  mode: 'moving' | 'waiting' = 'moving',
 ): number {
-  return tariff.flagFall + distanceKm * tariff.ratePerKm + waitingMinutes * tariff.waitingPerMin;
+  return calcMeterBreakdown(tariff, distanceKm, waitingMinutes, mode).total;
 }

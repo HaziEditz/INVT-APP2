@@ -63,8 +63,13 @@ export function FullScreenMapModal({
               <Pressable style={styles.ctrl} onPress={onPause}>
                 <Text style={styles.ctrlText}>{meter.paused ? 'Resume' : 'Pause'}</Text>
               </Pressable>
-              <Pressable style={[styles.ctrl, meter.waiting && styles.ctrlWait]} onPress={onWait}>
-                <Text style={styles.ctrlText}>{meter.waiting ? 'End Wait' : 'Wait'}</Text>
+              <Pressable
+                style={[styles.ctrl, meter.mode === 'waiting' && !meter.paused && styles.ctrlWait]}
+                onPress={onWait}
+              >
+                <Text style={styles.ctrlText}>
+                  {meter.paused ? 'PAUSED' : meter.mode === 'moving' ? 'MOVING' : 'WAITING'}
+                </Text>
               </Pressable>
             </View>
           </View>

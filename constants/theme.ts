@@ -39,5 +39,11 @@ export const NZTA_MAX_WORK_HOURS = 13;
 /** Maximum total shift length (work + break time) */
 export const NZTA_MAX_SHIFT_HOURS = 14;
 export const NZTA_BREAK_AFTER_HOURS = 5;
+/** NZTA weekly driving limit */
+export const NZTA_WEEKLY_MAX_HOURS = 70;
+/** Continue same 14h shift window if rest under this many hours */
+export const NZTA_REST_CONTINUE_HOURS = 10;
+/** Reset weekly counter after this many hours rest */
+export const NZTA_REST_WEEKLY_RESET_HOURS = 24;
 /** @deprecated use NZTA_MAX_WORK_HOURS */
 export const NZTA_MAX_HOURS = NZTA_MAX_WORK_HOURS;
