@@ -1,6 +1,7 @@
 import { jobCoords, regionForRoute } from '@/lib/geo';
 import { Colors } from '@/constants/theme';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
+import Constants from 'expo-constants';
 import { useRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -18,8 +19,11 @@ type Props = {
   showsUserLocation?: boolean;
 };
 
-/** Use Google Maps on native builds (API key is injected via app.json at build time). */
-const MAP_PROVIDER = Platform.OS === 'android' || Platform.OS === 'ios' ? PROVIDER_GOOGLE : undefined;
+const IS_EXPO_GO = Constants.appOwnership === 'expo';
+
+/** Google provider crashes in Expo Go without a dev build; use default maps there. */
+const MAP_PROVIDER =
+  !IS_EXPO_GO && (Platform.OS === 'android' || Platform.OS === 'ios') ? PROVIDER_GOOGLE : undefined;
 
 export default function JobMap({
   pickup,
@@ -32,6 +36,7 @@ export default function JobMap({
   showsUserLocation = true,
 }: Props) {
   const mapRef = useRef<MapView | null>(null);
+  const showUser = showsUserLocation && !IS_EXPO_GO;
 
   const p = pickup ?? jobCoords(pickupLat, pickupLng);
   const d = dropoff ?? jobCoords(dropoffLat, dropoffLng, p.latitude + 0.02, p.longitude + 0.02);
@@ -52,7 +57,7 @@ export default function JobMap({
         style={styles.map}
         provider={MAP_PROVIDER}
         initialRegion={region}
-        showsUserLocation={showsUserLocation}
+        showsUserLocation={showUser}
         showsMyLocationButton={false}
         loadingEnabled
         mapType="standard"

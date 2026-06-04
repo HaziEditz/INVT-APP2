@@ -10,9 +10,11 @@ const TYPE_COLORS: Record<JobType, string> = {
 };
 
 export function JobTypeBadge({ type }: { type: JobType }) {
+  const color = TYPE_COLORS[type] ?? Colors.accent;
+  const label = type && TYPE_COLORS[type] ? type : 'Taxi';
   return (
-    <View style={[styles.badge, { backgroundColor: TYPE_COLORS[type] + '22', borderColor: TYPE_COLORS[type] }]}>
-      <Text style={[styles.text, { color: TYPE_COLORS[type] }]}>{type}</Text>
+    <View style={[styles.badge, { backgroundColor: color + '22', borderColor: color }]}>
+      <Text style={[styles.text, { color }]}>{label}</Text>
     </View>
   );
 }

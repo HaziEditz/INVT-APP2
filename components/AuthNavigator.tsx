@@ -41,12 +41,14 @@ export function AuthNavigator() {
       return;
     }
 
-    if (firebaseUser && vehicleReady && (inAuth || onSelectVehicle)) {
+    if (firebaseUser && vehicleReady && (inAuth || onSelectVehicle) && !inTabs) {
+      console.log('[AuthNavigator] redirect → /(tabs) from', root);
       router.replace('/(tabs)');
       return;
     }
 
     if (firebaseUser && vehicleReady && !inTabs && !onSelectVehicle && root !== 'active-job') {
+      console.log('[AuthNavigator] redirect → /(tabs) (fallback)');
       router.replace('/(tabs)');
     }
   }, [firebaseUser, driver, loading, vehicleReady, segments, router]);

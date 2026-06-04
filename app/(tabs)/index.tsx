@@ -20,6 +20,11 @@ import {
 } from 'react-native';
 
 export default function MainScreen() {
+  useSafeEffect(() => {
+    console.log('[MainScreen] mounted');
+    return () => console.log('[MainScreen] unmounted');
+  }, [], 'MainScreen-mount');
+
   const { firebaseUser, driver, profileLoading, refreshDriver } = useAuth();
   const {
     shiftActive,

@@ -103,17 +103,22 @@ export async function startBackgroundTracking(
 
   const started = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
   if (!started) {
-    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-      accuracy: Location.Accuracy.Balanced,
-      timeInterval: 15000,
-      distanceInterval: 25,
-      showsBackgroundLocationIndicator: true,
-      pausesUpdatesAutomatically: false,
-      foregroundService: {
-        notificationTitle: 'BookaWaka Driver',
-        notificationBody: 'Tracking location for dispatch',
-      },
-    });
+    try {
+      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 15000,
+        distanceInterval: 25,
+        showsBackgroundLocationIndicator: true,
+        pausesUpdatesAutomatically: false,
+        foregroundService: {
+          notificationTitle: 'BookaWaka Driver',
+          notificationBody: 'Tracking location for dispatch',
+        },
+      });
+    } catch (err) {
+      console.warn('[Location] Background tracking unavailable (Expo Go / permissions):', err);
+      return perms.foregroundGranted;
+    }
   }
 
   try {

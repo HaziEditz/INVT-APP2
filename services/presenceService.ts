@@ -118,6 +118,7 @@ function enrichShiftPresenceInBackground(driver: DriverProfile, vehicleId: strin
         lat: lat || 0,
         lng: lng || 0,
       });
+      console.log('[Presence] enrichShiftPresence complete', { onlinePath });
     } catch (err) {
       console.warn('[Presence] enrichShiftPresenceInBackground failed:', err);
     }

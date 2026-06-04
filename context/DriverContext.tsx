@@ -120,6 +120,25 @@ function fmtNzTime(d: Date) {
   return d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+function isOfferPayload(val: Record<string, unknown>): boolean {
+  return !!(val.pickup || val.from || val.dropoff || val.to || val.jobId || val.id);
+}
+
+function extractOfferPayloads(val: unknown): Record<string, unknown>[] {
+  if (!val || typeof val !== 'object') return [];
+  if (Array.isArray(val)) {
+    return val.filter(
+      (x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x),
+    );
+  }
+  const rec = val as Record<string, unknown>;
+  if (isOfferPayload(rec)) return [rec];
+  return Object.values(rec).filter(
+    (x): x is Record<string, unknown> =>
+      !!x && typeof x === 'object' && !Array.isArray(x) && isOfferPayload(x),
+  );
+}
+
 function parseJobOffer(val: Record<string, unknown>): JobOffer {
   return {
     id: String(val.id ?? val.jobId ?? Date.now()),
@@ -446,12 +465,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [canReceiveJobOffers], 'Driver-clearOffersWhenOffline');
 
   const flushQueuedOffer = () => {
+    let promoted: QueuedOffer | null = null;
     setQueuedOffers((q) => {
       if (q.length === 0) return q;
       const [next, ...rest] = q;
-      setJobOffer({ ...next, silent: false });
+      promoted = next ?? null;
       return rest;
     });
+    if (promoted) {
+      console.log('[Driver] flushQueuedOffer → show', promoted.id);
+      setJobOffer({ ...promoted, silent: false });
+    }
   };
 
   const enqueueOffer = (offer: JobOffer) => {
@@ -505,9 +529,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const offerRef = ref(database, `jobOffers/${driver.companyId}/${driver.id}`);
       return onValue(offerRef, async (snap) => {
         try {
-          const val = snap.val();
-          if (!val || typeof val !== 'object') return;
-          await processOfferPayload(val as Record<string, unknown>);
+          const payloads = extractOfferPayloads(snap.val());
+          for (const payload of payloads) {
+            await processOfferPayload(payload);
+          }
         } catch (err) {
           console.error('[Driver] job offer listener', err);
         }
@@ -524,9 +549,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const notifyRef = ref(database, `notification/${driver.id}`);
       return onValue(notifyRef, async (snap) => {
         try {
-          const val = snap.val();
-          if (!val || typeof val !== 'object') return;
-          await processOfferPayload(val as Record<string, unknown>);
+          const payloads = extractOfferPayloads(snap.val());
+          for (const payload of payloads) {
+            await processOfferPayload(payload);
+          }
         } catch (err) {
           console.error('[Driver] notification listener', err);
         }
@@ -606,9 +632,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       console.log('[Shift] startShift — profile uid:', driver.uid, 'vehicle:', vehicleId);
       await startShiftOnline(driver, vehicleId);
+      console.log('[Shift] startShiftOnline done — enrich runs in background');
       setPresenceStatus('Online');
       setReadyForJobs(true);
       readyForJobsRef.current = true;
+      console.log('[Shift] presence Online, readyForJobs=true');
     } catch (err) {
       console.warn('[Shift] Firebase online status write failed:', err);
       Alert.alert('Connection issue', 'Could not register with dispatch. Check your network and try again.');
@@ -618,25 +646,39 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    console.log('[Shift] scheduling NZTA clock + location (background)');
+
     void import('@/services/nztaService').then(({ startShiftClock }) =>
-      startShiftClock().catch((err) => console.error('[Driver] startShiftClock', err)),
+      startShiftClock()
+        .then(() => console.log('[Shift] NZTA clock started'))
+        .catch((err) => console.error('[Driver] startShiftClock', err)),
     );
 
     void import('@/services/locationService').then(async ({ startBackgroundTracking }) => {
-      const trackingStarted = await startBackgroundTracking(driver.id, driver.companyId, vehicleId);
-      if (!trackingStarted) {
-        Alert.alert(
-          'Location optional',
-          'You are online and ready for jobs. Enable location when prompted so dispatch can see your position on the map.',
-        );
+      try {
+        console.log('[Shift] location tracking begin');
+        const trackingStarted = await startBackgroundTracking(driver.id, driver.companyId, vehicleId);
+        console.log('[Shift] location tracking result:', trackingStarted);
+        if (!trackingStarted) {
+          Alert.alert(
+            'Location optional',
+            'You are online and ready for jobs. Enable location when prompted so dispatch can see your position on the map.',
+          );
+        }
+      } catch (err) {
+        console.warn('[Shift] location tracking failed (non-fatal):', err);
       }
     });
 
     if (driver.companyId) {
       update(ref(database, `vehicles/${driver.companyId}/${vehicleId}`), {
         currentDriverId: driver.id,
-      }).catch(() => undefined);
+      })
+        .then(() => console.log('[Shift] vehicle currentDriverId updated'))
+        .catch(() => undefined);
     }
+
+    console.log('[Shift] startShift complete — safe to navigate to tabs');
   };
 
   const togglePresence = async () => {
