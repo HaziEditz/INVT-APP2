@@ -1,5 +1,5 @@
 import { onValue, ref } from 'firebase/database';
-import { database } from '@/lib/firebase';
+import { getDatabaseInstance } from '@/lib/firebase';
 import { JobOffer, JobStage } from '@/types';
 
 export type BookingUpdate = {
@@ -43,7 +43,7 @@ export function subscribeBooking(
   bookingId: string,
   onUpdate: (update: BookingUpdate) => void,
 ): () => void {
-  const bookingRef = ref(database, `allbookings/${companyId}/${bookingId}`);
+  const bookingRef = ref(getDatabaseInstance(), `allbookings/${companyId}/${bookingId}`);
   return onValue(bookingRef, (snap) => {
     if (!snap.exists()) return;
     const parsed = parseBookingNode(snap.val());

@@ -148,10 +148,10 @@ function extractOfferPayloads(val: unknown): Record<string, unknown>[] {
   }
   const rec = val as Record<string, unknown>;
   if (isOfferPayload(rec)) return [rec];
-  return Object.values(rec).filter(
-    (x): x is Record<string, unknown> =>
-      !!x && typeof x === 'object' && !Array.isArray(x) && isOfferPayload(x),
-  );
+  return Object.values(rec).filter((x): x is Record<string, unknown> => {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return false;
+    return isOfferPayload(x as Record<string, unknown>);
+  });
 }
 
 function parseJobOffer(val: Record<string, unknown>): JobOffer {
@@ -554,17 +554,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [canReceiveJobOffers], 'Driver-clearOffersWhenOffline');
 
   const flushQueuedOffer = () => {
-    let promoted: QueuedOffer | null = null;
     setQueuedOffers((q) => {
       if (q.length === 0) return q;
       const [next, ...rest] = q;
-      promoted = next ?? null;
+      if (next) {
+        console.log('[Driver] flushQueuedOffer → show', next.id);
+        setJobOffer({ ...next, silent: false });
+      }
       return rest;
     });
-    if (promoted) {
-      console.log('[Driver] flushQueuedOffer → show', promoted.id);
-      setJobOffer({ ...promoted, silent: false });
-    }
   };
 
   const enqueueOffer = (offer: JobOffer) => {
