@@ -171,7 +171,7 @@ export default function ProfileScreen() {
       await endShift();
     }
     await signOut();
-    router.replace('/(auth)/login');
+    console.log('[Profile] signed out — AuthNavigator routes to login');
   };
 
   return (

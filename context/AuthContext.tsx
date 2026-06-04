@@ -228,7 +228,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       await removeData(STORAGE_KEYS.driverSession);
       await removeData(STORAGE_KEYS.vehicleSessionReady);
+      await removeData(STORAGE_KEYS.shiftActive);
       setDriver(null);
+      setFirebaseUser(null);
     } catch (err) {
       console.error('[Auth] signOut failed:', err);
       Alert.alert('Sign Out Failed', err instanceof Error ? err.message : 'Could not sign out');

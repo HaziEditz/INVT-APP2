@@ -3,14 +3,12 @@ import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { storeData, STORAGE_KEYS } from '@/lib/storage';
-import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, InteractionManager, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 /** Gate after login: driver must confirm vehicle before main screen. */
 export default function SelectVehicleScreen() {
-  const router = useRouter();
   const { driver, profileLoading, refreshDriver, firebaseUser } = useAuth();
   const { vehicles, vehiclesLoading, selectedVehicleId, refreshVehicles, startShift, setSelectedVehicleId } =
     useDriver();
@@ -33,30 +31,16 @@ export default function SelectVehicleScreen() {
     if (!pickerVehicle) return;
     setStarting(true);
     try {
-      console.log('[SelectVehicle] 1/5 setSelectedVehicleId', pickerVehicle);
+      console.log('[SelectVehicle] setSelectedVehicleId', pickerVehicle);
       await setSelectedVehicleId(pickerVehicle);
-      console.log('[SelectVehicle] 2/5 vehicleSessionReady stored');
       await storeData(STORAGE_KEYS.vehicleSessionReady, true);
-      console.log('[SelectVehicle] 3/5 startShift begin');
+      console.log('[SelectVehicle] startShift');
       await startShift(pickerVehicle);
-      console.log('[SelectVehicle] 4/5 startShift returned — scheduling navigation to tabs');
-      await new Promise<void>((resolve) => {
-        InteractionManager.runAfterInteractions(() => {
-          console.log('[SelectVehicle] 5/5 router.replace /(tabs)');
-          try {
-            router.replace('/(tabs)');
-            console.log('[SelectVehicle] navigation dispatched');
-          } catch (navErr) {
-            console.error('[SelectVehicle] router.replace failed:', navErr);
-          }
-          resolve();
-        });
-      });
+      console.log('[SelectVehicle] shift started — AuthNavigator will open tabs');
     } catch (err) {
       console.error('[SelectVehicle] onConfirm failed:', err);
     } finally {
       setStarting(false);
-      console.log('[SelectVehicle] onConfirm finished');
     }
   };
 
