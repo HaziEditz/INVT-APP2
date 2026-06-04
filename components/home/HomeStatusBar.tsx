@@ -1,15 +1,56 @@
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-/** Presence only — Available / Away (manual or after missed offer). */
+function formatZoneElapsed(ms: number): string {
+  const totalMin = Math.max(0, Math.floor(ms / 60000));
+  if (totalMin < 60) return `${totalMin}m`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** Top bar: Available/Away | Zone | Queue | Time in zone */
 export function HomeStatusBar() {
   const insets = useSafeAreaInsets();
   const { presenceStatus, shiftActive, togglePresence, zone, readyForJobs } = useDriver();
+  const [zoneEnteredAt, setZoneEnteredAt] = useState<number | null>(null);
+  const [, setTick] = useState(0);
+  const lastZoneNameRef = useRef('');
 
   const isAvailable = presenceStatus === 'Online' && shiftActive && readyForJobs;
   const isAway = presenceStatus === 'Away' && shiftActive;
+
+  useEffect(() => {
+    const name = zone.name?.trim() || '';
+    if (!shiftActive || !name) {
+      lastZoneNameRef.current = '';
+      setZoneEnteredAt(null);
+      return;
+    }
+    if (name !== lastZoneNameRef.current) {
+      lastZoneNameRef.current = name;
+      setZoneEnteredAt(Date.now());
+    }
+  }, [zone.name, shiftActive]);
+
+  useEffect(() => {
+    if (!shiftActive || !zoneEnteredAt) return;
+    const id = setInterval(() => setTick((n) => n + 1), 30000);
+    return () => clearInterval(id);
+  }, [shiftActive, zoneEnteredAt]);
+
+  const zoneName = shiftActive ? zone.name?.trim() || '—' : '—';
+  const queueLabel =
+    shiftActive && zone.position > 0
+      ? `#${zone.position}`
+      : '—';
+  const timeInZone =
+    shiftActive && zoneEnteredAt ? formatZoneElapsed(Date.now() - zoneEnteredAt) : '—';
+
+  const toggleLabel = !shiftActive ? 'Off shift' : isAvailable ? 'Available' : isAway ? 'Away' : 'Available';
 
   return (
     <View style={[styles.bar, { paddingTop: insets.top + 6 }]}>
@@ -18,21 +59,27 @@ export function HomeStatusBar() {
         onPress={shiftActive ? togglePresence : undefined}
         disabled={!shiftActive}
       >
-        <Text style={styles.toggleText}>
-          {!shiftActive ? 'Off shift' : isAvailable ? 'Available' : isAway ? 'Away' : 'Available'}
-        </Text>
-        {shiftActive ? <Text style={styles.toggleHint}>tap</Text> : null}
+        <Text style={styles.toggleText}>{toggleLabel}</Text>
       </Pressable>
 
-      <View style={styles.zoneWrap}>
-        <Text style={styles.zoneLabel}>Zone</Text>
-        <Text style={styles.zoneValue} numberOfLines={1}>
-          {shiftActive ? zone.name?.trim() || '—' : '—'}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.metaScroll}
+        contentContainerStyle={styles.metaRow}
+      >
+        <Text style={styles.meta}>
+          Zone: <Text style={styles.metaVal}>{zoneName}</Text>
         </Text>
-        {shiftActive && zone.position > 0 ? (
-          <Text style={styles.queueHint}>Queue #{zone.position}</Text>
-        ) : null}
-      </View>
+        <Text style={styles.sep}>|</Text>
+        <Text style={styles.meta}>
+          Queue: <Text style={styles.metaVal}>{queueLabel}</Text>
+        </Text>
+        <Text style={styles.sep}>|</Text>
+        <Text style={styles.meta}>
+          Time in zone: <Text style={styles.metaVal}>{timeInZone}</Text>
+        </Text>
+      </ScrollView>
     </View>
   );
 }
@@ -41,27 +88,27 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingBottom: 8,
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
-    gap: 12,
+    gap: 8,
   },
   toggle: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 100,
+    borderRadius: 18,
+    minWidth: 88,
     alignItems: 'center',
   },
   toggleOn: { backgroundColor: Colors.success },
   toggleAway: { backgroundColor: Colors.warning },
   toggleOff: { backgroundColor: Colors.textMuted },
-  toggleText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  toggleHint: { color: 'rgba(255,255,255,0.8)', fontSize: 10 },
-  zoneWrap: { flex: 1, minWidth: 0 },
-  zoneLabel: { color: Colors.textMuted, fontSize: 10, textTransform: 'uppercase' },
-  zoneValue: { color: Colors.text, fontSize: 15, fontWeight: '700' },
-  queueHint: { color: Colors.textMuted, fontSize: 12 },
+  toggleText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  metaScroll: { flex: 1, minWidth: 0 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 8 },
+  meta: { color: Colors.textMuted, fontSize: 12, fontWeight: '600' },
+  metaVal: { color: Colors.text, fontWeight: '700' },
+  sep: { color: Colors.border, fontSize: 12, fontWeight: '300' },
 });

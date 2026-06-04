@@ -1,6 +1,5 @@
 import { CurrentTripPanel } from '@/components/home/CurrentTripPanel';
 import { FullScreenMapModal } from '@/components/home/FullScreenMapModal';
-import { HomeBottomBar } from '@/components/home/HomeBottomBar';
 import { HomeMainTabs } from '@/components/home/HomeMainTabs';
 import { HomeStatusBar } from '@/components/home/HomeStatusBar';
 import { OffersPanel } from '@/components/home/OffersPanel';
@@ -156,8 +155,6 @@ export default function MainScreen() {
           {mainTab === 'current' ? <CurrentTripPanel /> : null}
           {mainTab === 'queue' ? <QueuePanel /> : null}
         </ErrorBoundary>
-
-        <HomeBottomBar />
 
         <Pressable
           style={[styles.hailBtn, hailActive && styles.hailBtnActive]}

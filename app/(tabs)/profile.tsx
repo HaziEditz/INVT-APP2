@@ -194,11 +194,16 @@ export default function ProfileScreen() {
 
       <View style={sharedStyles.card}>
         <Text style={sharedStyles.cardTitle}>Vehicle</Text>
-        <Text style={styles.vehicleNumber}>{vehicleNumber}</Text>
-        <Text style={styles.bodyTypeLabel}>Vehicle type: {bodyType}</Text>
-        <Text style={sharedStyles.cardText}>
-          {vehicleIdForMeta ? `Fleet ID: ${vehicleIdForMeta.toUpperCase()}` : 'No vehicle selected'}
-        </Text>
+        {vehicleNumber !== '—' ? (
+          <Text style={styles.vehicleNumber}>
+            Vehicle {vehicleNumber} | {bodyType} | {activeVehicle?.seatCapacity ?? '—'} Seater
+          </Text>
+        ) : (
+          <Text style={styles.vehicleNumber}>No vehicle selected</Text>
+        )}
+        {vehicleIdForMeta ? (
+          <Text style={sharedStyles.cardText}>Fleet ID: {vehicleIdForMeta.toUpperCase()}</Text>
+        ) : null}
       </View>
 
       <EarningsBreakdownCard
@@ -275,7 +280,6 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   companyName: { color: Colors.text, fontSize: 20, fontWeight: '700', marginTop: 4 },
-  vehicleNumber: { color: Colors.accent, fontSize: 28, fontWeight: '800', marginTop: 4 },
-  bodyTypeLabel: { color: Colors.text, fontSize: 18, fontWeight: '700', marginTop: 8 },
+  vehicleNumber: { color: Colors.accent, fontSize: 22, fontWeight: '800', marginTop: 4 },
   hours: { color: Colors.accent, fontSize: 28, fontWeight: '800', marginTop: 4 },
 });

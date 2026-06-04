@@ -7,7 +7,7 @@ import { useDriver } from '@/context/DriverContext';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function OffersPanel() {
-  const { pendingOffers, pickOfferFromList, shiftActive, activeVehicle } = useDriver();
+  const { pendingOffers, pickOfferFromList, shiftActive } = useDriver();
 
   if (!shiftActive) {
     return (
@@ -20,12 +20,8 @@ export function OffersPanel() {
   if (pendingOffers.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>No pending jobs for your vehicle right now.</Text>
-        <Text style={styles.emptySub}>
-          {activeVehicle
-            ? `${activeVehicle.bodyType} · ${activeVehicle.seatCapacity} seats · ${activeVehicle.vehicleType}`
-            : 'Select a vehicle on shift'}
-        </Text>
+        <Text style={styles.emptyText}>No pending jobs for you right now.</Text>
+        <Text style={styles.emptySub}>New offers appear here when dispatch posts jobs for your fleet.</Text>
       </View>
     );
   }
