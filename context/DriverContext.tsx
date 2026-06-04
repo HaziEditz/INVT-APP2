@@ -17,7 +17,11 @@ import {
   mapVehicleStatusToDisplay,
   writeOnlinePresence,
 } from '@/services/presenceService';
+import { loadCompanyTariffs } from '@/lib/companyTariffs';
+import { writeClosedJob } from '@/lib/closedJobs';
+import { completeJobPayment } from '@/lib/dispatchApi';
 import { calcMeterFare, DEFAULT_TARIFFS } from '@/lib/tariffs';
+import { PaymentExtras } from '@/types';
 import {
   ActiveJob,
   CompanyInfo,
@@ -43,7 +47,9 @@ interface DriverContextValue {
   vehiclesLoading: boolean;
   zone: ZoneInfo;
   jobOffer: JobOffer | null;
+  paymentJob: ActiveJob | null;
   activeJob: ActiveJob | null;
+  nextQueuedOffer: QueuedOffer | null;
   hailActive: boolean;
   meter: MeterState | null;
   tariffs: Tariff[];
@@ -70,6 +76,8 @@ interface DriverContextValue {
   advanceStage: () => Promise<void>;
   setPaymentType: (payment: PaymentType) => void;
   completeJob: () => Promise<void>;
+  finalizePayment: (paymentType: string, extras: PaymentExtras, totalFare: number) => Promise<void>;
+  dismissPayment: () => void;
   cancelActiveJob: () => Promise<void>;
   noShowActiveJob: () => Promise<void>;
   recallJob: () => Promise<void>;
@@ -119,6 +127,7 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     dropoff: String(val.dropoff ?? val.to ?? ''),
     passengerName: val.passengerName ? String(val.passengerName) : undefined,
     passengerPhone: val.passengerPhone ? String(val.passengerPhone) : undefined,
+    passengerEmail: val.passengerEmail ? String(val.passengerEmail) : undefined,
     fixedFare: val.fixedFare != null ? Number(val.fixedFare) : undefined,
     estimatedFare: val.estimatedFare != null ? Number(val.estimatedFare) : undefined,
     estimatedDistanceKm:
@@ -163,6 +172,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const [zone, setZone] = useState<ZoneInfo>(EMPTY_ZONE);
   const [jobOffer, setJobOffer] = useState<JobOffer | null>(null);
+  const [paymentJob, setPaymentJob] = useState<ActiveJob | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const [completedJobs, setCompletedJobs] = useState<CompletedJob[]>([]);
   const [jobHistory, setJobHistory] = useState<HistoryJob[]>([]);
@@ -171,7 +181,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [isOffline, setIsOffline] = useState(false);
   const [hailActive, setHailActive] = useState(false);
   const [meter, setMeter] = useState<MeterState | null>(null);
-  const [tariffs] = useState<Tariff[]>(DEFAULT_TARIFFS);
+  const [tariffs, setTariffsState] = useState<Tariff[]>(DEFAULT_TARIFFS);
   const [selectedTariff, setSelectedTariffState] = useState<Tariff>(DEFAULT_TARIFFS[0]);
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
   const [jobEditNotice, setJobEditNotice] = useState<string | null>(null);
@@ -270,6 +280,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     refreshVehicles().catch((err) => console.error('[Driver] refreshVehicles', err));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.uid, driver?.companyId, driver?.id, driver?.vehicleId], 'Driver-vehicles');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId) {
+      setSelectedTariffState(DEFAULT_TARIFFS[0]);
+      return;
+    }
+    loadCompanyTariffs(driver.companyId)
+      .then(async (list) => {
+        setTariffsState(list);
+        const savedId = await getData<string>(STORAGE_KEYS.selectedTariffId);
+        const match = savedId ? list.find((t) => t.id === savedId) : null;
+        if (match) setSelectedTariffState(match);
+        else if (list[0]) setSelectedTariffState(list[0]);
+      })
+      .catch((err) => console.error('[Driver] loadCompanyTariffs', err));
+  }, [driver?.companyId], 'Driver-tariffs');
 
   useSafeEffect(() => {
     if (!driver?.companyId) {
@@ -394,7 +420,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [driver?.companyId, driver?.id, driver?.uid, selectedVehicleId], 'Driver-presence');
 
-  const offersBadgeCount = queuedOffers.length;
+  const offersBadgeCount = queuedOffers.length + (jobOffer && !jobOffer.silent ? 1 : 0);
+  const nextQueuedOffer = queuedOffers[0] ?? null;
 
   const flushQueuedOffer = () => {
     setQueuedOffers((q) => {
@@ -440,6 +467,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await notifyJobOffer('New Job Offer', `${offer.type}: ${offer.pickup}`);
   };
 
+  const processOfferPayload = async (val: Record<string, unknown>) => {
+    if (val.editNotice && activeJobIdRef.current === String(val.jobId ?? val.id)) {
+      setJobEditNotice(String(val.editNotice));
+    }
+    if (val.removed || val.declined) return;
+    await handleIncomingOffer(val);
+  };
+
   useSafeEffect(() => {
     if (!isFirebaseReady || !driver?.companyId || !driver.id) return;
     try {
@@ -448,11 +483,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         try {
           const val = snap.val();
           if (!val || typeof val !== 'object') return;
-          if (val.editNotice && activeJobIdRef.current === String(val.jobId ?? val.id)) {
-            setJobEditNotice(String(val.editNotice));
-          }
-          if (val.removed || val.declined) return;
-          await handleIncomingOffer(val as Record<string, unknown>);
+          await processOfferPayload(val as Record<string, unknown>);
         } catch (err) {
           console.error('[Driver] job offer listener', err);
         }
@@ -462,6 +493,25 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.companyId, driver?.id, activeJob?.stage], 'Driver-jobOffers');
+
+  useSafeEffect(() => {
+    if (!isFirebaseReady || !driver?.id) return;
+    try {
+      const notifyRef = ref(database, `notification/${driver.id}`);
+      return onValue(notifyRef, async (snap) => {
+        try {
+          const val = snap.val();
+          if (!val || typeof val !== 'object') return;
+          await processOfferPayload(val as Record<string, unknown>);
+        } catch (err) {
+          console.error('[Driver] notification listener', err);
+        }
+      });
+    } catch (err) {
+      console.error('[Driver] notification subscribe failed', err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.id], 'Driver-notification');
 
   const setSelectedVehicleId = async (id: string) => {
     const normalized = id.trim().toUpperCase();
@@ -592,6 +642,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setShiftActive(false);
     shiftActiveRef.current = false;
     await storeData(STORAGE_KEYS.shiftActive, false);
+    await storeData(STORAGE_KEYS.vehicleSessionReady, false);
     setReadyForJobs(false);
     readyForJobsRef.current = false;
     endHailInternal();
@@ -668,6 +719,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const updated = { ...activeJob, stage: nextStage };
     setActiveJob(updated);
     await storeData(STORAGE_KEYS.activeJob, updated);
+    if (nextStage === 'complete') {
+      setPaymentJob(updated);
+    }
   };
 
   const setPaymentType = (payment: PaymentType) => {
@@ -679,9 +733,54 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const completeJob = async () => {
     if (!activeJob) return;
-    const done: CompletedJob = { ...activeJob, stage: 'complete', completedAt: Date.now() };
+    setPaymentJob(activeJob.stage === 'complete' ? activeJob : { ...activeJob, stage: 'complete' });
+  };
+
+  const dismissPayment = () => {
+    setPaymentJob(null);
+  };
+
+  const finalizePayment = async (
+    paymentType: string,
+    extras: PaymentExtras,
+    totalFare: number,
+  ) => {
+    const job = paymentJob ?? activeJob;
+    if (!job || !driver?.companyId) return;
+
+    const closed: ActiveJob = {
+      ...job,
+      stage: 'complete',
+      fare: totalFare,
+      paymentType: paymentType as PaymentType,
+    };
+
+    try {
+      await writeClosedJob(driver.companyId, driver.id, closed, paymentType, extras, totalFare);
+    } catch (err) {
+      console.warn('[Driver] writeClosedJob failed:', err);
+    }
+
+    try {
+      await completeJobPayment({
+        jobId: job.id,
+        driverId: driver.id,
+        companyId: driver.companyId,
+        paymentType,
+        fare: totalFare,
+        extras,
+      });
+    } catch {
+      await enqueueOfflineItem({
+        type: 'job_update',
+        payload: { action: 'complete', jobId: job.id, paymentType, fare: totalFare, extras },
+      });
+    }
+
+    const done: CompletedJob = { ...closed, completedAt: Date.now() };
     setCompletedJobs((prev) => [done, ...prev]);
     setActiveJob(null);
+    setPaymentJob(null);
     activeJobIdRef.current = null;
     await storeData(STORAGE_KEYS.activeJob, null);
     refreshJobHistory().catch(() => undefined);
@@ -844,6 +943,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         vehiclesLoading,
         zone,
         jobOffer,
+        paymentJob,
+        nextQueuedOffer,
         activeJob,
         hailActive,
         meter,
@@ -871,6 +972,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         advanceStage,
         setPaymentType,
         completeJob,
+        finalizePayment,
+        dismissPayment,
         cancelActiveJob,
         noShowActiveJob,
         recallJob,

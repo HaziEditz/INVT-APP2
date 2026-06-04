@@ -1,29 +1,55 @@
 import { useAuth } from '@/context/AuthContext';
+import { getData, STORAGE_KEYS } from '@/lib/storage';
 import { useRouter, useSegments } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
-/** Route guard: signed-in users leave auth stack; signed-out users cannot stay on tabs. */
+/** Route guard: auth → vehicle selection → main tabs. */
 export function AuthNavigator() {
-  const { firebaseUser, loading } = useAuth();
+  const { firebaseUser, driver, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const [vehicleReady, setVehicleReady] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (loading) return;
+    if (!firebaseUser) {
+      setVehicleReady(null);
+      return;
+    }
+    getData<boolean>(STORAGE_KEYS.vehicleSessionReady).then((v) => setVehicleReady(!!v));
+  }, [firebaseUser?.uid]);
+
+  useEffect(() => {
+    if (loading || vehicleReady === null) return;
 
     const root = segments[0];
     const inAuth = root === '(auth)';
+    const onSelectVehicle = root === 'select-vehicle';
     const inTabs = root === '(tabs)';
 
-    if (firebaseUser && inAuth) {
+    if (!firebaseUser) {
+      if (!inAuth) router.replace('/(auth)/login');
+      return;
+    }
+
+    if (!driver && !onSelectVehicle && !inAuth) {
+      router.replace('/select-vehicle');
+      return;
+    }
+
+    if (firebaseUser && !vehicleReady && !onSelectVehicle) {
+      router.replace('/select-vehicle');
+      return;
+    }
+
+    if (firebaseUser && vehicleReady && (inAuth || onSelectVehicle)) {
       router.replace('/(tabs)');
       return;
     }
 
-    if (!firebaseUser && inTabs) {
-      router.replace('/(auth)/login');
+    if (firebaseUser && vehicleReady && !inTabs && !onSelectVehicle && root !== 'active-job') {
+      router.replace('/(tabs)');
     }
-  }, [firebaseUser, loading, segments, router]);
+  }, [firebaseUser, driver, loading, vehicleReady, segments, router]);
 
   return null;
 }

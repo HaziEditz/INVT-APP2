@@ -36,6 +36,7 @@ export interface JobOffer {
   dropoff: string;
   passengerName?: string;
   passengerPhone?: string;
+  passengerEmail?: string;
   fixedFare?: number;
   estimatedFare?: number;
   estimatedDistanceKm?: number;
@@ -133,8 +134,40 @@ export interface CompanyInfo {
 }
 
 export const STAGE_LABELS: Record<JobStage, string> = {
-  pickup: 'On The Way',
+  pickup: 'On Way',
   arrived: 'Arrived',
-  onboard: 'Passenger On Board',
+  onboard: 'On Board',
   complete: 'Complete',
 };
+
+export const DRIVER_PAYMENT_TYPES = [
+  'Cash',
+  'Card',
+  'EFTPOS',
+  'Account',
+  'TM',
+  'ACC',
+] as const;
+
+export type DriverPaymentType = (typeof DRIVER_PAYMENT_TYPES)[number];
+
+export interface PaymentExtras {
+  bikeCarry: number;
+  airportFee: number;
+  eftposSurcharge: number;
+  tolls: number;
+  other: number;
+  otherNote?: string;
+}
+
+export interface PreBookingForm {
+  passengerName: string;
+  passengerPhone: string;
+  passengerEmail: string;
+  pickup: string;
+  dropoff: string;
+  scheduledAt: string;
+  paymentType: string;
+  vehicleType: string;
+  notes: string;
+}

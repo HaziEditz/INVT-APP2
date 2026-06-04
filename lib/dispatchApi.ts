@@ -132,3 +132,7 @@ export async function declineJobOffer(jobId: string, driverId: string) {
 export async function createPreBooking(payload: Record<string, unknown>) {
   return dispatchPost('/api/pre-booking', payload);
 }
+
+export async function completeJobPayment(payload: Record<string, unknown>) {
+  return dispatchPost('/api/job/complete', payload);
+}

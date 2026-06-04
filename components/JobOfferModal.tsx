@@ -67,6 +67,9 @@ export function JobOfferModal() {
             {jobOffer.passengerPhone ? (
               <Text style={styles.detail}>Phone: {jobOffer.passengerPhone}</Text>
             ) : null}
+            {jobOffer.passengerEmail ? (
+              <Text style={styles.detail}>Email: {jobOffer.passengerEmail}</Text>
+            ) : null}
             {jobOffer.dispatcherName ? (
               <Text style={styles.detail}>Dispatcher: {jobOffer.dispatcherName}</Text>
             ) : null}
@@ -100,12 +103,12 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     maxHeight: '85%',
   },
-  title: { color: Colors.text, fontSize: 22, fontWeight: '800' },
+  title: { color: Colors.text, fontSize: 24, fontWeight: '800' },
   timer: { color: Colors.warning, fontWeight: '800', fontSize: 16, marginVertical: 6 },
   scroll: { maxHeight: 340, marginVertical: 8 },
   row: { gap: 4, marginBottom: 12 },
   label: { color: Colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
-  value: { color: Colors.text, fontSize: 16 },
+  value: { color: Colors.text, fontSize: 17 },
   fare: { color: Colors.success, fontSize: 20, fontWeight: '800' },
   meta: { color: Colors.textMuted, fontSize: 14, marginTop: 4 },
   section: { color: Colors.text, fontWeight: '700', marginTop: 12, marginBottom: 6 },

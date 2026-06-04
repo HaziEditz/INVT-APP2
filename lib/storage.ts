@@ -27,4 +27,5 @@ export const STORAGE_KEYS = {
   shiftActive: 'bw_shift_active',
   selectedTariffId: 'bw_selected_tariff',
   meterState: 'bw_meter_state',
+  vehicleSessionReady: 'bw_vehicle_session_ready',
 } as const;

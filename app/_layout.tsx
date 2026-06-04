@@ -5,6 +5,7 @@ import { DriverProvider } from '@/context/DriverContext';
 import { AuthNavigator } from '@/components/AuthNavigator';
 import { Colors } from '@/constants/theme';
 import { JobOfferModal } from '@/components/JobOfferModal';
+import { PaymentModal } from '@/components/PaymentModal';
 import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -36,6 +37,7 @@ export default function RootLayout() {
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="select-vehicle" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="active-job" options={{ title: 'Active Job' }} />
           <Stack.Screen name="meter" options={{ title: 'Meter' }} />
@@ -48,6 +50,9 @@ export default function RootLayout() {
         </ErrorBoundary>
         <ErrorBoundary name="JobOfferModal">
           <JobOfferModal />
+        </ErrorBoundary>
+        <ErrorBoundary name="PaymentModal">
+          <PaymentModal />
         </ErrorBoundary>
       </DriverProvider>
     </AuthProvider>

@@ -10,6 +10,8 @@ const STAGES: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
 export function ActiveJobPanel() {
   const {
     activeJob,
+    meter,
+    hailActive,
     advanceStage,
     completeJob,
     cancelActiveJob,
@@ -31,6 +33,8 @@ export function ActiveJobPanel() {
     await advanceStage();
   };
 
+  const runningMeter = !hailActive && activeJob.stage === 'onboard' && meter?.running;
+
   return (
     <ScrollView style={styles.panel} nestedScrollEnabled showsVerticalScrollIndicator={false}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
@@ -50,6 +54,9 @@ export function ActiveJobPanel() {
         <Text style={styles.detail}>{activeJob.passengerName} · {activeJob.passengerPhone ?? '—'}</Text>
       ) : null}
       {activeJob.paymentType ? <Text style={styles.detail}>Pay: {activeJob.paymentType}</Text> : null}
+      {runningMeter && meter ? (
+        <Text style={styles.meter}>Meter ${meter.fare.toFixed(2)} · {meter.distanceKm.toFixed(1)} km</Text>
+      ) : null}
       {activeJob.notes ? <Text style={styles.notes}>{activeJob.notes}</Text> : null}
       {activeJob.dispatcherName ? <Text style={styles.detail}>Dispatch: {activeJob.dispatcherName}</Text> : null}
 
@@ -80,15 +87,16 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     padding: 12,
-    maxHeight: 200,
+    maxHeight: 280,
   },
   stageScroll: { marginBottom: 8 },
   stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.border, marginRight: 6 },
   dotOn: { backgroundColor: Colors.accent },
-  stageText: { color: Colors.textMuted, fontSize: 11 },
-  stageOn: { color: Colors.text, fontWeight: '600' },
-  addr: { color: Colors.text, fontSize: 13, marginBottom: 4 },
+  stageText: { color: Colors.textMuted, fontSize: 13 },
+  stageOn: { color: Colors.text, fontWeight: '700' },
+  addr: { color: Colors.text, fontSize: 16, marginBottom: 6 },
+  meter: { color: Colors.success, fontSize: 16, fontWeight: '700', marginTop: 4 },
   detail: { color: Colors.textMuted, fontSize: 12 },
   notes: { color: Colors.warning, fontSize: 12, marginTop: 4 },
   actions: { gap: 8, marginTop: 10 },

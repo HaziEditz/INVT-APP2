@@ -14,6 +14,6 @@ export default function Index() {
     );
   }
 
-  if (firebaseUser) return <Redirect href="/(tabs)" />;
+  if (firebaseUser) return <Redirect href="/select-vehicle" />;
   return <Redirect href="/(auth)/login" />;
 }

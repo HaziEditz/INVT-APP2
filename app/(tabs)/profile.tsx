@@ -49,6 +49,7 @@ export default function ProfileScreen() {
     selectedVehicleId,
     vehicles,
     shiftActive,
+    endShift,
     refreshJobHistory,
     refreshVehicles,
   } = useDriver();
@@ -166,6 +167,9 @@ export default function ProfileScreen() {
   }, [driver?.companyId, vehicleIdForMeta, activeVehicle?.bodyType]);
 
   const onSignOut = async () => {
+    if (shiftActive) {
+      await endShift();
+    }
     await signOut();
     router.replace('/(auth)/login');
   };
@@ -246,6 +250,20 @@ export default function ProfileScreen() {
         <Text style={sharedStyles.cardTitle}>Push notifications</Text>
         <Switch value={notifications} onValueChange={setNotifications} trackColor={{ true: Colors.accent }} />
       </View>
+
+      {shiftActive ? (
+        <Button
+          title="End Shift"
+          variant="danger"
+          style={{ marginTop: 16 }}
+          onPress={() => {
+            Alert.alert('End shift?', 'You will go offline until you sign in and choose a vehicle again.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'End shift', style: 'destructive', onPress: () => void endShift() },
+            ]);
+          }}
+        />
+      ) : null}
 
       <Button title="Sign Out" variant="danger" onPress={onSignOut} style={{ marginTop: 12 }} />
     </ScreenScroll>

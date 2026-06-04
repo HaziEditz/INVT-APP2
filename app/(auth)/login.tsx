@@ -1,7 +1,9 @@
 import { Input } from '@/components/Input';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
+import { resolveEmailForLogin } from '@/lib/driverAuth';
 import { getAuthInstance, isFirebaseReady } from '@/lib/firebase';
+import { removeData, STORAGE_KEYS } from '@/lib/storage';
 import { AuthError, signInWithEmailAndPassword } from 'firebase/auth';
 import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -41,14 +43,14 @@ function authErrorMessage(err: unknown): string {
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSignIn = async () => {
-    const trimmedEmail = email.trim().toLowerCase();
-    if (!trimmedEmail || !password) {
-      Alert.alert('Missing fields', 'Enter your email and password.');
+    const trimmed = loginId.trim();
+    if (!trimmed || !password) {
+      Alert.alert('Missing fields', 'Enter your email or Driver ID (e.g. D001) and password.');
       return;
     }
 
@@ -59,9 +61,11 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
+      const emailToUse = await resolveEmailForLogin(trimmed);
       const auth = getAuthInstance();
-      await signInWithEmailAndPassword(auth, trimmedEmail, password);
-      router.replace('/(tabs)');
+      await signInWithEmailAndPassword(auth, emailToUse, password);
+      await removeData(STORAGE_KEYS.vehicleSessionReady);
+      router.replace('/select-vehicle');
     } catch (err) {
       Alert.alert('Sign In Failed', authErrorMessage(err));
     } finally {
@@ -84,12 +88,11 @@ export default function LoginScreen() {
 
           <View style={sharedStyles.card}>
             <Input
-              label="Email"
-              placeholder="you@email.com"
+              label="Email or Driver ID"
+              placeholder="you@email.com or D001"
               autoCapitalize="none"
-              keyboardType="email-address"
-              value={email}
-              onChangeText={setEmail}
+              value={loginId}
+              onChangeText={setLoginId}
               onSubmitEditing={handleSignIn}
               returnKeyType="next"
             />
@@ -107,8 +110,6 @@ export default function LoginScreen() {
               onPress={handleSignIn}
               disabled={loading}
               activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Sign In"
             >
               {loading ? (
                 <ActivityIndicator color="#fff" />
@@ -138,19 +139,9 @@ const styles = StyleSheet.create({
     gap: 16,
     minHeight: '100%',
   },
-  brand: {
-    color: Colors.text,
-    fontSize: 36,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
+  brand: { color: Colors.text, fontSize: 36, fontWeight: '800', textAlign: 'center' },
   brandAccent: { color: Colors.accent },
-  tagline: {
-    color: Colors.textMuted,
-    textAlign: 'center',
-    marginBottom: 24,
-    fontSize: 16,
-  },
+  tagline: { color: Colors.textMuted, textAlign: 'center', marginBottom: 24, fontSize: 16 },
   signInBtn: {
     backgroundColor: Colors.accent,
     borderRadius: 12,
