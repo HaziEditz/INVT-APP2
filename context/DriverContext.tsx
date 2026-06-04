@@ -583,6 +583,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await startShiftClock();
 
     try {
+      console.log('[Shift] startShift — profile uid:', driver.uid, 'vehicle:', vehicleId);
       await startShiftOnline(driver, vehicleId);
       setPresenceStatus('Online');
       setReadyForJobs(true);

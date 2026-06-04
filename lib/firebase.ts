@@ -2,9 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
 import {
   Auth,
+  User,
   getAuth,
   getReactNativePersistence,
   initializeAuth,
+  signInAnonymously,
 } from 'firebase/auth';
 import { Database, getDatabase } from 'firebase/database';
 import { Platform } from 'react-native';
@@ -94,6 +96,29 @@ export function getDatabaseInstance(): Database {
     throw new Error(initError ?? 'Firebase Database is not initialized.');
   }
   return database;
+}
+
+/**
+ * RTDB writes require an authenticated Firebase user. Logs UID and falls back to
+ * anonymous sign-in only when currentUser is missing.
+ */
+export async function ensureAuthUserForRtdbWrite(context: string): Promise<User> {
+  const authInstance = getAuthInstance();
+  let user = authInstance.currentUser;
+
+  if (user) {
+    const provider = user.isAnonymous
+      ? 'anonymous'
+      : user.providerData[0]?.providerId ?? 'password/email';
+    console.log(`[Firebase Auth] ${context} — uid: ${user.uid} (${provider})`);
+    return user;
+  }
+
+  console.warn(`[Firebase Auth] ${context} — currentUser is null, signing in anonymously`);
+  const cred = await signInAnonymously(authInstance);
+  user = cred.user;
+  console.log(`[Firebase Auth] ${context} — anonymous uid: ${user.uid}`);
+  return user;
 }
 
 export { auth, database };

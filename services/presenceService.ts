@@ -1,5 +1,5 @@
 import { onDisconnect, ref, remove, set, update } from 'firebase/database';
-import { database } from '@/lib/firebase';
+import { database, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { DriverProfile, PresenceDisplayStatus } from '@/types';
 import { getCurrentCoords } from '@/services/locationService';
 
@@ -78,6 +78,10 @@ function fmtNzTime(d: Date): string {
 
 /** Start shift: Firebase presence only (replaces legacy FnServiceON). */
 export async function startShiftOnline(driver: DriverProfile, vehicleId: string): Promise<void> {
+  const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+  const authUser = await ensureAuthUserForRtdbWrite(`startShiftOnline → ${onlinePath}`);
+  console.log('[Presence] startShiftOnline auth uid:', authUser.uid, 'driver profile uid:', driver.uid);
+
   const now = new Date();
   const nowIso = now.toISOString();
 
@@ -112,6 +116,10 @@ export async function writeOnlinePresence(
     console.warn('[Presence] skipped — missing companyId or vehicleId');
     return;
   }
+
+  const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+  const authUser = await ensureAuthUserForRtdbWrite(`writeOnlinePresence → ${onlinePath}`);
+  console.log('[Presence] writeOnlinePresence auth uid:', authUser.uid, 'status:', status);
 
   const { lat, lng } = await getGps();
   const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
