@@ -1,4 +1,6 @@
 import { Button } from '@/components/Button';
+import { JobNotesSection } from '@/components/JobNotesSection';
+import { hasJobNotes } from '@/lib/jobNotes';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
@@ -45,6 +47,7 @@ export function OffersPanel() {
             ↓ {o.dropoff || '—'}
           </Text>
           {o.passengerName ? <Text style={styles.meta}>{o.passengerName}</Text> : null}
+          {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
           {(o.estimatedFare ?? o.fixedFare) != null ? (
             <Text style={styles.fare}>${(o.fixedFare ?? o.estimatedFare)!.toFixed(2)}</Text>
           ) : null}

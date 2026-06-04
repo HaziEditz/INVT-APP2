@@ -1,4 +1,5 @@
 import { Button } from '@/components/Button';
+import { JobNotesSection } from '@/components/JobNotesSection';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
@@ -73,7 +74,7 @@ export function JobOfferModal() {
             {jobOffer.dispatcherName ? (
               <Text style={styles.detail}>Dispatcher: {jobOffer.dispatcherName}</Text>
             ) : null}
-            {jobOffer.notes ? <Text style={styles.notes}>{jobOffer.notes}</Text> : null}
+            <JobNotesSection job={jobOffer} />
             {jobOffer.isAcc ? <Text style={styles.special}>ACC Job</Text> : null}
             {jobOffer.isTotalMobility ? <Text style={styles.special}>Total Mobility</Text> : null}
           </ScrollView>

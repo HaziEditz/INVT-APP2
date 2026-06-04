@@ -37,6 +37,11 @@ export type MainPanelTab = 'offers' | 'current' | 'queue';
 
 export type PresenceDisplayStatus = 'Online' | 'Offline' | 'Away';
 
+export interface JobNoteLine {
+  label: string;
+  text: string;
+}
+
 export interface JobOffer {
   id: string;
   type: JobType;
@@ -54,6 +59,8 @@ export interface JobOffer {
   expiresAt: number;
   source?: string;
   notes?: string;
+  /** All note/instruction lines from dispatch, passenger, website, etc. */
+  allNotes?: JobNoteLine[];
   dispatcherName?: string;
   pickupLat?: number;
   pickupLng?: number;

@@ -1,4 +1,5 @@
 import { Button } from '@/components/Button';
+import { JobNotesSection } from '@/components/JobNotesSection';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
@@ -122,6 +123,7 @@ export function CurrentTripPanel() {
           {activeJob.passengerName} · {activeJob.passengerPhone ?? '—'}
         </Text>
       ) : null}
+      <JobNotesSection job={activeJob} compact />
       {runningMeter && meter ? (
         <View style={styles.meterWrap}>
           <MeterBreakdownView meter={meter} />

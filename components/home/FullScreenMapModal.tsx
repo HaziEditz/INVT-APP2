@@ -11,6 +11,8 @@ type Props = {
   activeJob: ActiveJob | null;
   meter: MeterState | null;
   showMeter: boolean;
+  showRoute: boolean;
+  showsUserLocation: boolean;
   onPause: () => void;
   onWait: () => void;
 };
@@ -21,6 +23,8 @@ export function FullScreenMapModal({
   activeJob,
   meter,
   showMeter,
+  showRoute,
+  showsUserLocation,
   onPause,
   onWait,
 }: Props) {
@@ -34,44 +38,19 @@ export function FullScreenMapModal({
           pickupLng={activeJob?.pickupLng}
           dropoffLat={activeJob?.dropoffLat}
           dropoffLng={activeJob?.dropoffLng}
-          showRoute={!!activeJob}
+          showRoute={showRoute}
+          showsUserLocation={showsUserLocation}
         />
 
-        <View style={[styles.top, { paddingTop: insets.top + 8 }]}>
-          <Pressable style={styles.close} onPress={onClose}>
+        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+          <Pressable style={styles.close} onPress={onClose} accessibilityLabel="Close map">
             <Text style={styles.closeText}>✕</Text>
           </Pressable>
-          {showMeter && meter ? (
-            <View style={styles.topMeter}>
-              <Text style={styles.fare}>${meter.fare.toFixed(2)}</Text>
-              <Text style={styles.time}>
-                {Math.floor((Date.now() - meter.startedAt) / 60000)}m trip
-              </Text>
-            </View>
-          ) : activeJob ? (
-            <View style={styles.topMeter}>
-              <Text style={styles.fare}>${(activeJob.fare ?? 0).toFixed(2)}</Text>
-              <Text style={styles.time}>{activeJob.durationMin} min</Text>
-            </View>
-          ) : null}
         </View>
 
         {showMeter && meter ? (
-          <View style={[styles.bottom, { paddingBottom: insets.bottom + 12 }]}>
-            <Text style={styles.dist}>{meter.distanceKm.toFixed(2)} km</Text>
-            <View style={styles.bottomControls}>
-              <Pressable style={styles.ctrl} onPress={onPause}>
-                <Text style={styles.ctrlText}>{meter.paused ? 'Resume' : 'Pause'}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.ctrl, meter.mode === 'waiting' && !meter.paused && styles.ctrlWait]}
-                onPress={onWait}
-              >
-                <Text style={styles.ctrlText}>
-                  {meter.paused ? 'PAUSED' : meter.mode === 'moving' ? 'MOVING' : 'WAITING'}
-                </Text>
-              </Pressable>
-            </View>
+          <View style={[styles.meterWrap, { paddingBottom: insets.bottom + 8 }]}>
+            <MeterOverlay meter={meter} onPause={onPause} onWait={onWait} />
           </View>
         ) : null}
       </View>
@@ -81,15 +60,14 @@ export function FullScreenMapModal({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
-  top: {
+  topBar: {
     position: 'absolute',
     top: 0,
-    left: 0,
     right: 0,
+    left: 0,
     flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'flex-end',
     paddingHorizontal: 12,
-    gap: 12,
   },
   close: {
     width: 44,
@@ -102,38 +80,10 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   closeText: { color: Colors.text, fontSize: 20, fontWeight: '700' },
-  topMeter: {
-    flex: 1,
-    backgroundColor: Colors.surface + 'DD',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  fare: { color: Colors.text, fontSize: 28, fontWeight: '800' },
-  time: { color: Colors.textMuted, fontSize: 14 },
-  bottom: {
+  meterWrap: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 16,
-    backgroundColor: Colors.surface + 'EE',
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    paddingTop: 12,
   },
-  dist: { color: Colors.text, fontSize: 22, fontWeight: '700', marginBottom: 10 },
-  bottomControls: { flexDirection: 'row', gap: 10 },
-  ctrl: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: Colors.surfaceElevated,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  ctrlWait: { borderColor: Colors.accent },
-  ctrlText: { color: Colors.text, fontWeight: '700' },
 });

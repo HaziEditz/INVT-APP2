@@ -10,7 +10,9 @@ import { NztaHoursState } from '@/types';
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-export function NztaHoursBar() {
+type Props = { embedded?: boolean };
+
+export function NztaHoursBar({ embedded }: Props) {
   const [nzta, setNzta] = useState<NztaHoursState | null>(null);
 
   const refresh = useCallback(() => {
@@ -30,7 +32,7 @@ export function NztaHoursBar() {
   const shiftLeft = remainingShiftMinutes(nzta);
 
   return (
-    <View style={styles.bar}>
+    <View style={[styles.bar, embedded && styles.barEmbedded]}>
       <Text style={styles.label}>NZTA remaining</Text>
       <View style={styles.row}>
         <Text style={styles.item}>Today {formatHours(todayLeft)}</Text>
@@ -55,6 +57,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  barEmbedded: {
+    marginHorizontal: 0,
+    marginTop: 8,
+    backgroundColor: Colors.surfaceElevated,
   },
   label: { color: Colors.textMuted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase' },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 4, gap: 4 },

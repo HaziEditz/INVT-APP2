@@ -4,6 +4,7 @@ import { get, onValue, ref, update } from 'firebase/database';
 import { getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
+import { collectJobNotes } from '@/lib/jobNotes';
 import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
@@ -155,6 +156,8 @@ function extractOfferPayloads(val: unknown): Record<string, unknown>[] {
 }
 
 function parseJobOffer(val: Record<string, unknown>): JobOffer {
+  const allNotes = collectJobNotes(val);
+  const primaryNote = allNotes.map((n) => n.text).join('\n\n') || undefined;
   return {
     id: String(val.id ?? val.jobId ?? Date.now()),
     type: (val.type as JobOffer['type']) ?? 'Taxi',
@@ -176,7 +179,8 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     isTotalMobility: !!val.isTotalMobility,
     expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
     source: val.source ? String(val.source) : undefined,
-    notes: val.notes ? String(val.notes) : undefined,
+    notes: primaryNote ?? (val.notes ? String(val.notes) : undefined),
+    allNotes: allNotes.length ? allNotes : undefined,
     dispatcherName: val.dispatcherName ? String(val.dispatcherName) : undefined,
     pickupLat: val.pickupLat != null ? Number(val.pickupLat) : val.lat != null ? Number(val.lat) : undefined,
     pickupLng: val.pickupLng != null ? Number(val.pickupLng) : val.lng != null ? Number(val.lng) : undefined,
@@ -669,7 +673,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         meterStarted,
       );
       bookingRawRef.current = update.raw;
-      if (changes.length === 0) return;
+      const syncedNotes = collectJobNotes(update.raw);
 
       if (blocked.length > 0) {
         Alert.alert(
@@ -685,6 +689,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (allowed.passengerPhone) patch.passengerPhone = allowed.passengerPhone;
       if (allowed.notes) patch.notes = allowed.notes;
       if (allowed.paymentType) patch.paymentType = allowed.paymentType as ActiveJob['paymentType'];
+      if (syncedNotes.length) {
+        patch.allNotes = syncedNotes;
+        if (!patch.notes) patch.notes = syncedNotes.map((n) => n.text).join('\n\n');
+      }
+
+      if (changes.length === 0 && !syncedNotes.length) return;
 
       if (Object.keys(patch).length > 0) {
         setActiveJob((prev) => {

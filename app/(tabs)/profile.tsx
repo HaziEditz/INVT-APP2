@@ -11,6 +11,7 @@ import {
   NZTA_MAX_SHIFT_HOURS,
   NZTA_MAX_WORK_HOURS,
 } from '@/constants/theme';
+import { NztaHoursBar } from '@/components/home/NztaHoursBar';
 import { loadVehicleBodyType } from '@/lib/vehicles';
 import {
   confirmBreakTaken,
@@ -216,6 +217,7 @@ export default function ProfileScreen() {
 
       <View style={sharedStyles.card}>
         <Text style={sharedStyles.cardTitle}>NZTA hours</Text>
+        <NztaHoursBar embedded />
         <Text style={styles.hours}>{formatHours(nzta?.workedMinutes ?? 0)}</Text>
         <Text style={sharedStyles.cardText}>
           Driving: max {NZTA_MAX_WORK_HOURS}h · Shift total: max {NZTA_MAX_SHIFT_HOURS}h ({NZTA_MAX_WORK_HOURS}h work + 1h break)

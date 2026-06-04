@@ -1,10 +1,10 @@
 import { CurrentTripPanel } from '@/components/home/CurrentTripPanel';
+import { FullScreenMapModal } from '@/components/home/FullScreenMapModal';
 import { HomeBottomBar } from '@/components/home/HomeBottomBar';
 import { HomeMainTabs } from '@/components/home/HomeMainTabs';
 import { HomeStatusBar } from '@/components/home/HomeStatusBar';
 import { OffersPanel } from '@/components/home/OffersPanel';
 import { QueuePanel } from '@/components/home/QueuePanel';
-import { NztaHoursBar } from '@/components/home/NztaHoursBar';
 import { TariffPicker } from '@/components/home/TariffPicker';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MapErrorFallback } from '@/components/MapErrorFallback';
@@ -40,10 +40,13 @@ export default function MainScreen() {
     pendingOffers,
     queuedOffers,
     offersBadgeCount,
+    pauseMeter,
+    toggleWaitMeter,
   } = useDriver();
 
   const [mainTab, setMainTab] = useState<MainPanelTab>('offers');
   const [tariffOpen, setTariffOpen] = useState(false);
+  const [mapExpanded, setMapExpanded] = useState(false);
 
   const hasCurrent = !!activeJob || hailActive;
 
@@ -94,7 +97,7 @@ export default function MainScreen() {
         <HomeStatusBar />
       </ErrorBoundary>
 
-      <View style={styles.mapSection}>
+      <View style={styles.mapFlex}>
         <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
           <JobMap
             pickupLat={activeJob?.pickupLat}
@@ -105,6 +108,15 @@ export default function MainScreen() {
             showsUserLocation={shiftActive}
           />
         </ErrorBoundary>
+
+        <Pressable
+          style={styles.expandBtn}
+          onPress={() => setMapExpanded(true)}
+          accessibilityLabel="Expand map"
+        >
+          <Text style={styles.expandIcon}>⛶</Text>
+        </Pressable>
+
         {meter?.running ? (
           <View style={styles.meterBadge}>
             <Text style={styles.meterFare}>${meter.fare.toFixed(2)}</Text>
@@ -116,51 +128,62 @@ export default function MainScreen() {
             >
               {meter.paused ? 'PAUSED' : meter.mode === 'moving' ? 'MOVING' : 'WAITING'}
             </Text>
-            <Text style={styles.meterSub}>
-              {meter.distanceKm.toFixed(1)} km · wait {(meter.waitingMs / 60000).toFixed(0)}m
-            </Text>
           </View>
         ) : null}
       </View>
 
-      <NztaHoursBar />
+      <View style={styles.bottomChrome}>
+        <TariffPicker
+          tariffs={tariffs}
+          selected={selectedTariff}
+          open={tariffOpen}
+          locked={tariffLocked}
+          onOpen={() => !tariffLocked && setTariffOpen(true)}
+          onClose={() => setTariffOpen(false)}
+          onSelect={setSelectedTariff}
+        />
 
-      <TariffPicker
-        tariffs={tariffs}
-        selected={selectedTariff}
-        open={tariffOpen}
-        locked={tariffLocked}
-        onOpen={() => !tariffLocked && setTariffOpen(true)}
-        onClose={() => setTariffOpen(false)}
-        onSelect={setSelectedTariff}
+        <HomeMainTabs
+          active={mainTab}
+          offersCount={offersBadgeCount || pendingOffers.length}
+          hasCurrent={hasCurrent}
+          queueCount={queuedOffers.length}
+          onChange={setMainTab}
+        />
+
+        <ErrorBoundary name="MainPanel">
+          {mainTab === 'offers' ? <OffersPanel /> : null}
+          {mainTab === 'current' ? <CurrentTripPanel /> : null}
+          {mainTab === 'queue' ? <QueuePanel /> : null}
+        </ErrorBoundary>
+
+        <HomeBottomBar />
+
+        <Pressable
+          style={[styles.hailBtn, hailActive && styles.hailBtnActive]}
+          onPress={onHailPress}
+        >
+          <Text style={styles.hailBtnText}>{hailActive ? 'END HAIL TRIP' : 'HAIL PASSENGER'}</Text>
+        </Pressable>
+
+        {!shiftActive ? (
+          <Text style={styles.offHint}>
+            You are off shift. Start a shift from Profile or vehicle selection.
+          </Text>
+        ) : null}
+      </View>
+
+      <FullScreenMapModal
+        visible={mapExpanded}
+        onClose={() => setMapExpanded(false)}
+        activeJob={activeJob}
+        meter={meter}
+        showMeter={!!meter?.running}
+        showRoute={mapShowsRoute}
+        showsUserLocation={shiftActive}
+        onPause={pauseMeter}
+        onWait={toggleWaitMeter}
       />
-
-      <HomeMainTabs
-        active={mainTab}
-        offersCount={offersBadgeCount || pendingOffers.length}
-        hasCurrent={hasCurrent}
-        queueCount={queuedOffers.length}
-        onChange={setMainTab}
-      />
-
-      <ErrorBoundary name="MainPanel">
-        {mainTab === 'offers' ? <OffersPanel /> : null}
-        {mainTab === 'current' ? <CurrentTripPanel /> : null}
-        {mainTab === 'queue' ? <QueuePanel /> : null}
-      </ErrorBoundary>
-
-      <HomeBottomBar />
-
-      <Pressable
-        style={[styles.hailBtn, hailActive && styles.hailBtnActive]}
-        onPress={onHailPress}
-      >
-        <Text style={styles.hailBtnText}>{hailActive ? 'END HAIL TRIP' : 'HAIL PASSENGER'}</Text>
-      </Pressable>
-
-      {!shiftActive ? (
-        <Text style={styles.offHint}>You are off shift. Start a shift from Profile or vehicle selection.</Text>
-      ) : null}
     </View>
   );
 }
@@ -175,22 +198,44 @@ const styles = StyleSheet.create({
   },
   loadingText: { color: Colors.textMuted, fontSize: 16 },
   root: { flex: 1, backgroundColor: Colors.background },
-  mapSection: { flex: 1, minHeight: 200, position: 'relative' },
+  mapFlex: { flex: 1, position: 'relative', minHeight: 120 },
+  expandBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.surface + 'EE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    zIndex: 10,
+  },
+  expandIcon: { color: Colors.accent, fontSize: 22, fontWeight: '700' },
   meterBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 10,
+    left: 10,
     backgroundColor: Colors.surface + 'EE',
-    padding: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: Colors.border,
+    zIndex: 10,
   },
-  meterFare: { color: Colors.success, fontSize: 22, fontWeight: '800' },
-  modeTag: { fontSize: 11, fontWeight: '800', marginTop: 2 },
+  meterFare: { color: Colors.success, fontSize: 18, fontWeight: '800' },
+  modeTag: { fontSize: 10, fontWeight: '800', marginTop: 2 },
   modeMoving: { color: Colors.success },
   modeWaiting: { color: Colors.warning },
-  meterSub: { color: Colors.textMuted, fontSize: 13 },
+  bottomChrome: {
+    flexShrink: 0,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
   hailBtn: {
     marginHorizontal: 14,
     marginVertical: 8,
@@ -201,5 +246,11 @@ const styles = StyleSheet.create({
   },
   hailBtnActive: { backgroundColor: Colors.danger },
   hailBtnText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.5 },
-  offHint: { color: Colors.textMuted, fontSize: 13, textAlign: 'center', paddingHorizontal: 16, paddingBottom: 8 },
+  offHint: {
+    color: Colors.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
 });
