@@ -1,5 +1,5 @@
 import { onDisconnect, ref, remove, set, update } from 'firebase/database';
-import { database, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
+import { getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { DriverProfile, PresenceDisplayStatus } from '@/types';
 import { getCurrentCoords } from '@/services/locationService';
 
@@ -90,7 +90,7 @@ function enrichShiftPresenceInBackground(driver: DriverProfile, vehicleId: strin
 
       const { lat, lng } = await getGps();
       const record = buildPresenceRecord(driver, vehicleId, 'Available', lat, lng);
-      const presencePath = ref(database, `${onlinePath}/current`);
+      const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
 
       try {
         await onDisconnect(presencePath).update({ lastSeen: Date.now() });
@@ -105,7 +105,7 @@ function enrichShiftPresenceInBackground(driver: DriverProfile, vehicleId: strin
         shiftStartedAt: nowIso,
       });
 
-      await update(ref(database, onlinePath), {
+      await update(ref(getDatabaseInstance(), onlinePath), {
         VehicleStatus: 'Available',
         status: 'Available',
         online: true,
@@ -132,8 +132,8 @@ export async function startShiftOnline(driver: DriverProfile, vehicleId: string)
   console.log('[Presence] startShiftOnline auth uid:', authUser.uid, 'driver profile uid:', driver.uid);
 
   const startedAt = new Date();
-  const baseRef = ref(database, onlinePath);
-  const currentRef = ref(database, `${onlinePath}/current`);
+  const baseRef = ref(getDatabaseInstance(), onlinePath);
+  const currentRef = ref(getDatabaseInstance(), `${onlinePath}/current`);
 
   await update(baseRef, {
     vehiclestatus: 'Available',
@@ -176,7 +176,7 @@ export async function writeOnlinePresence(
 
   const { lat, lng } = await getGps();
   const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
-  const presencePath = ref(database, `${onlinePath}/current`);
+  const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
 
   try {
     await onDisconnect(presencePath).update({ lastSeen: Date.now() });
@@ -191,7 +191,7 @@ export async function writeOnlinePresence(
   }
 
   const topStatus = status === 'Assigned' ? 'Picking' : status;
-  await update(ref(database, onlinePath), {
+  await update(ref(getDatabaseInstance(), onlinePath), {
     vehiclestatus: topStatus,
   });
 }
@@ -202,11 +202,11 @@ export async function moveDriverToEndOfQueue(driver: DriverProfile, vehicleId: s
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
   const endPos = 9999;
   try {
-    await update(ref(database, `${onlinePath}/current`), {
+    await update(ref(getDatabaseInstance(), `${onlinePath}/current`), {
       zonequeue: endPos,
       zoneQueue: endPos,
     });
-    await update(ref(database, `${onlinePath}/zone`), {
+    await update(ref(getDatabaseInstance(), `${onlinePath}/zone`), {
       position: endPos,
       queue: endPos,
       zonequeue: endPos,
@@ -219,11 +219,11 @@ export async function moveDriverToEndOfQueue(driver: DriverProfile, vehicleId: s
 export async function clearOnlinePresence(driver: DriverProfile, vehicleId: string) {
   if (!driver.companyId || !vehicleId) return;
 
-  const presencePath = ref(database, `online/${driver.companyId}/${vehicleId}/current`);
+  const presencePath = ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}/current`);
   try {
     await onDisconnect(presencePath).cancel();
     await update(presencePath, { online: false, vehiclestatus: 'Offline', lastSeen: Date.now() });
-    await update(ref(database, `online/${driver.companyId}/${vehicleId}`), {
+    await update(ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}`), {
       vehiclestatus: 'Offline',
     });
   } catch (err) {
@@ -231,7 +231,7 @@ export async function clearOnlinePresence(driver: DriverProfile, vehicleId: stri
   }
 
   try {
-    await remove(ref(database, `online/${driver.companyId}/${vehicleId}`));
+    await remove(ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}`));
   } catch (err) {
     console.warn('[Presence] remove node failed:', err);
   }

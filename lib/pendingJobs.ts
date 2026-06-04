@@ -1,5 +1,5 @@
 import { get, onValue, ref } from 'firebase/database';
-import { database } from '@/lib/firebase';
+import { getDatabaseInstance } from '@/lib/firebase';
 import { jobMatchesDriverVehicle, serviceTypeToJobType } from '@/lib/jobMatching';
 import { JobOffer, Vehicle } from '@/types';
 
@@ -76,7 +76,7 @@ export function subscribePendingJobs(
   vehicle: Vehicle | undefined,
   onChange: (offers: JobOffer[]) => void,
 ): () => void {
-  const pendingRef = ref(database, `pendingjobs/${companyId}`);
+  const pendingRef = ref(getDatabaseInstance(), `pendingjobs/${companyId}`);
   return onValue(pendingRef, (snap) => {
     onChange(extractPendingOffers(snap.val(), vehicle));
   });
@@ -86,6 +86,6 @@ export async function loadPendingJobsOnce(
   companyId: string,
   vehicle: Vehicle | undefined,
 ): Promise<JobOffer[]> {
-  const snap = await get(ref(database, `pendingjobs/${companyId}`));
+  const snap = await get(ref(getDatabaseInstance(), `pendingjobs/${companyId}`));
   return extractPendingOffers(snap.val(), vehicle);
 }

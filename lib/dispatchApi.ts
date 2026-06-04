@@ -1,11 +1,10 @@
 import { DISPATCH_API_URL } from '@/constants/theme';
-import { auth } from '@/lib/firebase';
+import { getAuthInstance, getDatabaseInstance } from '@/lib/firebase';
 import { getDispatchConfig } from '@/lib/dispatchConfig';
 import { update, ref } from 'firebase/database';
-import { database } from '@/lib/firebase';
 
 export async function dispatchGet<T>(path: string): Promise<T> {
-  const token = await auth.currentUser?.getIdToken();
+  const token = await getAuthInstance().currentUser?.getIdToken();
   const res = await fetch(`${DISPATCH_API_URL}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
@@ -14,7 +13,7 @@ export async function dispatchGet<T>(path: string): Promise<T> {
 }
 
 export async function dispatchPost<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  const token = await auth.currentUser?.getIdToken();
+  const token = await getAuthInstance().currentUser?.getIdToken();
   const res = await fetch(`${DISPATCH_API_URL}${path}`, {
     method: 'POST',
     headers: {
@@ -88,7 +87,7 @@ export async function syncDriverLocation(payload: DriverLocationPayload) {
   const { companyId, vehicleId, lat, lng } = payload;
   if (!companyId || !vehicleId) return;
 
-  await update(ref(database, `online/${companyId}/${vehicleId}/current`), {
+  await update(ref(getDatabaseInstance(), `online/${companyId}/${vehicleId}/current`), {
     lat,
     lng,
     Lat: lat,

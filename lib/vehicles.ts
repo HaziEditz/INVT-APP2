@@ -1,5 +1,5 @@
 import { get, ref } from 'firebase/database';
-import { database } from '@/lib/firebase';
+import { getDatabaseInstance } from '@/lib/firebase';
 import { Vehicle } from '@/types';
 
 function normVehicleId(v: unknown): string | null {
@@ -113,7 +113,7 @@ function extractBodyType(meta: Record<string, unknown>): string {
 async function loadVehicleDetails(companyId: string, ids: string[]): Promise<Vehicle[]> {
   if (!ids.length) return [];
 
-  const snap = await get(ref(database, `vehicles/${companyId}`));
+  const snap = await get(ref(getDatabaseInstance(), `vehicles/${companyId}`));
   const registry: Record<string, Record<string, unknown>> = {};
   if (snap.exists()) {
     snap.forEach((child) => {
@@ -156,7 +156,7 @@ export async function loadVehicleBodyType(companyId: string, vehicleId: string):
   if (!companyId || !vehicleId) return '—';
   try {
     const upper = vehicleId.trim().toUpperCase();
-    const snap = await get(ref(database, `vehicles/${companyId}/${upper}`));
+    const snap = await get(ref(getDatabaseInstance(), `vehicles/${companyId}/${upper}`));
     if (snap.exists()) {
       return extractBodyType((snap.val() ?? {}) as Record<string, unknown>);
     }
@@ -174,14 +174,14 @@ export async function loadDriverVehicles(
 ): Promise<Vehicle[]> {
   const allocated: string[] = [];
 
-  const profileSnap = await get(ref(database, `drivers/${companyId}/${uid}`));
+  const profileSnap = await get(ref(getDatabaseInstance(), `drivers/${companyId}/${uid}`));
   if (profileSnap.exists()) {
     allocated.push(...extractAllocatedIds(profileSnap.val() as Record<string, unknown>));
   }
 
   if (driverIdHint && driverIdHint !== uid) {
     try {
-      const altSnap = await get(ref(database, `drivers/${companyId}/${driverIdHint}`));
+      const altSnap = await get(ref(getDatabaseInstance(), `drivers/${companyId}/${driverIdHint}`));
       if (altSnap.exists()) {
         allocated.push(...extractAllocatedIds(altSnap.val() as Record<string, unknown>));
       }
@@ -194,7 +194,7 @@ export async function loadDriverVehicles(
 
   if (unique.length === 0) {
     try {
-      const allSnap = await get(ref(database, `vehicles/${companyId}`));
+      const allSnap = await get(ref(getDatabaseInstance(), `vehicles/${companyId}`));
       if (allSnap.exists()) {
         allSnap.forEach((child) => {
           const vId = normVehicleId(child.key ?? '');

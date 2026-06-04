@@ -1,5 +1,5 @@
 import { get, limitToLast, query, ref } from 'firebase/database';
-import { database } from '@/lib/firebase';
+import { getDatabaseInstance } from '@/lib/firebase';
 import { JobType, PaymentType } from '@/types';
 
 export type JobHistoryStatus = 'completed' | 'cancelled' | 'noshow';
@@ -159,7 +159,7 @@ export async function loadDriverJobHistory(
 
   try {
     const snap = await get(
-      query(ref(database, `completedJobs/${companyId}`), limitToLast(500)),
+      query(ref(getDatabaseInstance(), `completedJobs/${companyId}`), limitToLast(500)),
     );
     if (snap.exists()) {
       snap.forEach((child) => {
@@ -174,7 +174,7 @@ export async function loadDriverJobHistory(
 
   try {
     const snap = await get(
-      query(ref(database, `allbookings/${companyId}`), limitToLast(500)),
+      query(ref(getDatabaseInstance(), `allbookings/${companyId}`), limitToLast(500)),
     );
     if (snap.exists()) {
       snap.forEach((child) => {

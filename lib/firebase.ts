@@ -1,13 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
-import {
-  Auth,
-  User,
-  getAuth,
-  getReactNativePersistence,
-  initializeAuth,
-  signInAnonymously,
-} from 'firebase/auth';
+import { Auth, User, getAuth, signInAnonymously } from 'firebase/auth';
 import { Database, getDatabase } from 'firebase/database';
 import { Platform } from 'react-native';
 
@@ -41,12 +33,6 @@ function initAuth(instance: FirebaseApp): Auth {
   }
 
   try {
-    if (typeof getReactNativePersistence === 'function') {
-      return initializeAuth(instance, {
-        persistence: getReactNativePersistence(AsyncStorage),
-      });
-    }
-    console.warn('[Firebase] getReactNativePersistence missing — using getAuth');
     return getAuth(instance);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -54,8 +40,8 @@ function initAuth(instance: FirebaseApp): Auth {
       console.log('[Firebase] Auth already initialized, reusing instance');
       return getAuth(instance);
     }
-    console.warn('[Firebase] initializeAuth failed, using getAuth:', err);
-    return getAuth(instance);
+    console.warn('[Firebase] getAuth failed:', err);
+    throw err;
   }
 }
 

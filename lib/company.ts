@@ -1,5 +1,5 @@
 import { get, ref } from 'firebase/database';
-import { database } from '@/lib/firebase';
+import { getDatabaseInstance } from '@/lib/firebase';
 
 export interface CompanyInfo {
   id: string;
@@ -12,7 +12,7 @@ export async function loadCompanyInfo(companyId: string, driverUid?: string): Pr
   let name = '';
 
   try {
-    const snap = await get(ref(database, `companies/${companyId}`));
+    const snap = await get(ref(getDatabaseInstance(), `companies/${companyId}`));
     if (snap.exists()) {
       const d = snap.val() as Record<string, unknown>;
       name = String(d.name ?? d.companyName ?? d.CompanyName ?? d.tradingName ?? '').trim();
@@ -23,7 +23,7 @@ export async function loadCompanyInfo(companyId: string, driverUid?: string): Pr
 
   if (!name && driverUid) {
     try {
-      const snap = await get(ref(database, `drivers/${companyId}/${driverUid}`));
+      const snap = await get(ref(getDatabaseInstance(), `drivers/${companyId}/${driverUid}`));
       if (snap.exists()) {
         const d = snap.val() as Record<string, unknown>;
         name = String(d.companyName ?? d.CompanyName ?? d.fleetName ?? '').trim();

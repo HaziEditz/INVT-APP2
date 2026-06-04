@@ -1,5 +1,5 @@
 import { get, ref } from 'firebase/database';
-import { database } from '@/lib/firebase';
+import { getDatabaseInstance } from '@/lib/firebase';
 
 export interface DispatchConfig {
   baseUrl: string;
@@ -13,7 +13,7 @@ let cached: DispatchConfig | null = null;
 export async function getDispatchConfig(): Promise<DispatchConfig> {
   if (cached) return cached;
 
-  const snapshot = await get(ref(database, 'links'));
+  const snapshot = await get(ref(getDatabaseInstance(), 'links'));
   if (!snapshot.exists()) {
     throw new Error('Dispatch links not found in Firebase');
   }

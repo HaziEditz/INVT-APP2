@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
 import { Alert } from 'react-native';
 import { get, onValue, ref, update } from 'firebase/database';
-import { database, isFirebaseReady } from '@/lib/firebase';
+import { getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { loadCompanyInfo } from '@/lib/company';
@@ -448,14 +448,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const zoneRef = ref(database, `online/${driver.companyId}/${selectedVehicleId}/zone`);
+      const zoneRef = ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/zone`);
       return onValue(zoneRef, (snap) => {
         try {
           if (snap.exists()) {
             setZone(parseZoneNode(snap.val()));
             return;
           }
-          get(ref(database, `online/${driver.companyId}/${selectedVehicleId}/current`))
+          get(ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/current`))
             .then((cur) => {
               if (!cur.exists()) {
                 setZone(EMPTY_ZONE);
@@ -485,7 +485,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const presenceRef = ref(database, `online/${driver.companyId}/${selectedVehicleId}/current`);
+      const presenceRef = ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/current`);
       return onValue(presenceRef, (snap) => {
         try {
           if (!snap.exists()) {
@@ -613,7 +613,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     if (!canReceiveJobOffers || !isFirebaseReady || !driver?.companyId || !driver.id) return;
     try {
-      const offerRef = ref(database, `jobOffers/${driver.companyId}/${driver.id}`);
+      const offerRef = ref(getDatabaseInstance(), `jobOffers/${driver.companyId}/${driver.id}`);
       return onValue(offerRef, async (snap) => {
         try {
           const payloads = extractOfferPayloads(snap.val());
@@ -633,7 +633,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     if (!canReceiveJobOffers || !isFirebaseReady || !driver?.id) return;
     try {
-      const notifyRef = ref(database, `notification/${driver.id}`);
+      const notifyRef = ref(getDatabaseInstance(), `notification/${driver.id}`);
       return onValue(notifyRef, async (snap) => {
         try {
           const payloads = extractOfferPayloads(snap.val());
@@ -721,7 +721,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setSelectedVehicleIdState(normalized);
     await storeData(STORAGE_KEYS.selectedVehicle, normalized);
     if (driver?.companyId && driver.uid) {
-      update(ref(database, `drivers/${driver.companyId}/${driver.uid}`), {
+      update(ref(getDatabaseInstance(), `drivers/${driver.companyId}/${driver.uid}`), {
         vehicleId: normalized,
       }).catch(() => undefined);
     }
@@ -731,7 +731,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     let vehicleId = (override ?? selectedVehicleId ?? driver?.vehicleId ?? '').trim().toUpperCase();
     if (!vehicleId && driver?.companyId && driver.uid) {
       try {
-        const snap = await get(ref(database, `drivers/${driver.companyId}/${driver.uid}`));
+        const snap = await get(ref(getDatabaseInstance(), `drivers/${driver.companyId}/${driver.uid}`));
         if (snap.exists()) {
           vehicleId = String(snap.val()?.vehicleId ?? '').trim().toUpperCase();
         }
@@ -757,7 +757,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     if (driver.companyId) {
       try {
-        const snap = await get(ref(database, `online/${driver.companyId}/${vehicleId}/current`));
+        const snap = await get(ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}/current`));
         if (snap.exists()) {
           const data = snap.val() as Record<string, unknown>;
           const existingDriverId = String(data.driverid ?? '');
@@ -825,7 +825,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
 
     if (driver.companyId) {
-      update(ref(database, `vehicles/${driver.companyId}/${vehicleId}`), {
+      update(ref(getDatabaseInstance(), `vehicles/${driver.companyId}/${vehicleId}`), {
         currentDriverId: driver.id,
       })
         .then(() => console.log('[Shift] vehicle currentDriverId updated'))

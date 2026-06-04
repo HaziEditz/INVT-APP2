@@ -29,6 +29,8 @@ function loadNotifications(): NotificationsModule | null {
         shouldShowAlert: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
       }),
     });
     notificationsModule = mod;
@@ -111,7 +113,11 @@ export async function notifyBreakReminder(
   try {
     const trigger =
       delayMinutes && delayMinutes > 0
-        ? { seconds: Math.max(60, delayMinutes * 60), repeats: false as const }
+        ? ({
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: Math.max(60, delayMinutes * 60),
+            repeats: false,
+          } satisfies import('expo-notifications').TimeIntervalTriggerInput)
         : null;
 
     await Notifications.scheduleNotificationAsync({
