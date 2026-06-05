@@ -3,6 +3,7 @@ import { JobNotesSection } from '@/components/JobNotesSection';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
+import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
 import { STAGE_LABELS, JobStage } from '@/types';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -56,6 +57,19 @@ export function CurrentTripPanel() {
   const nextStage = STAGES[Math.min(idx + 1, STAGES.length - 1)];
   const nextLabel = STAGE_LABELS[nextStage];
   const st = activeJob.stepTimes;
+  const navTarget =
+    activeJob.stage === 'onboard' || activeJob.stage === 'complete'
+      ? {
+          lat: activeJob.dropoffLat,
+          lng: activeJob.dropoffLng,
+          label: activeJob.dropoff,
+        }
+      : {
+          lat: activeJob.pickupLat,
+          lng: activeJob.pickupLng,
+          label: activeJob.pickup,
+        };
+  const canNavigate = canOpenNavigation(navTarget);
 
   const onAdvance = async () => {
     await advanceStage();
@@ -92,6 +106,18 @@ export function CurrentTripPanel() {
       <JobNotesSection job={activeJob} compact />
 
       <View style={styles.actions}>
+        {canNavigate ? (
+          <Button
+            title="Navigate"
+            variant="secondary"
+            onPress={() =>
+              showNavigationPicker(
+                navTarget,
+                activeJob.stage === 'onboard' ? 'Navigate to drop-off' : 'Navigate to pickup',
+              )
+            }
+          />
+        ) : null}
         {meterRunning ? (
           <Button title="End Trip" variant="danger" onPress={endTrip} />
         ) : (

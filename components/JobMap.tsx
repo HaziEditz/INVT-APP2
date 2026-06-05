@@ -1,12 +1,4 @@
-import { Platform } from 'react-native';
-import type { ComponentType } from 'react';
-import type { JobMapProps } from './JobMap.types';
+import LeafletMap from '@/components/LeafletMap';
 
 export type { JobMapProps } from './JobMap.types';
-
-const JobMap: ComponentType<JobMapProps> =
-  Platform.OS === 'web'
-    ? require('./JobMap.web').default
-    : require('./SafeJobMap').default;
-
-export default JobMap;
+export default LeafletMap;

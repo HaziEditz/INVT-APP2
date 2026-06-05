@@ -24,7 +24,9 @@ import { loadCompanyTariffs } from '@/lib/companyTariffs';
 import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { completeJobPayment } from '@/lib/dispatchApi';
-import { reverseGeocodeCurrentAddress } from '@/services/locationService';
+import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
+import { reverseGeocodeCurrentAddress, getCurrentCoords } from '@/services/locationService';
+import * as Location from 'expo-location';
 import {
   diffBookingChanges,
   stageAllowsMeter,
@@ -58,6 +60,7 @@ interface DriverContextValue {
   vehicles: Vehicle[];
   vehiclesLoading: boolean;
   zone: ZoneInfo;
+  companyZones: CompanyZone[];
   jobOffer: JobOffer | null;
   paymentJob: ActiveJob | null;
   activeJob: ActiveJob | null;
@@ -232,6 +235,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const [zone, setZone] = useState<ZoneInfo>(EMPTY_ZONE);
+  const [companyZones, setCompanyZones] = useState<CompanyZone[]>([]);
+  const companyZonesRef = useRef<CompanyZone[]>([]);
   const [jobOffer, setJobOffer] = useState<JobOffer | null>(null);
   const [paymentJob, setPaymentJob] = useState<ActiveJob | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
@@ -453,6 +458,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [shiftActive, driver?.companyId, selectedVehicleId, activeVehicle?.id], 'Driver-pendingJobs');
 
   useSafeEffect(() => {
+    if (!isFirebaseReady || !driver?.companyId) {
+      setCompanyZones([]);
+      companyZonesRef.current = [];
+      return;
+    }
+    return subscribeCompanyZones(driver.companyId, (zones) => {
+      companyZonesRef.current = zones;
+      setCompanyZones(zones);
+    });
+  }, [driver?.companyId], 'Driver-companyZones');
+
+  useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
       setZone(EMPTY_ZONE);
       return;
@@ -462,22 +479,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return onValue(zoneRef, (snap) => {
         try {
           if (snap.exists()) {
-            setZone(parseZoneNode(snap.val()));
+            const parsed = parseZoneNode(snap.val());
+            setZone((prev) => ({
+              ...parsed,
+              name: prev.name || parsed.name,
+            }));
             return;
           }
           get(ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/current`))
             .then((cur) => {
-              if (!cur.exists()) {
-                setZone(EMPTY_ZONE);
-                return;
-              }
+              if (!cur.exists()) return;
               const d = cur.val() as Record<string, unknown>;
-              setZone({
-                name: String(d.zonename ?? d.zoneName ?? '').trim(),
-                position: Number(d.zonequeue ?? d.zoneQueue ?? 0),
-                totalInQueue: 0,
-                nearbyDrivers: 0,
-              });
+              setZone((prev) => ({
+                name: prev.name || String(d.zonename ?? d.zoneName ?? '').trim(),
+                position: Number(d.zonequeue ?? d.zoneQueue ?? prev.position ?? 0),
+                totalInQueue: prev.totalInQueue ?? 0,
+                nearbyDrivers: prev.nearbyDrivers ?? 0,
+              }));
             })
             .catch((err) => console.error('[Driver] zone fallback read', err));
         } catch (err) {
@@ -487,7 +505,41 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('[Driver] zone subscribe failed', err);
     }
-  }, [shiftActive, driver?.companyId, selectedVehicleId], 'Driver-zone');
+  }, [shiftActive, driver?.companyId, selectedVehicleId], 'Driver-zoneQueue');
+
+  useSafeEffect(() => {
+    if (!shiftActive || !driver?.companyId || !companyZones.length) return;
+    let sub: Location.LocationSubscription | null = null;
+    let cancelled = false;
+
+    const applyZoneFromCoords = (lat: number, lng: number) => {
+      const hit = findZoneAtCoords(lat, lng, companyZonesRef.current);
+      setZone((prev) => ({
+        ...prev,
+        name: hit?.name ?? (prev.name || ''),
+      }));
+    };
+
+    void (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+        const coords = await getCurrentCoords();
+        applyZoneFromCoords(coords.latitude, coords.longitude);
+        sub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, distanceInterval: 15, timeInterval: 5000 },
+          (loc) => applyZoneFromCoords(loc.coords.latitude, loc.coords.longitude),
+        );
+      } catch (err) {
+        console.warn('[Driver] GPS zone detect failed:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      sub?.remove();
+    };
+  }, [shiftActive, driver?.companyId, companyZones.length], 'Driver-gpsZone');
 
   useSafeEffect(() => {
     if (!isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
@@ -1440,6 +1492,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         vehicles,
         vehiclesLoading,
         zone,
+        companyZones,
         jobOffer,
         paymentJob,
         nextQueuedOffer,
