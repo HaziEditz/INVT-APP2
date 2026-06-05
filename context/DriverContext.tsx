@@ -101,6 +101,7 @@ interface DriverContextValue {
   noShowActiveJob: () => Promise<void>;
   recallJob: () => Promise<void>;
   startHail: () => Promise<void>;
+  endHail: () => Promise<void>;
   endTrip: () => Promise<void>;
   pauseMeter: () => void;
   toggleWaitMeter: () => void;
@@ -1357,8 +1358,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     startMeterWatch();
   };
 
-  const endTrip = async () => {
-    if (!meterRef.current?.running && !hailActive && !activeJob) return;
+  const endHail = async () => {
+    if (!hailActiveRef.current && !hailActive) return;
 
     const snapshot = buildMeterSnapshot();
     const now = Date.now();
@@ -1368,37 +1369,51 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       meterStopRef.current = null;
     }
 
+    const hailJob: ActiveJob = {
+      id: `hail_${snapshot?.startedAt ?? now}`,
+      type: 'Taxi',
+      pickup: hailPickupAddress || 'Street hail',
+      dropoff: hailPickupAddress || 'Street hail',
+      pickupLat: hailPickupLat,
+      pickupLng: hailPickupLng,
+      stage: 'complete',
+      startedAt: snapshot?.startedAt ?? now,
+      distanceKm: snapshot?.distanceKm ?? 0,
+      durationMin: snapshot?.startedAt
+        ? Math.round((now - snapshot.startedAt) / 60000)
+        : 0,
+      fare: snapshot?.fare ?? 0,
+      stepTimes: {
+        hailStartedAt: snapshot?.startedAt ?? now,
+        hailEndedAt: now,
+        completeAt: now,
+      },
+      tariffChanges: snapshot?.tariffChanges ?? [],
+      meterSnapshot: snapshot,
+      source: 'hail',
+    };
+
+    setPaymentJob(hailJob);
+    setHailActive(false);
+    hailActiveRef.current = false;
+    setMeter(null);
+    meterRef.current = null;
+    await storeData(STORAGE_KEYS.meterState, null);
+  };
+
+  const endTrip = async () => {
     if (hailActiveRef.current || hailActive) {
-      const hailJob: ActiveJob = {
-        id: `hail_${snapshot?.startedAt ?? now}`,
-        type: 'Taxi',
-        pickup: hailPickupAddress || 'Street hail',
-        dropoff: hailPickupAddress || 'Street hail',
-        pickupLat: hailPickupLat,
-        pickupLng: hailPickupLng,
-        stage: 'complete',
-        startedAt: snapshot?.startedAt ?? now,
-        distanceKm: snapshot?.distanceKm ?? 0,
-        durationMin: snapshot?.startedAt
-          ? Math.round((now - snapshot.startedAt) / 60000)
-          : 0,
-        fare: snapshot?.fare ?? 0,
-        stepTimes: {
-          hailStartedAt: snapshot?.startedAt ?? now,
-          hailEndedAt: now,
-          completeAt: now,
-        },
-        tariffChanges: snapshot?.tariffChanges ?? [],
-        meterSnapshot: snapshot,
-        source: 'hail',
-      };
-      setPaymentJob(hailJob);
-      setHailActive(false);
-      hailActiveRef.current = false;
-      setMeter(null);
-      meterRef.current = null;
-      await storeData(STORAGE_KEYS.meterState, null);
+      await endHail();
       return;
+    }
+    if (!meterRef.current?.running && !activeJob) return;
+
+    const snapshot = buildMeterSnapshot();
+    const now = Date.now();
+
+    if (meterStopRef.current) {
+      meterStopRef.current();
+      meterStopRef.current = null;
     }
 
     if (activeJob) {
@@ -1534,6 +1549,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         noShowActiveJob,
         recallJob,
         startHail,
+        endHail,
         endTrip,
         pauseMeter,
         toggleWaitMeter,
