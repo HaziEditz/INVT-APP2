@@ -158,3 +158,30 @@ export async function getCurrentCoords() {
   });
   return coords;
 }
+
+export function formatGeocodedAddress(place: Location.LocationGeocodedAddress): string {
+  const parts = [
+    place.streetNumber,
+    place.street,
+    place.subregion || place.district,
+    place.city || place.region,
+  ].filter(Boolean);
+  return parts.join(', ') || place.name || '';
+}
+
+export async function reverseGeocodeCurrentAddress(): Promise<{
+  address: string;
+  lat: number;
+  lng: number;
+}> {
+  const coords = await getCurrentCoords();
+  const results = await Location.reverseGeocodeAsync({
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+  });
+  const formatted = results[0] ? formatGeocodedAddress(results[0]) : '';
+  const address =
+    formatted ||
+    `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
+  return { address, lat: coords.latitude, lng: coords.longitude };
+}

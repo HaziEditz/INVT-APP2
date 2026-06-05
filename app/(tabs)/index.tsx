@@ -2,6 +2,7 @@ import { CurrentTripPanel } from '@/components/home/CurrentTripPanel';
 import { FullScreenMapModal } from '@/components/home/FullScreenMapModal';
 import { HomeMainTabs } from '@/components/home/HomeMainTabs';
 import { HomeStatusBar } from '@/components/home/HomeStatusBar';
+import { MeterOverlay } from '@/components/home/MeterOverlay';
 import { OffersPanel } from '@/components/home/OffersPanel';
 import { QueuePanel } from '@/components/home/QueuePanel';
 import { TariffPicker } from '@/components/home/TariffPicker';
@@ -31,7 +32,6 @@ export default function MainScreen() {
     hailActive,
     meter,
     startHail,
-    endHail,
     tariffs,
     selectedTariff,
     setSelectedTariff,
@@ -48,6 +48,8 @@ export default function MainScreen() {
   const [mapExpanded, setMapExpanded] = useState(false);
 
   const hasCurrent = !!activeJob || hailActive;
+  const meterRunning = !!meter?.running;
+  const showHailButton = shiftActive && !hailActive && !meterRunning && !activeJob;
 
   useSafeEffect(() => {
     if (!firebaseUser) return;
@@ -64,18 +66,11 @@ export default function MainScreen() {
       Alert.alert('Off shift', 'Start your shift from Profile or sign in again.');
       return;
     }
-    if (hailActive) {
-      Alert.alert('End hail trip?', 'Finish street hail and return to queue.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'End trip', onPress: endHail },
-      ]);
-      return;
-    }
     if (activeJob) {
       Alert.alert('On dispatch job', 'Complete or cancel the active job before hailing.');
       return;
     }
-    startHail();
+    void startHail();
     setMainTab('current');
   };
 
@@ -116,17 +111,9 @@ export default function MainScreen() {
           <Text style={styles.expandIcon}>⛶</Text>
         </Pressable>
 
-        {meter?.running ? (
-          <View style={styles.meterBadge}>
-            <Text style={styles.meterFare}>${meter.fare.toFixed(2)}</Text>
-            <Text
-              style={[
-                styles.modeTag,
-                meter.mode === 'moving' ? styles.modeMoving : styles.modeWaiting,
-              ]}
-            >
-              {meter.paused ? 'PAUSED' : meter.mode === 'moving' ? 'MOVING' : 'WAITING'}
-            </Text>
+        {meterRunning && meter && !mapExpanded ? (
+          <View style={styles.meterOverlayWrap} pointerEvents="box-none">
+            <MeterOverlay meter={meter} onPause={pauseMeter} onWait={toggleWaitMeter} />
           </View>
         ) : null}
       </View>
@@ -156,12 +143,11 @@ export default function MainScreen() {
           {mainTab === 'queue' ? <QueuePanel /> : null}
         </ErrorBoundary>
 
-        <Pressable
-          style={[styles.hailBtn, hailActive && styles.hailBtnActive]}
-          onPress={onHailPress}
-        >
-          <Text style={styles.hailBtnText}>{hailActive ? 'END HAIL TRIP' : 'HAIL PASSENGER'}</Text>
-        </Pressable>
+        {showHailButton ? (
+          <Pressable style={styles.hailBtn} onPress={onHailPress}>
+            <Text style={styles.hailBtnText}>HAIL PASSENGER</Text>
+          </Pressable>
+        ) : null}
 
         {!shiftActive ? (
           <Text style={styles.offHint}>
@@ -175,7 +161,7 @@ export default function MainScreen() {
         onClose={() => setMapExpanded(false)}
         activeJob={activeJob}
         meter={meter}
-        showMeter={!!meter?.running}
+        showMeter={meterRunning}
         showRoute={mapShowsRoute}
         showsUserLocation={shiftActive}
         onPause={pauseMeter}
@@ -211,22 +197,13 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   expandIcon: { color: Colors.accent, fontSize: 22, fontWeight: '700' },
-  meterBadge: {
+  meterOverlayWrap: {
     position: 'absolute',
-    top: 10,
-    left: 10,
-    backgroundColor: Colors.surface + 'EE',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    left: 0,
+    right: 0,
+    bottom: 0,
     zIndex: 10,
   },
-  meterFare: { color: Colors.success, fontSize: 18, fontWeight: '800' },
-  modeTag: { fontSize: 10, fontWeight: '800', marginTop: 2 },
-  modeMoving: { color: Colors.success },
-  modeWaiting: { color: Colors.warning },
   bottomChrome: {
     flexShrink: 0,
     borderTopWidth: 1,
@@ -241,7 +218,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
-  hailBtnActive: { backgroundColor: Colors.danger },
   hailBtnText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.5 },
   offHint: {
     color: Colors.textMuted,

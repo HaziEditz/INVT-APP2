@@ -23,7 +23,7 @@ const EMPTY_EXTRAS: PaymentExtras = {
 };
 
 export function PaymentModal() {
-  const { paymentJob, finalizePayment, dismissPayment } = useDriver();
+  const { paymentJob, finalizePayment } = useDriver();
   const [paymentType, setPaymentType] = useState<string>('Cash');
   const [extras, setExtras] = useState<PaymentExtras>(EMPTY_EXTRAS);
   const [submitting, setSubmitting] = useState(false);
@@ -31,10 +31,11 @@ export function PaymentModal() {
   if (!paymentJob) return null;
 
   const meter = paymentJob.meterSnapshot;
-  const base = meter?.fare ?? paymentJob.fare ?? paymentJob.fixedFare ?? paymentJob.estimatedFare ?? 0;
+  const breakdown = meter?.breakdown;
+  const tripFare = breakdown?.total ?? meter?.fare ?? paymentJob.fare ?? paymentJob.fixedFare ?? 0;
   const extrasTotal =
     extras.bikeCarry + extras.airportFee + extras.eftposSurcharge + extras.tolls + extras.other;
-  const total = +(base + extrasTotal).toFixed(2);
+  const total = +(tripFare + extrasTotal).toFixed(2);
 
   const setExtra = (key: keyof PaymentExtras, raw: string) => {
     const n = parseFloat(raw) || 0;
@@ -55,32 +56,37 @@ export function PaymentModal() {
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <Text style={styles.title}>Collect payment</Text>
-          <Text style={styles.sub}>{paymentJob.pickup} → {paymentJob.dropoff}</Text>
+          <Text style={styles.sub}>{paymentJob.pickup}</Text>
+          {paymentJob.dropoff && paymentJob.dropoff !== paymentJob.pickup ? (
+            <Text style={styles.sub}>→ {paymentJob.dropoff}</Text>
+          ) : null}
 
-          {meter?.breakdown ? (
+          {breakdown ? (
             <View style={styles.breakdownBox}>
               <Text style={styles.breakdownTitle}>Fare breakdown</Text>
-              <Text style={styles.breakdownLine}>Flag fall ${meter.breakdown.flagFall.toFixed(2)}</Text>
+              <Text style={styles.breakdownLine}>Flag fall ${breakdown.flagFall.toFixed(2)}</Text>
               <Text style={styles.breakdownLine}>
-                Distance {meter.breakdown.distanceKm.toFixed(1)} km × rate = $
-                {meter.breakdown.distanceCharge.toFixed(2)}
+                Distance {breakdown.distanceKm.toFixed(2)} km = ${breakdown.distanceCharge.toFixed(2)}
               </Text>
               <Text style={styles.breakdownLine}>
-                Waiting {meter.breakdown.waitingMinutes.toFixed(0)} min × rate = $
-                {meter.breakdown.waitingCharge.toFixed(2)}
+                Waiting {breakdown.waitingMinutes.toFixed(1)} min = ${breakdown.waitingCharge.toFixed(2)}
               </Text>
-              <Text style={styles.breakdownTotal}>Trip ${meter.breakdown.total.toFixed(2)}</Text>
-              <Text style={styles.meta}>
-                {meter.distanceKm.toFixed(1)} km · wait {(meter.waitingMs / 60000).toFixed(0)} min · pause{' '}
-                {(meter.pausedMs / 60000).toFixed(0)} min
+              <Text style={styles.breakdownEq}>
+                ${breakdown.flagFall.toFixed(2)} + ${breakdown.distanceCharge.toFixed(2)} + $
+                {breakdown.waitingCharge.toFixed(2)} = ${breakdown.total.toFixed(2)}
               </Text>
-              {meter.tariffName ? (
+              {meter?.tariffName ? (
                 <Text style={styles.meta}>Tariff: {meter.tariffName}</Text>
               ) : null}
             </View>
-          ) : null}
+          ) : (
+            <Text style={styles.fare}>Trip fare ${tripFare.toFixed(2)}</Text>
+          )}
 
-          <Text style={styles.fare}>Total due ${total.toFixed(2)}</Text>
+          {extrasTotal > 0 ? (
+            <Text style={styles.extrasLine}>Extras +${extrasTotal.toFixed(2)}</Text>
+          ) : null}
+          <Text style={styles.totalDue}>Total due ${total.toFixed(2)}</Text>
 
           <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
             <Text style={styles.section}>Payment type</Text>
@@ -119,8 +125,11 @@ export function PaymentModal() {
             ))}
           </ScrollView>
 
-          <Button title={submitting ? 'Saving…' : 'Complete trip'} onPress={onDone} disabled={submitting} />
-          <Button title="Back" variant="secondary" onPress={dismissPayment} disabled={submitting} />
+          <Button
+            title={submitting ? 'Saving…' : 'Confirm Payment'}
+            onPress={onDone}
+            disabled={submitting}
+          />
         </View>
       </View>
     </Modal>
@@ -139,7 +148,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   title: { color: Colors.text, fontSize: 22, fontWeight: '800' },
-  sub: { color: Colors.textMuted, fontSize: 14, marginTop: 4 },
+  sub: { color: Colors.textMuted, fontSize: 14, marginTop: 2 },
   breakdownBox: {
     marginTop: 10,
     padding: 12,
@@ -150,9 +159,11 @@ const styles = StyleSheet.create({
   },
   breakdownTitle: { color: Colors.text, fontWeight: '700', marginBottom: 6 },
   breakdownLine: { color: Colors.textMuted, fontSize: 13, marginBottom: 2 },
-  breakdownTotal: { color: Colors.success, fontSize: 18, fontWeight: '800', marginTop: 6 },
+  breakdownEq: { color: Colors.success, fontSize: 16, fontWeight: '800', marginTop: 8 },
   meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
   fare: { color: Colors.success, fontSize: 18, fontWeight: '800', marginVertical: 10 },
+  extrasLine: { color: Colors.textMuted, fontSize: 14, marginTop: 6 },
+  totalDue: { color: Colors.success, fontSize: 22, fontWeight: '900', marginVertical: 10 },
   scroll: { maxHeight: 360, marginBottom: 12 },
   section: { color: Colors.text, fontWeight: '700', fontSize: 15, marginTop: 8, marginBottom: 8 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

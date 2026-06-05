@@ -21,8 +21,10 @@ import {
   writeOnlinePresence,
 } from '@/services/presenceService';
 import { loadCompanyTariffs } from '@/lib/companyTariffs';
+import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { completeJobPayment } from '@/lib/dispatchApi';
+import { reverseGeocodeCurrentAddress } from '@/services/locationService';
 import {
   diffBookingChanges,
   stageAllowsMeter,
@@ -61,6 +63,7 @@ interface DriverContextValue {
   activeJob: ActiveJob | null;
   nextQueuedOffer: QueuedOffer | null;
   hailActive: boolean;
+  hailPickupAddress: string | null;
   meter: MeterState | null;
   tariffs: Tariff[];
   selectedTariff: Tariff;
@@ -94,8 +97,8 @@ interface DriverContextValue {
   cancelActiveJob: () => Promise<void>;
   noShowActiveJob: () => Promise<void>;
   recallJob: () => Promise<void>;
-  startHail: () => void;
-  endHail: () => void;
+  startHail: () => Promise<void>;
+  endTrip: () => Promise<void>;
   pauseMeter: () => void;
   toggleWaitMeter: () => void;
   tariffLocked: boolean;
@@ -238,6 +241,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [company, setCompany] = useState<CompanyInfo | null>(null);
   const [isOffline, setIsOffline] = useState(false);
   const [hailActive, setHailActive] = useState(false);
+  const [hailPickupAddress, setHailPickupAddress] = useState<string | null>(null);
+  const [hailPickupLat, setHailPickupLat] = useState<number | undefined>();
+  const [hailPickupLng, setHailPickupLng] = useState<number | undefined>();
   const [meter, setMeter] = useState<MeterState | null>(null);
   const [tariffs, setTariffsState] = useState<Tariff[]>([]);
   const [selectedTariff, setSelectedTariffState] = useState<Tariff>(NO_TARIFF_CONFIGURED);
@@ -900,7 +906,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setReadyForJobs(false);
     readyForJobsRef.current = false;
     setPendingOffers([]);
-    endHailInternal();
+    stopMeterTimers();
+    setHailActive(false);
+    hailActiveRef.current = false;
+    setHailPickupAddress(null);
+    setHailPickupLat(undefined);
+    setHailPickupLng(undefined);
+    setMeter(null);
+    meterRef.current = null;
+    storeData(STORAGE_KEYS.meterState, null).catch(() => undefined);
 
     if (driver && vehicleId) {
       try {
@@ -1137,10 +1151,26 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         : job.durationMin,
     };
 
+    const completedAt = Date.now();
+
     try {
       await writeClosedJob(driver.companyId, driver.id, closed, paymentType, extras, totalFare);
     } catch (err) {
       console.warn('[Driver] writeClosedJob failed:', err);
+    }
+
+    if (job.id && !String(job.id).startsWith('hail_')) {
+      try {
+        await markBookingCompleted(driver.companyId, job.id, {
+          fare: totalFare,
+          paymentType,
+          driverId: driver.id,
+          completedAt,
+          distanceKm: closed.distanceKm,
+        });
+      } catch (err) {
+        console.warn('[Driver] markBookingCompleted failed:', err);
+      }
     }
 
     try {
@@ -1159,12 +1189,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    const done: CompletedJob = { ...closed, completedAt: Date.now() };
+    const done: CompletedJob = { ...closed, completedAt };
     setCompletedJobs((prev) => [done, ...prev]);
     setActiveJob(null);
     setPaymentJob(null);
+    setHailActive(false);
+    hailActiveRef.current = false;
+    setHailPickupAddress(null);
+    setHailPickupLat(undefined);
+    setHailPickupLng(undefined);
+    setMeter(null);
+    meterRef.current = null;
     activeJobIdRef.current = null;
     await storeData(STORAGE_KEYS.activeJob, null);
+    await storeData(STORAGE_KEYS.meterState, null);
     refreshJobHistory().catch(() => undefined);
 
     if (driver && shiftActive) {
@@ -1223,16 +1261,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const endHailInternal = () => {
-    stopMeterTimers();
-    setHailActive(false);
-    hailActiveRef.current = false;
-    setMeter(null);
-    meterRef.current = null;
-    storeData(STORAGE_KEYS.meterState, null).catch(() => undefined);
+  const buildMeterSnapshot = (): MeterState | null => {
+    const raw = meterRef.current;
+    if (!raw) return null;
+    const now = Date.now();
+    const waitMin = raw.waitingMs / 60000;
+    const breakdown = calcMeterBreakdown(selectedTariff, raw.distanceKm, waitMin);
+    return {
+      ...raw,
+      running: false,
+      finishedAt: now,
+      breakdown,
+      fare: breakdown.total,
+    };
   };
 
-  const startHail = () => {
+  const startHail = async () => {
     if (!shiftActive) {
       Alert.alert('Start shift', 'Start your shift before hailing a passenger.');
       return;
@@ -1241,26 +1285,90 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('No tariff configured', 'Ask dispatch to set up tariffs for your company in Firebase.');
       return;
     }
+    setHailPickupAddress('Locating…');
+    setHailActive(true);
+    hailActiveRef.current = true;
+
+    try {
+      const geo = await reverseGeocodeCurrentAddress();
+      setHailPickupAddress(geo.address);
+      setHailPickupLat(geo.lat);
+      setHailPickupLng(geo.lng);
+    } catch {
+      setHailPickupAddress('Current location (address unavailable)');
+    }
+
     const m = createInitialMeter(selectedTariff);
     setMeter(m);
     meterRef.current = m;
-    setHailActive(true);
-    hailActiveRef.current = true;
     storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
     startMeterWatch();
   };
 
-  const endHail = () => {
-    setMeter((prev) => {
-      if (!prev) return prev;
-      const ended = { ...prev, running: false, finishedAt: Date.now() };
-      storeData(STORAGE_KEYS.meterState, ended).catch(() => undefined);
-      return ended;
-    });
-    stopMeterTimers();
-    setHailActive(false);
-    hailActiveRef.current = false;
-    if (queuedOffers.length > 0) flushQueuedOffer();
+  const endTrip = async () => {
+    if (!meterRef.current?.running && !hailActive && !activeJob) return;
+
+    const snapshot = buildMeterSnapshot();
+    const now = Date.now();
+
+    if (meterStopRef.current) {
+      meterStopRef.current();
+      meterStopRef.current = null;
+    }
+
+    if (hailActiveRef.current || hailActive) {
+      const hailJob: ActiveJob = {
+        id: `hail_${snapshot?.startedAt ?? now}`,
+        type: 'Taxi',
+        pickup: hailPickupAddress || 'Street hail',
+        dropoff: hailPickupAddress || 'Street hail',
+        pickupLat: hailPickupLat,
+        pickupLng: hailPickupLng,
+        stage: 'complete',
+        startedAt: snapshot?.startedAt ?? now,
+        distanceKm: snapshot?.distanceKm ?? 0,
+        durationMin: snapshot?.startedAt
+          ? Math.round((now - snapshot.startedAt) / 60000)
+          : 0,
+        fare: snapshot?.fare ?? 0,
+        stepTimes: {
+          hailStartedAt: snapshot?.startedAt ?? now,
+          hailEndedAt: now,
+          completeAt: now,
+        },
+        tariffChanges: snapshot?.tariffChanges ?? [],
+        meterSnapshot: snapshot,
+        source: 'hail',
+      };
+      setPaymentJob(hailJob);
+      setHailActive(false);
+      hailActiveRef.current = false;
+      setMeter(null);
+      meterRef.current = null;
+      await storeData(STORAGE_KEYS.meterState, null);
+      return;
+    }
+
+    if (activeJob) {
+      const stepTimes: JobStepTimes = { ...activeJob.stepTimes, completeAt: now };
+      const updated: ActiveJob = {
+        ...activeJob,
+        stage: 'complete',
+        stepTimes,
+        meterSnapshot: snapshot ?? activeJob.meterSnapshot,
+        fare: snapshot?.fare ?? activeJob.fare,
+        distanceKm: snapshot?.distanceKm ?? activeJob.distanceKm,
+        durationMin: snapshot?.startedAt
+          ? Math.round((now - snapshot.startedAt) / 60000)
+          : activeJob.durationMin,
+      };
+      setActiveJob(updated);
+      setPaymentJob(updated);
+      setMeter(null);
+      meterRef.current = null;
+      await storeData(STORAGE_KEYS.activeJob, updated);
+      await storeData(STORAGE_KEYS.meterState, snapshot);
+    }
   };
 
   const pauseMeter = () => {
@@ -1298,8 +1406,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setMeter((prev) => {
         if (!prev) return prev;
         const waitMin = prev.waitingMs / 60000;
-        const mode = prev.paused ? 'waiting' : prev.mode;
-        const breakdown = calcMeterBreakdown(t, prev.distanceKm, waitMin, mode);
+        const breakdown = calcMeterBreakdown(t, prev.distanceKm, waitMin);
         const next = {
           ...prev,
           tariffId: t.id,
@@ -1338,6 +1445,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         nextQueuedOffer,
         activeJob,
         hailActive,
+        hailPickupAddress,
         meter,
         tariffs,
         selectedTariff,
@@ -1373,7 +1481,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         noShowActiveJob,
         recallJob,
         startHail,
-        endHail,
+        endTrip,
         pauseMeter,
         toggleWaitMeter,
         setSelectedTariff,

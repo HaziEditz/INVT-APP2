@@ -16,8 +16,13 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function normalizeSpeed(speedMs?: number | null): number {
+  if (speedMs == null || !Number.isFinite(speedMs) || speedMs < 0) return 0;
+  return speedMs;
+}
+
 export function createInitialMeter(tariff: Tariff): MeterState {
-  const breakdown = calcMeterBreakdown(tariff, 0, 0, 'waiting');
+  const breakdown = calcMeterBreakdown(tariff, 0, 0);
   return {
     running: true,
     paused: false,
@@ -37,12 +42,7 @@ export function createInitialMeter(tariff: Tariff): MeterState {
 
 function applyTariffToMeter(meter: MeterState, tariff: Tariff): MeterState {
   const waitMin = meter.waitingMs / 60000;
-  const breakdown = calcMeterBreakdown(
-    tariff,
-    meter.distanceKm,
-    waitMin,
-    meter.paused ? 'waiting' : meter.mode,
-  );
+  const breakdown = calcMeterBreakdown(tariff, meter.distanceKm, waitMin);
   return {
     ...meter,
     tariffId: tariff.id,
@@ -59,7 +59,6 @@ export type MeterTickResult = {
 
 export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | null): MeterTickResult {
   const now = Date.now();
-  const elapsed = now - (meter.pauseAccumulatedAt ?? meter.startedAt);
   let next: MeterState = {
     ...meter,
     pauseAccumulatedAt: now,
@@ -70,7 +69,7 @@ export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | 
     return { meter: applyTariffToMeter(next, tariff) };
   }
 
-  const speed = speedMs ?? 0;
+  const speed = normalizeSpeed(speedMs);
   const isMoving = speed > SPEED_MOVING_MS;
   next.mode = isMoving ? 'moving' : 'waiting';
   if (isMoving) {
@@ -102,7 +101,7 @@ export function tickMeterWithGps(
     }
   }
 
-  const speed = speedMs ?? 0;
+  const speed = normalizeSpeed(speedMs);
   const isMoving = speed > SPEED_MOVING_MS;
   if (next.lastLat != null && next.lastLng != null && isMoving && !next.paused) {
     const dM = haversineM(next.lastLat, next.lastLng, lat, lng);
@@ -134,7 +133,11 @@ export async function watchMeter(
       return () => clearInterval(id);
     }
     sub = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.Balanced, distanceInterval: 5, timeInterval: TICK_MS },
+      {
+        accuracy: Location.Accuracy.Balanced,
+        distanceInterval: 0,
+        timeInterval: TICK_MS,
+      },
       (loc) => {
         const m = getMeter();
         if (!m?.running) return;

@@ -13,61 +13,32 @@ function fmtTime(ts?: number) {
   return new Date(ts).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function rideMinutes(meter: { startedAt: number; finishedAt?: number }) {
-  const end = meter.finishedAt ?? Date.now();
-  return Math.max(0, Math.floor((end - meter.startedAt) / 60000));
-}
-
-function MeterBreakdownView({ meter }: { meter: NonNullable<ReturnType<typeof useDriver>['meter']> }) {
-  const b = meter.breakdown;
-  const modeLabel = meter.paused ? 'PAUSED' : meter.mode === 'moving' ? 'MOVING' : 'WAITING';
-  const modeStyle = meter.paused
-    ? styles.modePaused
-    : meter.mode === 'moving'
-      ? styles.modeMoving
-      : styles.modeWaiting;
-
-  return (
-    <View style={styles.meterBox}>
-      <Text style={[styles.modeBadge, modeStyle]}>{modeLabel}</Text>
-      <Text style={styles.meterFare}>${meter.fare.toFixed(2)}</Text>
-      <Text style={styles.breakdown}>
-        Flag ${b.flagFall.toFixed(2)} + Dist ${b.distanceCharge.toFixed(2)} + Wait $
-        {b.waitingCharge.toFixed(2)} = ${b.total.toFixed(2)}
-      </Text>
-      <Text style={styles.meta}>
-        {meter.distanceKm.toFixed(1)} km · wait {(meter.waitingMs / 60000).toFixed(0)} min · pause{' '}
-        {(meter.pausedMs / 60000).toFixed(0)} min · trip {rideMinutes(meter)} min
-      </Text>
-    </View>
-  );
-}
-
 export function CurrentTripPanel() {
   const {
     activeJob,
     hailActive,
+    hailPickupAddress,
     meter,
     advanceStage,
-    completeJob,
     cancelActiveJob,
     noShowActiveJob,
     recallJob,
-    pauseMeter,
-    endHail,
+    endTrip,
   } = useDriver();
 
-  if (hailActive && meter) {
+  const meterRunning = !!meter?.running;
+
+  if (hailActive) {
     return (
       <View style={styles.panel}>
         <Text style={styles.title}>Street hail</Text>
-        <Text style={styles.meta}>Start {fmtTime(meter.startedAt)}</Text>
-        {meter.finishedAt ? <Text style={styles.meta}>Finish {fmtTime(meter.finishedAt)}</Text> : null}
-        <MeterBreakdownView meter={meter} />
-        <View style={styles.actions}>
-          <Button title={meter.paused ? 'Resume' : 'Pause'} variant="secondary" onPress={pauseMeter} />
-          <Button title="End hail trip" variant="danger" onPress={endHail} />
-        </View>
+        <Text style={styles.pickupFrom} numberOfLines={3}>
+          Picked up from: {hailPickupAddress || 'Locating address…'}
+        </Text>
+        <Text style={styles.meta}>Started {fmtTime(meter?.startedAt)}</Text>
+        {meterRunning ? (
+          <Button title="End Trip" variant="danger" onPress={endTrip} />
+        ) : null}
       </View>
     );
   }
@@ -83,15 +54,10 @@ export function CurrentTripPanel() {
 
   const idx = STAGES.indexOf(activeJob.stage);
   const nextStage = STAGES[Math.min(idx + 1, STAGES.length - 1)];
-  const nextLabel = activeJob.stage === 'complete' ? 'Finish job' : STAGE_LABELS[nextStage];
-  const runningMeter = activeJob.stage === 'onboard' && meter?.running;
+  const nextLabel = STAGE_LABELS[nextStage];
   const st = activeJob.stepTimes;
 
   const onAdvance = async () => {
-    if (activeJob.stage === 'complete') {
-      await completeJob();
-      return;
-    }
     await advanceStage();
   };
 
@@ -107,8 +73,8 @@ export function CurrentTripPanel() {
       </ScrollView>
 
       <Text style={styles.times}>
-        Accepted {fmtTime(st.acceptedAt)} · Arrived {fmtTime(st.arrivedAt)} · On board {fmtTime(st.onboardAt)}{' '}
-        · Done {fmtTime(st.completeAt)}
+        Accepted {fmtTime(st.acceptedAt)} · Arrived {fmtTime(st.arrivedAt)} · On board {fmtTime(st.onboardAt)} · Done{' '}
+        {fmtTime(st.completeAt)}
       </Text>
 
       <JobTypeBadge type={activeJob.type} />
@@ -124,16 +90,14 @@ export function CurrentTripPanel() {
         </Text>
       ) : null}
       <JobNotesSection job={activeJob} compact />
-      {runningMeter && meter ? (
-        <View style={styles.meterWrap}>
-          <MeterBreakdownView meter={meter} />
-          <Button title={meter.paused ? 'Resume' : 'Pause'} variant="secondary" onPress={pauseMeter} />
-        </View>
-      ) : null}
 
       <View style={styles.actions}>
-        <Button title={nextLabel} onPress={onAdvance} />
-        {activeJob.stage === 'pickup' || activeJob.stage === 'arrived' ? (
+        {meterRunning ? (
+          <Button title="End Trip" variant="danger" onPress={endTrip} />
+        ) : (
+          <Button title={nextLabel} onPress={onAdvance} />
+        )}
+        {!meterRunning && (activeJob.stage === 'pickup' || activeJob.stage === 'arrived') ? (
           <>
             <Button title="No Show" variant="secondary" onPress={noShowActiveJob} />
             <Button
@@ -148,7 +112,7 @@ export function CurrentTripPanel() {
             />
           </>
         ) : null}
-        {idx > 0 && idx < STAGES.length - 1 ? (
+        {!meterRunning && idx > 0 && idx < STAGES.length - 1 ? (
           <Button title="Recall" variant="secondary" onPress={recallJob} />
         ) : null}
       </View>
@@ -165,13 +129,7 @@ const styles = StyleSheet.create({
     maxHeight: 320,
   },
   title: { color: Colors.text, fontSize: 18, fontWeight: '800' },
-  meterBox: { marginTop: 6 },
-  modeBadge: { fontSize: 12, fontWeight: '800', alignSelf: 'flex-start', marginBottom: 4 },
-  modeMoving: { color: Colors.success },
-  modeWaiting: { color: Colors.warning },
-  modePaused: { color: Colors.textMuted },
-  meterFare: { color: Colors.success, fontSize: 28, fontWeight: '800' },
-  breakdown: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
+  pickupFrom: { color: Colors.text, fontSize: 15, fontWeight: '600', marginTop: 8, lineHeight: 20 },
   empty: { padding: 20, alignItems: 'center' },
   emptyText: { color: Colors.textMuted, fontSize: 15, textAlign: 'center' },
   emptySub: { color: Colors.textMuted, fontSize: 13, marginTop: 8, textAlign: 'center' },
@@ -183,7 +141,6 @@ const styles = StyleSheet.create({
   stageOn: { color: Colors.text, fontWeight: '700' },
   times: { color: Colors.textMuted, fontSize: 11, marginBottom: 8 },
   addr: { color: Colors.text, fontSize: 16, marginBottom: 6 },
-  meta: { color: Colors.textMuted, fontSize: 12 },
-  meterWrap: { marginTop: 6, gap: 8 },
+  meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
   actions: { gap: 8, marginTop: 10 },
 });
