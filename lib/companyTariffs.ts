@@ -5,18 +5,43 @@ import { Tariff } from '@/types';
 function parseTariffNode(id: string, val: unknown): Tariff | null {
   if (!val || typeof val !== 'object') return null;
   const t = val as Record<string, unknown>;
-  const name = String(t.name ?? t.label ?? id);
-  const flagFall = Number(t.flagFall ?? t.flagfall ?? t.base ?? NaN);
-  const ratePerKm = Number(t.ratePerKm ?? t.perKm ?? t.kmRate ?? NaN);
-  const waitingPerMin = Number(t.waitingPerMin ?? t.waitPerMin ?? t.waiting ?? NaN);
+  const name = String(t.name ?? t.label ?? t.TariffName ?? id);
+  const flagFall = Number(
+    t.flagFall ?? t.flagfall ?? t.base ?? t.baseFare ?? NaN,
+  );
+  const ratePerKm = Number(
+    t.ratePerKm ?? t.perKm ?? t.kmRate ?? t.pricePerKm ?? NaN,
+  );
+  const waitingPerMin = Number(
+    t.waitingPerMin ?? t.waitPerMin ?? t.waiting ?? t.waitingRate ?? NaN,
+  );
   if (Number.isNaN(flagFall) || Number.isNaN(ratePerKm)) return null;
-  return {
+  const out: Tariff = {
     id,
     name,
     flagFall,
     ratePerKm,
     waitingPerMin: Number.isNaN(waitingPerMin) ? 0 : waitingPerMin,
   };
+  if (t.nightEnabled) {
+    out.nightEnabled = true;
+    out.nightStart = String(t.nightStart ?? '22:00');
+    out.nightEnd = String(t.nightEnd ?? '06:00');
+    out.nightFlagFall = Number(t.nightFlagFall ?? t.nightBaseFare ?? flagFall);
+    out.nightRatePerKm = Number(t.nightRatePerKm ?? t.nightPricePerKm ?? ratePerKm);
+    out.nightWaitingPerMin = Number(
+      t.nightWaitingPerMin ?? t.nightWaitingRate ?? out.waitingPerMin,
+    );
+  }
+  if (t.weekendEnabled) {
+    out.weekendEnabled = true;
+    out.weekendMultiplier = Number(t.weekendMultiplier ?? 1.2);
+  }
+  if (t.holidayEnabled) {
+    out.holidayEnabled = true;
+    out.holidayMultiplier = Number(t.holidayMultiplier ?? 1.5);
+  }
+  return out;
 }
 
 /** Load tariffs from Firebase `tariffs/{companyId}` only. */

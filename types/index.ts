@@ -146,6 +146,16 @@ export interface Tariff {
   flagFall: number;
   ratePerKm: number;
   waitingPerMin: number;
+  nightEnabled?: boolean;
+  nightStart?: string;
+  nightEnd?: string;
+  nightFlagFall?: number;
+  nightRatePerKm?: number;
+  nightWaitingPerMin?: number;
+  weekendEnabled?: boolean;
+  weekendMultiplier?: number;
+  holidayEnabled?: boolean;
+  holidayMultiplier?: number;
 }
 
 export interface NztaHoursState {
