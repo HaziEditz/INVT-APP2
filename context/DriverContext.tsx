@@ -113,6 +113,7 @@ interface DriverContextValue {
   canReceiveJobOffers: boolean;
   goAway: () => Promise<void>;
   goAvailable: () => Promise<void>;
+  hasTripInProgress: boolean;
 }
 
 const DriverContext = createContext<DriverContextValue | null>(null);
@@ -212,6 +213,7 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
 type AwayIntent = 'none' | 'manual' | 'missed';
 
 const EMPTY_STEP_TIMES: JobStepTimes = {};
+const TRIP_BLOCK_MSG = 'Complete your current job first';
 
 function defaultActiveJob(offer: JobOffer): ActiveJob {
   const now = Date.now();
@@ -904,7 +906,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     console.log('[Shift] startShift complete — safe to navigate to tabs');
   };
 
+  const tripInProgress = () => hailActiveRef.current || !!activeJobIdRef.current;
+
+  const blockIfTripInProgress = () => {
+    if (!tripInProgress()) return false;
+    Alert.alert('Job in progress', TRIP_BLOCK_MSG);
+    return true;
+  };
+
   const goAway = async () => {
+    if (blockIfTripInProgress()) return;
     if (!driver || !shiftActive) return;
     const vehicleId = await resolveVehicleId();
     if (!vehicleId) return;
@@ -949,13 +960,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const endShift = async () => {
-    const vehicleId = await resolveVehicleId();
+  const endShiftLocal = () => {
     setShiftActive(false);
     shiftActiveRef.current = false;
     awayIntentRef.current = 'none';
-    await storeData(STORAGE_KEYS.shiftActive, false);
-    await storeData(STORAGE_KEYS.vehicleSessionReady, false);
+    void storeData(STORAGE_KEYS.shiftActive, false);
+    void storeData(STORAGE_KEYS.vehicleSessionReady, false);
     setReadyForJobs(false);
     readyForJobsRef.current = false;
     setPendingOffers([]);
@@ -968,39 +978,55 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setMeter(null);
     meterRef.current = null;
     storeData(STORAGE_KEYS.meterState, null).catch(() => undefined);
-
-    if (driver && vehicleId) {
-      try {
-        await writeOnlinePresence(driver, vehicleId, 'Offline');
-      } catch {
-        // non-fatal
-      }
-      try {
-        await clearOnlinePresence(driver, vehicleId);
-      } catch {
-        // non-fatal
-      }
-    }
-
     setPresenceStatus('Offline');
     setJobOffer(null);
     setQueuedOffers([]);
     setActiveJob(null);
     activeJobIdRef.current = null;
     setPaymentJob(null);
-    await storeData(STORAGE_KEYS.activeJob, null);
+    void storeData(STORAGE_KEYS.activeJob, null);
+  };
 
-    if (driver?.companyId && driver.uid) {
+  const endShiftRemote = async (
+    driverSnapshot: typeof driver,
+    vehicleId: string | null,
+  ) => {
+    if (driverSnapshot && vehicleId) {
+      try {
+        await writeOnlinePresence(driverSnapshot, vehicleId, 'Offline');
+      } catch {
+        // non-fatal
+      }
+      try {
+        await clearOnlinePresence(driverSnapshot, vehicleId);
+      } catch {
+        // non-fatal
+      }
+    }
+
+    if (driverSnapshot?.companyId && driverSnapshot.uid) {
       const { endShiftClock } = await import('@/services/nztaService');
-      await endShiftClock(driver.companyId, driver.uid, driver.id);
+      await endShiftClock(driverSnapshot.companyId, driverSnapshot.uid, driverSnapshot.id);
     }
     const { stopBackgroundTracking } = await import('@/services/locationService');
     await stopBackgroundTracking();
   };
 
+  const endShift = async () => {
+    if (blockIfTripInProgress()) return;
+    const vehicleId = await resolveVehicleId();
+    const driverSnapshot = driver;
+    endShiftLocal();
+    await endShiftRemote(driverSnapshot, vehicleId);
+  };
+
   const endShiftAndSignOut = async () => {
-    await endShift();
+    if (blockIfTripInProgress()) return;
+    const vehicleId = await resolveVehicleId();
+    const driverSnapshot = driver;
+    endShiftLocal();
     await signOut();
+    void endShiftRemote(driverSnapshot, vehicleId);
   };
 
   const acceptOffer = async () => {
@@ -1391,6 +1417,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       tariffChanges: snapshot?.tariffChanges ?? [],
       meterSnapshot: snapshot,
       source: 'hail',
+      expiresAt: now,
     };
 
     setPaymentJob(hailJob);
@@ -1560,6 +1587,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         canReceiveJobOffers,
         goAway,
         goAvailable,
+        hasTripInProgress: hailActive || !!activeJob,
       }}
     >
       {children}

@@ -1,4 +1,4 @@
-import type { MapCoord } from './JobMap.native';
+export type MapCoord = { latitude: number; longitude: number };
 
 export type JobMapProps = {
   pickup?: MapCoord;

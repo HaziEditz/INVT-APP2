@@ -101,18 +101,23 @@ export function tickMeterWithGps(
     }
   }
 
-  const speed = normalizeSpeed(speedMs);
-  const isMoving = speed > SPEED_MOVING_MS;
-  if (next.lastLat != null && next.lastLng != null && isMoving && !next.paused) {
-    const dM = haversineM(next.lastLat, next.lastLng, lat, lng);
-    if (dM > 2 && dM < 500) {
-      next.distanceKm += dM / 1000;
-    }
+  let distanceDeltaM = 0;
+  if (next.lastLat != null && next.lastLng != null) {
+    distanceDeltaM = haversineM(next.lastLat, next.lastLng, lat, lng);
   }
   next.lastLat = lat;
   next.lastLng = lng;
 
-  const tick = tickMeter(next, tariff, speedMs);
+  const speed = normalizeSpeed(speedMs);
+  const speedSaysMoving = speed > SPEED_MOVING_MS;
+  const movedEnough = distanceDeltaM > 1.5;
+
+  if (speedSaysMoving && movedEnough && !next.paused && distanceDeltaM > 2 && distanceDeltaM < 500) {
+    next.distanceKm += distanceDeltaM / 1000;
+  }
+
+  // Waiting time accrues whenever speed is at or below 5 km/h.
+  const tick = tickMeter(next, tariff, speedSaysMoving ? speed : 0);
   return { ...tick, autoUnpaused };
 }
 

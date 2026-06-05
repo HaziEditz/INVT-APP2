@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function formatZoneElapsed(ms: number): string {
@@ -15,7 +15,8 @@ function formatZoneElapsed(ms: number): string {
 /** Top bar: Available/Away | Zone | Queue | Time in zone */
 export function HomeStatusBar() {
   const insets = useSafeAreaInsets();
-  const { presenceStatus, shiftActive, togglePresence, zone, readyForJobs } = useDriver();
+  const { presenceStatus, shiftActive, togglePresence, zone, readyForJobs, hasTripInProgress } =
+    useDriver();
   const [zoneEnteredAt, setZoneEnteredAt] = useState<number | null>(null);
   const [, setTick] = useState(0);
   const lastZoneNameRef = useRef('');
@@ -56,7 +57,17 @@ export function HomeStatusBar() {
     <View style={[styles.bar, { paddingTop: insets.top + 6 }]}>
       <Pressable
         style={[styles.toggle, isAvailable ? styles.toggleOn : isAway ? styles.toggleAway : styles.toggleOff]}
-        onPress={shiftActive ? togglePresence : undefined}
+        onPress={
+          shiftActive
+            ? () => {
+                if (hasTripInProgress) {
+                  Alert.alert('Job in progress', 'Complete your current job first');
+                  return;
+                }
+                void togglePresence();
+              }
+            : undefined
+        }
         disabled={!shiftActive}
       >
         <Text style={styles.toggleText}>{toggleLabel}</Text>

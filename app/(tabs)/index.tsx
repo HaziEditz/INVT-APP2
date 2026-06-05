@@ -40,7 +40,6 @@ export default function MainScreen() {
     queuedOffers,
     offersBadgeCount,
     pauseMeter,
-    toggleWaitMeter,
     companyZones,
   } = useDriver();
 
@@ -117,9 +116,9 @@ export default function MainScreen() {
           <Text style={styles.expandIcon}>⛶</Text>
         </Pressable>
 
-        {meterRunning && meter && !mapExpanded ? (
+        {meterRunning && meter ? (
           <View style={styles.meterOverlayWrap} pointerEvents="box-none">
-            <MeterOverlay meter={meter} onPause={pauseMeter} onWait={toggleWaitMeter} />
+            <MeterOverlay meter={meter} onPause={pauseMeter} />
           </View>
         ) : null}
       </View>
@@ -167,7 +166,7 @@ export default function MainScreen() {
         onClose={() => setMapExpanded(false)}
         activeJob={activeJob}
         meter={meter}
-        showMeter={meterRunning}
+        showMeter={meterRunning && mapExpanded}
         showRoute={mapShowsRoute}
         showsUserLocation={shiftActive}
         zones={companyZones.map((z) => ({
@@ -176,7 +175,6 @@ export default function MainScreen() {
           boundary: z.boundary,
         }))}
         onPause={pauseMeter}
-        onWait={toggleWaitMeter}
       />
     </View>
   );
@@ -214,6 +212,8 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 10,
+    maxHeight: '20%',
+    justifyContent: 'flex-end',
   },
   bottomChrome: {
     flexShrink: 0,

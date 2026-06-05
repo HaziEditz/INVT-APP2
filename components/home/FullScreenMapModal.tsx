@@ -15,7 +15,6 @@ type Props = {
   showsUserLocation: boolean;
   zones?: Array<{ name: string; active?: boolean; boundary: number[][] }>;
   onPause: () => void;
-  onWait: () => void;
 };
 
 export function FullScreenMapModal({
@@ -28,7 +27,6 @@ export function FullScreenMapModal({
   showsUserLocation,
   zones,
   onPause,
-  onWait,
 }: Props) {
   const insets = useSafeAreaInsets();
 
@@ -53,7 +51,7 @@ export function FullScreenMapModal({
 
         {showMeter && meter ? (
           <View style={[styles.meterWrap, { paddingBottom: insets.bottom + 8 }]}>
-            <MeterOverlay meter={meter} onPause={onPause} onWait={onWait} />
+            <MeterOverlay meter={meter} onPause={onPause} />
           </View>
         ) : null}
       </View>

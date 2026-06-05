@@ -3,7 +3,7 @@ import { jobCoords } from '@/lib/geo';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import * as Location from 'expo-location';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { JobMapProps } from './JobMap.types';
 
@@ -24,13 +24,14 @@ export default function LeafletMap({
   const dropoff = jobCoords(dropoffLat, dropoffLng, pickup.latitude + 0.02, pickup.longitude + 0.02);
   const hasJobCoords = pickupLat != null && pickupLng != null;
 
-  const postPayload = useCallback(
-    (payload: LeafletMapPayload) => {
-      if (!webRef.current) return;
+  const pushToMap = useCallback((payload: LeafletMapPayload) => {
+    if (!webRef.current) return;
+    const json = JSON.stringify(payload).replace(/</g, '\\u003c');
+    webRef.current.injectJavaScript(`window.updateMap && window.updateMap(${json}); true;`);
+    if (Platform.OS === 'android') {
       webRef.current.postMessage(JSON.stringify(payload));
-    },
-    [],
-  );
+    }
+  }, []);
 
   const mapPayload = useMemo<LeafletMapPayload>(() => {
     const payload: LeafletMapPayload = {
@@ -108,35 +109,51 @@ export default function LeafletMap({
 
   useSafeEffect(() => {
     if (!ready) return;
-    postPayload(mapPayload);
-  }, [ready, mapPayload, postPayload], 'LeafletMap-sync');
+    pushToMap(mapPayload);
+  }, [ready, mapPayload, pushToMap], 'LeafletMap-sync');
 
   const html = useMemo(() => buildLeafletMapHtml(), []);
+
+  const handleLoadEnd = () => {
+    setReady(true);
+    webRef.current?.injectJavaScript(
+      'if(window.map){window.map.invalidateSize();}else if(window.initMap){window.initMap();} true;',
+    );
+    pushToMap(mapPayload);
+  };
 
   return (
     <View style={styles.wrap}>
       <WebView
         ref={webRef}
         originWhitelist={['*']}
-        source={{ html }}
+        source={{ html, baseUrl: 'https://localhost/' }}
         style={styles.webview}
         javaScriptEnabled
         domStorageEnabled
         scrollEnabled={false}
+        mixedContentMode="always"
+        allowsInlineMediaPlayback
+        setSupportMultipleWindows={false}
+        onLoadEnd={handleLoadEnd}
         onMessage={(event) => {
           try {
             const msg = JSON.parse(event.nativeEvent.data) as { type?: string };
-            if (msg.type === 'ready') setReady(true);
+            if (msg.type === 'ready') {
+              setReady(true);
+              pushToMap(mapPayload);
+            }
           } catch {
             // ignore
           }
         }}
+        onError={(e) => console.warn('[LeafletMap] WebView error:', e.nativeEvent)}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, width: '100%', minHeight: 120 },
-  webview: { flex: 1, backgroundColor: '#e8eef2' },
+  wrap: { flex: 1, width: '100%', minHeight: 160, backgroundColor: '#dbeafe' },
+  webview: { flex: 1, backgroundColor: '#dbeafe' },
 });

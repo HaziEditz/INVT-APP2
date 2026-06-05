@@ -55,6 +55,7 @@ export default function ProfileScreen() {
     vehicles,
     shiftActive,
     endShiftAndSignOut,
+    hasTripInProgress,
     refreshJobHistory,
     refreshVehicles,
   } = useDriver();
@@ -260,6 +261,10 @@ export default function ProfileScreen() {
         variant="danger"
         style={{ marginTop: 16 }}
         onPress={() => {
+          if (hasTripInProgress) {
+            Alert.alert('Job in progress', 'Complete your current job first');
+            return;
+          }
           Alert.alert(
             'End shift?',
             'Your shift will end, you will be signed out, and returned to the login screen.',
