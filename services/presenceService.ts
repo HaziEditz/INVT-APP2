@@ -174,9 +174,8 @@ export async function writeOnlinePresence(
   const authUser = await ensureAuthUserForRtdbWrite(`writeOnlinePresence → ${onlinePath}`);
   console.log('[Presence] writeOnlinePresence auth uid:', authUser.uid, 'status:', status);
 
-  const { lat, lng } = await getGps();
-  const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
   const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
+  const topStatus = status === 'Assigned' ? 'Picking' : status;
 
   try {
     await onDisconnect(presencePath).update({ lastSeen: Date.now() });
@@ -184,16 +183,32 @@ export async function writeOnlinePresence(
     console.warn('[Presence] onDisconnect failed (non-fatal):', err);
   }
 
+  const fastRecord = buildPresenceRecord(driver, vehicleId, status, 0, 0);
   if (resetZone) {
-    await set(presencePath, record);
+    await set(presencePath, fastRecord);
   } else {
-    await update(presencePath, record);
+    await update(presencePath, fastRecord);
   }
 
-  const topStatus = status === 'Assigned' ? 'Picking' : status;
   await update(ref(getDatabaseInstance(), onlinePath), {
     vehiclestatus: topStatus,
+    VehicleStatus: topStatus,
+    online: status !== 'Offline' && status !== 'Away',
+    updatedAt: Date.now(),
   });
+
+  void getGps()
+    .then(({ lat, lng }) => {
+      const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
+      return update(presencePath, {
+        ...record,
+        lat: lat || 0,
+        lng: lng || 0,
+        Lat: lat || 0,
+        Lng: lng || 0,
+      });
+    })
+    .catch((err) => console.warn('[Presence] GPS enrich failed:', err));
 }
 
 /** After missed offer — driver re-joins zone at end of queue. */

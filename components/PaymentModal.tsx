@@ -22,6 +22,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TM_PASSENGER_PAY_TYPES = ['Cash', 'Card', 'EFTPOS', 'Account', 'ACC'] as const;
 const HOIST_COUNTS = ['1', '2', '3', '4'] as const;
+const EXTRA_OPTIONS = [
+  { key: 'eftpos', label: 'EFTPOS Fee' },
+  { key: 'airport', label: 'Airport Fee' },
+  { key: 'bike', label: 'Bike Fee' },
+  { key: 'other', label: 'Other' },
+] as const;
+
+type ExtraKey = (typeof EXTRA_OPTIONS)[number]['key'];
+type PaymentStep = 1 | 2 | 3;
 
 type DropdownProps = {
   label: string;
@@ -90,12 +99,39 @@ function Field({
   );
 }
 
+function StepIndicator({ step }: { step: PaymentStep }) {
+  const steps = [
+    { n: 1, label: 'Select Payment' },
+    { n: 2, label: 'Enter Details' },
+    { n: 3, label: 'Confirm' },
+  ] as const;
+
+  return (
+    <View style={styles.stepRow}>
+      {steps.map((s, i) => (
+        <View key={s.n} style={styles.stepItem}>
+          <View style={[styles.stepDot, step >= s.n && styles.stepDotOn]}>
+            <Text style={[styles.stepDotText, step >= s.n && styles.stepDotTextOn]}>{s.n}</Text>
+          </View>
+          <Text style={[styles.stepLabel, step === s.n && styles.stepLabelOn]}>{s.label}</Text>
+          {i < steps.length - 1 ? (
+            <View style={[styles.stepLine, step > s.n && styles.stepLineOn]} />
+          ) : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export function PaymentModal() {
   const insets = useSafeAreaInsets();
   const { paymentJob, finalizePayment, tmConfig, activeVehicleBodyType } = useDriver();
+  const [paymentStep, setPaymentStep] = useState<PaymentStep>(1);
   const [paymentType, setPaymentType] = useState<string>('Cash');
   const [submitting, setSubmitting] = useState(false);
   const [scanTarget, setScanTarget] = useState<string | null>(null);
+  const [extrasSheetOpen, setExtrasSheetOpen] = useState(false);
+  const [editingExtra, setEditingExtra] = useState<ExtraKey | null>(null);
 
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
@@ -173,7 +209,24 @@ export function PaymentModal() {
 
   const totalDue = +(tripFare + extrasTotal).toFixed(2);
 
+  const extrasSummaryParts = useMemo(() => {
+    const parts: string[] = [];
+    if (extras.eftposSurcharge > 0) parts.push(`EFTPOS $${extras.eftposSurcharge.toFixed(2)}`);
+    if (extras.airportFee > 0) parts.push(`Airport $${extras.airportFee.toFixed(2)}`);
+    if (extras.bikeCarry > 0) parts.push(`Bike $${extras.bikeCarry.toFixed(2)}`);
+    if (extras.other > 0) {
+      const note = extras.otherNote ? ` (${extras.otherNote})` : '';
+      parts.push(`Other $${extras.other.toFixed(2)}${note}`);
+    }
+    return parts;
+  }, [extras]);
+
   if (!paymentJob) return null;
+
+  const goBack = () => {
+    if (paymentStep === 3) setPaymentStep(2);
+    else if (paymentStep === 2) setPaymentStep(1);
+  };
 
   const buildPaymentRecord = (): PaymentRecord => {
     const base: PaymentRecord = { paymentType, amount: totalDue };
@@ -239,10 +292,71 @@ export function PaymentModal() {
     setScanTarget(null);
   };
 
-  const renderPaymentForm = () => {
+  const closeExtrasSheet = () => {
+    setExtrasSheetOpen(false);
+    setEditingExtra(null);
+  };
+
+  const renderExtraEditor = () => {
+    if (!editingExtra) return null;
+    switch (editingExtra) {
+      case 'eftpos':
+        return (
+          <Field
+            label="EFTPOS Fee amount"
+            value={extraEftposFee}
+            onChangeText={setExtraEftposFee}
+            placeholder="0.00"
+            keyboardType="decimal-pad"
+          />
+        );
+      case 'airport':
+        return (
+          <Field
+            label="Airport Fee amount"
+            value={extraAirportFee}
+            onChangeText={setExtraAirportFee}
+            placeholder="0.00"
+            keyboardType="decimal-pad"
+          />
+        );
+      case 'bike':
+        return (
+          <Field
+            label="Bike Fee amount"
+            value={extraBikeCarryFee}
+            onChangeText={setExtraBikeCarryFee}
+            placeholder="0.00"
+            keyboardType="decimal-pad"
+          />
+        );
+      case 'other':
+        return (
+          <>
+            <Field
+              label="Description (optional)"
+              value={extraOtherNote}
+              onChangeText={setExtraOtherNote}
+              placeholder="e.g. Toll, luggage"
+            />
+            <Field
+              label="Other amount"
+              value={extraOtherAmount}
+              onChangeText={setExtraOtherAmount}
+              placeholder="0.00"
+              keyboardType="decimal-pad"
+            />
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderPaymentDetails = () => {
     switch (paymentType) {
       case 'Cash':
-        return <Button title={submitting ? 'Saving…' : 'Cash Payment'} onPress={onConfirm} disabled={submitting} />;
+        return <Text style={styles.stepHint}>No extra details needed for cash.</Text>;
       case 'Card':
         return (
           <View style={styles.formBlock}>
@@ -258,7 +372,6 @@ export function PaymentModal() {
             <Pressable style={styles.scanBtn} onPress={() => setScanTarget('card')}>
               <Text style={styles.scanBtnText}>Scan Card</Text>
             </Pressable>
-            <Button title={submitting ? 'Saving…' : 'Confirm Card Payment'} onPress={onConfirm} disabled={submitting} />
           </View>
         );
       case 'EFTPOS':
@@ -266,14 +379,12 @@ export function PaymentModal() {
           <View style={styles.formBlock}>
             <Text style={styles.formTitle}>EFTPOS Transaction</Text>
             <Field label="Transaction Reference (optional)" value={eftposRef} onChangeText={setEftposRef} placeholder="Ref #" />
-            <Button title={submitting ? 'Saving…' : 'Confirm EFTPOS Payment'} onPress={onConfirm} disabled={submitting} />
           </View>
         );
       case 'Account':
         return (
           <View style={styles.formBlock}>
             <Field label="Account Number" value={accountNumber} onChangeText={setAccountNumber} placeholder="Account #" keyboardType="number-pad" />
-            <Button title={submitting ? 'Saving…' : 'Confirm Account Payment'} onPress={onConfirm} disabled={submitting} />
           </View>
         );
       case 'ACC':
@@ -281,7 +392,6 @@ export function PaymentModal() {
           <View style={styles.formBlock}>
             <Field label="ACC Claim Number" value={accClaimNumber} onChangeText={setAccClaimNumber} placeholder="Claim #" />
             <Field label="Purchase Order Number" value={accPurchaseOrder} onChangeText={setAccPurchaseOrder} placeholder="PO #" />
-            <Button title={submitting ? 'Saving…' : 'Confirm ACC Payment'} onPress={onConfirm} disabled={submitting} />
           </View>
         );
       case 'Gift Card':
@@ -291,7 +401,6 @@ export function PaymentModal() {
             <Pressable style={styles.scanBtn} onPress={() => setScanTarget('gift')}>
               <Text style={styles.scanBtnText}>Scan Gift Card</Text>
             </Pressable>
-            <Button title={submitting ? 'Saving…' : 'Confirm Gift Card Payment'} onPress={onConfirm} disabled={submitting} />
           </View>
         );
       case 'TM':
@@ -372,99 +481,163 @@ export function PaymentModal() {
                 />
               </>
             ) : null}
-            <Button title={submitting ? 'Saving…' : 'Confirm TM Payment'} onPress={onConfirm} disabled={submitting} />
           </View>
         );
       default:
-        return <Button title={submitting ? 'Saving…' : 'Confirm Payment'} onPress={onConfirm} disabled={submitting} />;
+        return null;
     }
   };
+
+  const renderConfirmSummary = () => (
+    <View style={styles.confirmBlock}>
+      <View style={styles.fareRow}>
+        <Text style={styles.fareLabel}>Trip fare</Text>
+        <Text style={styles.fareVal}>${tripFare.toFixed(2)}</Text>
+      </View>
+      {extrasTotal > 0 ? (
+        <View style={styles.fareRow}>
+          <Text style={styles.fareLabel}>Extras</Text>
+          <Text style={styles.fareVal}>+${extrasTotal.toFixed(2)}</Text>
+        </View>
+      ) : null}
+      <View style={styles.tripTotalRow}>
+        <Text style={styles.tripTotalLabel}>TOTAL DUE</Text>
+        <Text style={styles.tripTotalVal}>${totalDue.toFixed(2)}</Text>
+      </View>
+      <Text style={styles.confirmPayType}>Payment: {paymentType}</Text>
+      {extrasSummaryParts.length > 0 ? (
+        <Text style={styles.confirmExtras}>Extras: {extrasSummaryParts.join(', ')}</Text>
+      ) : null}
+    </View>
+  );
 
   return (
     <Modal visible animationType="slide" statusBarTranslucent presentationStyle="fullScreen">
       <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View style={styles.header}>
+          {paymentStep > 1 ? (
+            <Pressable style={styles.backBtn} onPress={goBack}>
+              <Text style={styles.backBtnText}>← Back</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.backPlaceholder} />
+          )}
+          <Text style={styles.headerTitle}>Collect Payment</Text>
+          <View style={styles.backPlaceholder} />
+        </View>
+
+        <StepIndicator step={paymentStep} />
+
+        {paymentStep > 1 ? (
+          <View style={styles.payTypeBanner}>
+            <Text style={styles.payTypeBannerLabel}>Payment type</Text>
+            <Text style={styles.payTypeBannerValue}>{paymentType}</Text>
+          </View>
+        ) : null}
+
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.title}>Collect Payment</Text>
+          {paymentStep === 1 ? (
+            <>
+              <View style={styles.fareBlock}>
+                <View style={styles.fareRow}>
+                  <Text style={styles.fareLabel}>Base Charge</Text>
+                  <Text style={styles.fareVal}>${flagFall.toFixed(2)}</Text>
+                </View>
+                <View style={styles.fareRow}>
+                  <Text style={styles.fareLabel}>Ride Cost</Text>
+                  <Text style={styles.fareVal}>${distanceCharge.toFixed(2)}</Text>
+                </View>
+                <View style={styles.fareRow}>
+                  <Text style={styles.fareLabel}>Waiting Cost</Text>
+                  <Text style={styles.fareVal}>${waitingCharge.toFixed(2)}</Text>
+                </View>
+                <View style={styles.tripTotalRow}>
+                  <Text style={styles.tripTotalLabel}>TRIP TOTAL</Text>
+                  <Text style={styles.tripTotalVal}>${tripFare.toFixed(2)}</Text>
+                </View>
+              </View>
 
-          <View style={styles.fareBlock}>
-            <View style={styles.fareRow}>
-              <Text style={styles.fareLabel}>Base Charge</Text>
-              <Text style={styles.fareVal}>${flagFall.toFixed(2)}</Text>
-            </View>
-            <View style={styles.fareRow}>
-              <Text style={styles.fareLabel}>Ride Cost</Text>
-              <Text style={styles.fareVal}>${distanceCharge.toFixed(2)}</Text>
-            </View>
-            <View style={styles.fareRow}>
-              <Text style={styles.fareLabel}>Waiting Cost</Text>
-              <Text style={styles.fareVal}>${waitingCharge.toFixed(2)}</Text>
-            </View>
-            <View style={styles.tripTotalRow}>
-              <Text style={styles.tripTotalLabel}>TRIP TOTAL</Text>
-              <Text style={styles.tripTotalVal}>${tripFare.toFixed(2)}</Text>
-            </View>
-          </View>
+              <Pressable style={styles.extrasBtn} onPress={() => setExtrasSheetOpen(true)}>
+                <Text style={styles.extrasBtnText}>Extra Charges</Text>
+                <Text style={styles.extrasBtnCaret}>›</Text>
+              </Pressable>
+              {extrasSummaryParts.length > 0 ? (
+                <Text style={styles.extrasSummary}>
+                  {extrasSummaryParts.join(' · ')} (+${extrasTotal.toFixed(2)})
+                </Text>
+              ) : null}
 
-          <View style={styles.extrasBlock}>
-            <Text style={styles.extrasTitle}>Extra Charges</Text>
-            <Field
-              label="EFTPOS fee (optional)"
-              value={extraEftposFee}
-              onChangeText={setExtraEftposFee}
-              placeholder="0.00"
-              keyboardType="decimal-pad"
-            />
-            <Field
-              label="Airport fee (optional)"
-              value={extraAirportFee}
-              onChangeText={setExtraAirportFee}
-              placeholder="0.00"
-              keyboardType="decimal-pad"
-            />
-            <Field
-              label="Bike carry fee (optional)"
-              value={extraBikeCarryFee}
-              onChangeText={setExtraBikeCarryFee}
-              placeholder="0.00"
-              keyboardType="decimal-pad"
-            />
-            <Field
-              label="Other description (optional)"
-              value={extraOtherNote}
-              onChangeText={setExtraOtherNote}
-              placeholder="e.g. Toll, luggage"
-            />
-            <Field
-              label="Other amount (optional)"
-              value={extraOtherAmount}
-              onChangeText={setExtraOtherAmount}
-              placeholder="0.00"
-              keyboardType="decimal-pad"
-            />
-            {extrasTotal > 0 ? (
-              <Text style={styles.extrasSubtotal}>Extras +${extrasTotal.toFixed(2)}</Text>
-            ) : null}
-          </View>
+              <View style={styles.totalDueBlock}>
+                <Text style={styles.totalDueLabel}>Total Due</Text>
+                <Text style={styles.totalDueVal}>${totalDue.toFixed(2)}</Text>
+              </View>
 
-          <View style={styles.totalDueBlock}>
-            <Text style={styles.totalDueLabel}>Total Due</Text>
-            <Text style={styles.totalDueVal}>${totalDue.toFixed(2)}</Text>
-          </View>
+              <Dropdown
+                label="Payment Type"
+                value={paymentType}
+                options={DRIVER_PAYMENT_TYPES}
+                onChange={setPaymentType}
+              />
 
-          <Dropdown
-            label="Payment Type"
-            value={paymentType}
-            options={DRIVER_PAYMENT_TYPES}
-            onChange={setPaymentType}
-          />
+              <Button title="Continue to Details" onPress={() => setPaymentStep(2)} />
+            </>
+          ) : null}
 
-          {renderPaymentForm()}
+          {paymentStep === 2 ? (
+            <>
+              <Text style={styles.stepSectionTitle}>Enter payment details</Text>
+              {renderPaymentDetails()}
+              <Button title="Continue to Confirm" onPress={() => setPaymentStep(3)} />
+            </>
+          ) : null}
+
+          {paymentStep === 3 ? (
+            <>
+              <Text style={styles.stepSectionTitle}>Review and confirm</Text>
+              {renderConfirmSummary()}
+              <Button
+                title={submitting ? 'Saving…' : `Confirm ${paymentType} Payment`}
+                onPress={onConfirm}
+                disabled={submitting}
+              />
+            </>
+          ) : null}
         </ScrollView>
+
+        <Modal visible={extrasSheetOpen} transparent animationType="slide">
+          <Pressable style={styles.sheetBackdrop} onPress={closeExtrasSheet}>
+            <Pressable style={styles.sheetPanel} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.sheetTitle}>Extra Charges</Text>
+              {!editingExtra ? (
+                <View style={styles.sheetOptions}>
+                  {EXTRA_OPTIONS.map((opt) => (
+                    <Pressable
+                      key={opt.key}
+                      style={styles.sheetOption}
+                      onPress={() => setEditingExtra(opt.key)}
+                    >
+                      <Text style={styles.sheetOptionText}>{opt.label}</Text>
+                      <Text style={styles.sheetOptionCaret}>›</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.sheetEditor}>
+                  <Pressable style={styles.sheetBackLink} onPress={() => setEditingExtra(null)}>
+                    <Text style={styles.sheetBackLinkText}>← All extras</Text>
+                  </Pressable>
+                  {renderExtraEditor()}
+                </View>
+              )}
+              <Button title="Done" onPress={closeExtrasSheet} />
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         <ScanCardModal
           visible={scanTarget !== null}
@@ -485,16 +658,72 @@ export function PaymentModal() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  backBtn: { minWidth: 72, paddingVertical: 8 },
+  backBtnText: { color: Colors.accent, fontSize: 16, fontWeight: '800' },
+  backPlaceholder: { minWidth: 72 },
+  headerTitle: { color: Colors.text, fontSize: 18, fontWeight: '800' },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginBottom: 4,
+  },
+  stepItem: { flex: 1, alignItems: 'center', position: 'relative' },
+  stepDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepDotOn: { borderColor: Colors.accent, backgroundColor: Colors.accent + '22' },
+  stepDotText: { color: Colors.textMuted, fontSize: 13, fontWeight: '800' },
+  stepDotTextOn: { color: Colors.accent },
+  stepLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: '600', marginTop: 6, textAlign: 'center' },
+  stepLabelOn: { color: Colors.text, fontWeight: '800' },
+  stepLine: {
+    position: 'absolute',
+    top: 14,
+    left: '55%',
+    right: '-45%',
+    height: 2,
+    backgroundColor: Colors.border,
+    zIndex: -1,
+  },
+  stepLineOn: { backgroundColor: Colors.accent },
+  payTypeBanner: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    backgroundColor: Colors.accent + '18',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.accent + '44',
+    alignItems: 'center',
+  },
+  payTypeBannerLabel: { color: Colors.textMuted, fontSize: 13, fontWeight: '600' },
+  payTypeBannerValue: { color: Colors.text, fontSize: 32, fontWeight: '900', marginTop: 4 },
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32 },
-  title: { color: Colors.text, fontSize: 26, fontWeight: '900', marginBottom: 20 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 32, gap: 16 },
   fareBlock: {
     backgroundColor: Colors.surface,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
     borderColor: Colors.border,
-    marginBottom: 20,
   },
   fareRow: {
     flexDirection: 'row',
@@ -515,7 +744,21 @@ const styles = StyleSheet.create({
   },
   tripTotalLabel: { color: Colors.text, fontSize: 18, fontWeight: '800' },
   tripTotalVal: { color: Colors.success, fontSize: 28, fontWeight: '900' },
-  dropdownWrap: { marginBottom: 16, zIndex: 10 },
+  extrasBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  extrasBtnText: { color: Colors.text, fontSize: 17, fontWeight: '800' },
+  extrasBtnCaret: { color: Colors.textMuted, fontSize: 22, fontWeight: '300' },
+  extrasSummary: { color: Colors.textMuted, fontSize: 14, fontWeight: '600', marginTop: -8 },
+  dropdownWrap: { zIndex: 10 },
   dropdownLabel: { color: Colors.text, fontSize: 16, fontWeight: '800', marginBottom: 8 },
   dropdownBtn: {
     flexDirection: 'row',
@@ -543,8 +786,10 @@ const styles = StyleSheet.create({
   dropdownItemOn: { backgroundColor: Colors.accent + '22' },
   dropdownItemText: { color: Colors.text, fontSize: 17 },
   dropdownItemTextOn: { color: Colors.accent, fontWeight: '700' },
-  formBlock: { gap: 12, marginTop: 4 },
+  formBlock: { gap: 12 },
   formTitle: { color: Colors.text, fontSize: 16, fontWeight: '800' },
+  stepSectionTitle: { color: Colors.text, fontSize: 20, fontWeight: '900' },
+  stepHint: { color: Colors.textMuted, fontSize: 15, fontWeight: '600' },
   field: { gap: 6 },
   fieldLabel: { color: Colors.textMuted, fontSize: 14, fontWeight: '600' },
   fieldInput: {
@@ -580,17 +825,6 @@ const styles = StyleSheet.create({
   tmLine: { color: Colors.text, fontSize: 16, fontWeight: '700' },
   tmSubLine: { color: Colors.textMuted, fontSize: 14, fontWeight: '600' },
   hoistLine: { color: Colors.text, fontSize: 15, fontWeight: '600', lineHeight: 22 },
-  extrasBlock: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    marginBottom: 16,
-    gap: 10,
-  },
-  extrasTitle: { color: Colors.text, fontSize: 16, fontWeight: '800', marginBottom: 4 },
-  extrasSubtotal: { color: Colors.textMuted, fontSize: 14, fontWeight: '600', marginTop: 4 },
   totalDueBlock: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -600,8 +834,48 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: Colors.border,
-    marginBottom: 20,
   },
   totalDueLabel: { color: Colors.text, fontSize: 20, fontWeight: '800' },
   totalDueVal: { color: Colors.success, fontSize: 30, fontWeight: '900' },
+  confirmBlock: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 8,
+  },
+  confirmPayType: { color: Colors.text, fontSize: 18, fontWeight: '800', marginTop: 8 },
+  confirmExtras: { color: Colors.textMuted, fontSize: 14, fontWeight: '600' },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  sheetPanel: {
+    backgroundColor: Colors.surfaceElevated,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    paddingBottom: 28,
+    gap: 16,
+  },
+  sheetTitle: { color: Colors.text, fontSize: 20, fontWeight: '900' },
+  sheetOptions: { gap: 8 },
+  sheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  sheetOptionText: { color: Colors.text, fontSize: 17, fontWeight: '700' },
+  sheetOptionCaret: { color: Colors.textMuted, fontSize: 20 },
+  sheetEditor: { gap: 12 },
+  sheetBackLink: { alignSelf: 'flex-start' },
+  sheetBackLinkText: { color: Colors.accent, fontSize: 15, fontWeight: '700' },
 });

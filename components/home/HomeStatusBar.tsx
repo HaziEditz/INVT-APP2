@@ -44,10 +44,8 @@ export function HomeStatusBar() {
   }, [shiftActive, zoneEnteredAt]);
 
   const zoneName = shiftActive ? zone.name?.trim() || '—' : '—';
-  const queueLabel =
-    shiftActive && zone.position > 0
-      ? `#${zone.position}`
-      : '—';
+  const inZone = Boolean(shiftActive && readyForJobs && zone.name?.trim());
+  const queueLabel = inZone ? `#${zone.position > 0 ? zone.position : 1}` : '—';
   const timeInZone =
     shiftActive && zoneEnteredAt ? formatZoneElapsed(Date.now() - zoneEnteredAt) : '—';
 

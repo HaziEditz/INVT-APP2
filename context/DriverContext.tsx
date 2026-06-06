@@ -26,6 +26,7 @@ import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { completeJobPayment } from '@/lib/dispatchApi';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
+import { computeZoneQueueFromOnline } from '@/lib/zoneQueue';
 import { reverseGeocodeCurrentAddress, getCurrentCoords } from '@/services/locationService';
 import * as Location from 'expo-location';
 import {
@@ -136,17 +137,6 @@ const EMPTY_ZONE: ZoneInfo = {
   totalInQueue: 0,
   nearbyDrivers: 0,
 };
-
-function parseZoneNode(val: unknown): ZoneInfo {
-  if (!val || typeof val !== 'object') return EMPTY_ZONE;
-  const z = val as Record<string, unknown>;
-  return {
-    name: String(z.name ?? z.zonename ?? z.zoneName ?? z.ZoneName ?? '').trim(),
-    position: Number(z.position ?? z.queue ?? z.zonequeue ?? z.zoneQueue ?? 0),
-    totalInQueue: Number(z.totalInQueue ?? z.total ?? z.queueSize ?? 0),
-    nearbyDrivers: Number(z.nearbyDrivers ?? z.nearby ?? 0),
-  };
-}
 
 function fmtNzDate(d: Date) {
   return d.toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -284,6 +274,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const meterStopRef = useRef<(() => void) | null>(null);
   const paymentJobRef = useRef(false);
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
+  const currentZoneNameRef = useRef('');
+  const onlineSnapshotRef = useRef<unknown>(null);
 
   useSafeEffect(() => {
     shiftActiveRef.current = shiftActive;
@@ -527,35 +519,25 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
+      currentZoneNameRef.current = '';
       setZone(EMPTY_ZONE);
       return;
     }
     try {
-      const zoneRef = ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/zone`);
-      return onValue(zoneRef, (snap) => {
+      const onlineRef = ref(getDatabaseInstance(), `online/${driver.companyId}`);
+      return onValue(onlineRef, (snap) => {
         try {
-          if (snap.exists()) {
-            const parsed = parseZoneNode(snap.val());
-            setZone((prev) => ({
-              ...parsed,
-              name: prev.name || parsed.name,
-            }));
-            return;
-          }
-          get(ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/current`))
-            .then((cur) => {
-              if (!cur.exists()) return;
-              const d = cur.val() as Record<string, unknown>;
-              setZone((prev) => ({
-                name: prev.name || String(d.zonename ?? d.zoneName ?? '').trim(),
-                position: Number(d.zonequeue ?? d.zoneQueue ?? prev.position ?? 0),
-                totalInQueue: prev.totalInQueue ?? 0,
-                nearbyDrivers: prev.nearbyDrivers ?? 0,
-              }));
-            })
-            .catch((err) => console.error('[Driver] zone fallback read', err));
+          onlineSnapshotRef.current = snap.val();
+          const zoneName = currentZoneNameRef.current.trim();
+          const queue = computeZoneQueueFromOnline(onlineSnapshotRef.current, selectedVehicleId, zoneName);
+          setZone((prev) => ({
+            ...prev,
+            name: zoneName || prev.name,
+            position: zoneName && readyForJobsRef.current ? queue.position : 0,
+            totalInQueue: zoneName ? queue.totalInQueue : 0,
+          }));
         } catch (err) {
-          console.error('[Driver] zone listener', err);
+          console.error('[Driver] zone queue listener', err);
         }
       });
     } catch (err) {
@@ -570,10 +552,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const applyZoneFromCoords = (lat: number, lng: number) => {
       const hit = findZoneAtCoords(lat, lng, companyZonesRef.current);
+      const name = hit?.name?.trim() ?? '';
+      currentZoneNameRef.current = name;
+      const queue = computeZoneQueueFromOnline(onlineSnapshotRef.current, selectedVehicleId, name);
       setZone((prev) => ({
         ...prev,
-        name: hit?.name ?? (prev.name || ''),
+        name: name || prev.name || '',
+        position: name && readyForJobsRef.current ? queue.position : 0,
+        totalInQueue: name ? queue.totalInQueue : 0,
       }));
+      if (name && driver?.companyId && selectedVehicleId) {
+        update(ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/current`), {
+          zonename: name,
+          zoneName: name,
+          lastSeen: Date.now(),
+        }).catch((err) => console.warn('[Driver] zone name sync failed:', err));
+      }
     };
 
     void (async () => {
@@ -595,7 +589,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       sub?.remove();
     };
-  }, [shiftActive, driver?.companyId, companyZones.length], 'Driver-gpsZone');
+  }, [shiftActive, driver?.companyId, selectedVehicleId, companyZones.length], 'Driver-gpsZone');
 
   useSafeEffect(() => {
     if (!isFirebaseReady || !driver?.companyId || !selectedVehicleId) {
@@ -970,28 +964,42 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const goAway = async () => {
     if (blockIfTripInProgress()) return;
     if (!driver || !shiftActive) return;
-    const vehicleId = await resolveVehicleId();
-    if (!vehicleId) return;
     awayIntentRef.current = 'manual';
-    await writeOnlinePresence(driver, vehicleId, 'Away');
     setPresenceStatus('Away');
     setReadyForJobs(false);
     readyForJobsRef.current = false;
+    setZone((prev) => ({ ...prev, position: 0 }));
+    const vehicleId = await resolveVehicleId();
+    if (!vehicleId) return;
+    void writeOnlinePresence(driver, vehicleId, 'Away').catch((err) =>
+      console.warn('[Driver] goAway presence write failed:', err),
+    );
   };
 
   const goAvailable = async () => {
     if (!driver || !shiftActive) return;
-    const vehicleId = await resolveVehicleId();
-    if (!vehicleId) return;
     const wasMissed = awayIntentRef.current === 'missed';
     awayIntentRef.current = 'none';
-    await writeOnlinePresence(driver, vehicleId, 'Available');
-    if (wasMissed) {
-      await moveDriverToEndOfQueue(driver, vehicleId);
-    }
     setPresenceStatus('Online');
     setReadyForJobs(true);
     readyForJobsRef.current = true;
+    const zoneName = currentZoneNameRef.current.trim();
+    if (zoneName) {
+      const queue = computeZoneQueueFromOnline(onlineSnapshotRef.current, selectedVehicleId, zoneName);
+      setZone((prev) => ({
+        ...prev,
+        position: queue.position,
+        totalInQueue: queue.totalInQueue,
+      }));
+    }
+    const vehicleId = await resolveVehicleId();
+    if (!vehicleId) return;
+    void writeOnlinePresence(driver, vehicleId, 'Available')
+      .then(() => {
+        if (wasMissed) return moveDriverToEndOfQueue(driver, vehicleId);
+        return undefined;
+      })
+      .catch((err) => console.warn('[Driver] goAvailable presence write failed:', err));
   };
 
   const setAwayAfterMissedOffer = async () => {
