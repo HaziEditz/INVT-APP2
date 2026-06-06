@@ -20,16 +20,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const EMPTY_EXTRAS: PaymentExtras = {
-  bikeCarry: 0,
-  airportFee: 0,
-  eftposSurcharge: 0,
-  tolls: 0,
-  other: 0,
-  otherNote: '',
-};
-
-const TM_PASSENGER_PAY_TYPES = ['Cash', 'Card', 'EFTPOS'] as const;
+const TM_PASSENGER_PAY_TYPES = ['Cash', 'Card', 'EFTPOS', 'Account', 'ACC'] as const;
 const HOIST_COUNTS = ['1', '2', '3', '4'] as const;
 
 type DropdownProps = {
@@ -123,6 +114,15 @@ export function PaymentModal() {
   const [tmPassengerCardExpiry, setTmPassengerCardExpiry] = useState('');
   const [tmPassengerCardCvc, setTmPassengerCardCvc] = useState('');
   const [tmPassengerEftposRef, setTmPassengerEftposRef] = useState('');
+  const [tmPassengerAccountNumber, setTmPassengerAccountNumber] = useState('');
+  const [tmPassengerAccClaimNumber, setTmPassengerAccClaimNumber] = useState('');
+  const [tmPassengerAccPurchaseOrder, setTmPassengerAccPurchaseOrder] = useState('');
+
+  const [extraEftposFee, setExtraEftposFee] = useState('');
+  const [extraAirportFee, setExtraAirportFee] = useState('');
+  const [extraBikeCarryFee, setExtraBikeCarryFee] = useState('');
+  const [extraOtherAmount, setExtraOtherAmount] = useState('');
+  const [extraOtherNote, setExtraOtherNote] = useState('');
 
   const meter = paymentJob?.meterSnapshot;
   const breakdown = meter?.breakdown;
@@ -147,10 +147,36 @@ export function PaymentModal() {
     };
   }, [tripFare, tmConfig, tmHoistCount, isWav]);
 
+  const extras: PaymentExtras = useMemo(
+    () => ({
+      eftposSurcharge: parseFloat(extraEftposFee) || 0,
+      airportFee: parseFloat(extraAirportFee) || 0,
+      bikeCarry: parseFloat(extraBikeCarryFee) || 0,
+      tolls: 0,
+      other: parseFloat(extraOtherAmount) || 0,
+      otherNote: extraOtherNote.trim() || undefined,
+    }),
+    [extraEftposFee, extraAirportFee, extraBikeCarryFee, extraOtherAmount, extraOtherNote],
+  );
+
+  const extrasTotal = useMemo(
+    () =>
+      +(
+        extras.eftposSurcharge +
+        extras.airportFee +
+        extras.bikeCarry +
+        extras.tolls +
+        extras.other
+      ).toFixed(2),
+    [extras],
+  );
+
+  const totalDue = +(tripFare + extrasTotal).toFixed(2);
+
   if (!paymentJob) return null;
 
   const buildPaymentRecord = (): PaymentRecord => {
-    const base: PaymentRecord = { paymentType, amount: tripFare };
+    const base: PaymentRecord = { paymentType, amount: totalDue };
     switch (paymentType) {
       case 'Card':
         return { ...base, cardNumber, cardExpiry, cardCvc };
@@ -184,6 +210,12 @@ export function PaymentModal() {
           tmPassengerCardCvc: tmPassengerPayType === 'Card' ? tmPassengerCardCvc : undefined,
           tmPassengerEftposRef:
             tmPassengerPayType === 'EFTPOS' ? tmPassengerEftposRef : undefined,
+          tmPassengerAccountNumber:
+            tmPassengerPayType === 'Account' ? tmPassengerAccountNumber : undefined,
+          tmPassengerAccClaimNumber:
+            tmPassengerPayType === 'ACC' ? tmPassengerAccClaimNumber : undefined,
+          tmPassengerAccPurchaseOrder:
+            tmPassengerPayType === 'ACC' ? tmPassengerAccPurchaseOrder : undefined,
         };
       default:
         return base;
@@ -194,7 +226,7 @@ export function PaymentModal() {
     setSubmitting(true);
     try {
       const record = buildPaymentRecord();
-      await finalizePayment(paymentType, EMPTY_EXTRAS, tripFare, record);
+      await finalizePayment(paymentType, extras, totalDue, record);
     } finally {
       setSubmitting(false);
     }
@@ -315,6 +347,31 @@ export function PaymentModal() {
             {tmPassengerPayType === 'EFTPOS' ? (
               <Field label="EFTPOS Reference (optional)" value={tmPassengerEftposRef} onChangeText={setTmPassengerEftposRef} />
             ) : null}
+            {tmPassengerPayType === 'Account' ? (
+              <Field
+                label="Passenger Account Number"
+                value={tmPassengerAccountNumber}
+                onChangeText={setTmPassengerAccountNumber}
+                placeholder="Account #"
+                keyboardType="number-pad"
+              />
+            ) : null}
+            {tmPassengerPayType === 'ACC' ? (
+              <>
+                <Field
+                  label="ACC Claim Number"
+                  value={tmPassengerAccClaimNumber}
+                  onChangeText={setTmPassengerAccClaimNumber}
+                  placeholder="Claim #"
+                />
+                <Field
+                  label="Purchase Order Number"
+                  value={tmPassengerAccPurchaseOrder}
+                  onChangeText={setTmPassengerAccPurchaseOrder}
+                  placeholder="PO #"
+                />
+              </>
+            ) : null}
             <Button title={submitting ? 'Saving…' : 'Confirm TM Payment'} onPress={onConfirm} disabled={submitting} />
           </View>
         );
@@ -351,6 +408,52 @@ export function PaymentModal() {
               <Text style={styles.tripTotalLabel}>TRIP TOTAL</Text>
               <Text style={styles.tripTotalVal}>${tripFare.toFixed(2)}</Text>
             </View>
+          </View>
+
+          <View style={styles.extrasBlock}>
+            <Text style={styles.extrasTitle}>Extra Charges</Text>
+            <Field
+              label="EFTPOS fee (optional)"
+              value={extraEftposFee}
+              onChangeText={setExtraEftposFee}
+              placeholder="0.00"
+              keyboardType="decimal-pad"
+            />
+            <Field
+              label="Airport fee (optional)"
+              value={extraAirportFee}
+              onChangeText={setExtraAirportFee}
+              placeholder="0.00"
+              keyboardType="decimal-pad"
+            />
+            <Field
+              label="Bike carry fee (optional)"
+              value={extraBikeCarryFee}
+              onChangeText={setExtraBikeCarryFee}
+              placeholder="0.00"
+              keyboardType="decimal-pad"
+            />
+            <Field
+              label="Other description (optional)"
+              value={extraOtherNote}
+              onChangeText={setExtraOtherNote}
+              placeholder="e.g. Toll, luggage"
+            />
+            <Field
+              label="Other amount (optional)"
+              value={extraOtherAmount}
+              onChangeText={setExtraOtherAmount}
+              placeholder="0.00"
+              keyboardType="decimal-pad"
+            />
+            {extrasTotal > 0 ? (
+              <Text style={styles.extrasSubtotal}>Extras +${extrasTotal.toFixed(2)}</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.totalDueBlock}>
+            <Text style={styles.totalDueLabel}>Total Due</Text>
+            <Text style={styles.totalDueVal}>${totalDue.toFixed(2)}</Text>
           </View>
 
           <Dropdown
@@ -477,4 +580,28 @@ const styles = StyleSheet.create({
   tmLine: { color: Colors.text, fontSize: 16, fontWeight: '700' },
   tmSubLine: { color: Colors.textMuted, fontSize: 14, fontWeight: '600' },
   hoistLine: { color: Colors.text, fontSize: 15, fontWeight: '600', lineHeight: 22 },
+  extrasBlock: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 16,
+    gap: 10,
+  },
+  extrasTitle: { color: Colors.text, fontSize: 16, fontWeight: '800', marginBottom: 4 },
+  extrasSubtotal: { color: Colors.textMuted, fontSize: 14, fontWeight: '600', marginTop: 4 },
+  totalDueBlock: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 20,
+  },
+  totalDueLabel: { color: Colors.text, fontSize: 20, fontWeight: '800' },
+  totalDueVal: { color: Colors.success, fontSize: 30, fontWeight: '900' },
 });

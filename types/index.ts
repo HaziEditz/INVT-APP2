@@ -283,6 +283,9 @@ export interface PaymentRecord {
   tmPassengerCardExpiry?: string;
   tmPassengerCardCvc?: string;
   tmPassengerEftposRef?: string;
+  tmPassengerAccountNumber?: string;
+  tmPassengerAccClaimNumber?: string;
+  tmPassengerAccPurchaseOrder?: string;
 }
 
 export interface PaymentExtras {
