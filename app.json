@@ -70,6 +70,12 @@
           "icon": "./assets/images/icon.png",
           "color": "#1a73e8"
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BookaWaka Driver needs camera access to scan payment cards."
+        }
       ]
     ],
     "experiments": {

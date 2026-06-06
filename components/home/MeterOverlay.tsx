@@ -42,9 +42,10 @@ export function MeterOverlay({ meter, onPause }: Props) {
   return (
     <View style={styles.box}>
       <Text style={styles.time}>{formatClock(tripMs)}</Text>
+      <Text style={styles.km}>{meter.distanceKm.toFixed(2)} km</Text>
 
       {isMoving ? (
-        <Text style={styles.modeStat}>Moving: {meter.distanceKm.toFixed(1)} km</Text>
+        <Text style={styles.modeStat}>Moving</Text>
       ) : (
         <Text style={styles.modeStat}>Waiting: ${waitingCost.toFixed(2)}</Text>
       )}
@@ -69,7 +70,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
-    maxHeight: 110,
+    maxHeight: 120,
   },
   time: {
     color: Colors.text,
@@ -77,9 +78,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 22,
   },
+  km: {
+    color: Colors.accent,
+    fontSize: 15,
+    fontWeight: '800',
+    marginTop: 2,
+  },
   modeStat: {
     color: Colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     marginTop: 2,
   },

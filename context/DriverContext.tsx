@@ -40,7 +40,7 @@ import {
   NO_TARIFF_CONFIGURED,
   tariffToSnapshot,
 } from '@/lib/tariffs';
-import { JobStepTimes, PaymentExtras, TariffChangeRecord } from '@/types';
+import { JobStepTimes, PaymentExtras, PaymentRecord, TariffChangeRecord } from '@/types';
 import {
   ActiveJob,
   CompanyInfo,
@@ -100,7 +100,12 @@ interface DriverContextValue {
   advanceStage: () => Promise<void>;
   setPaymentType: (payment: PaymentType) => void;
   completeJob: () => Promise<void>;
-  finalizePayment: (paymentType: string, extras: PaymentExtras, totalFare: number) => Promise<void>;
+  finalizePayment: (
+    paymentType: string,
+    extras: PaymentExtras,
+    totalFare: number,
+    paymentDetails?: PaymentRecord,
+  ) => Promise<void>;
   dismissPayment: () => void;
   cancelActiveJob: () => Promise<void>;
   noShowActiveJob: () => Promise<void>;
@@ -1244,6 +1249,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     paymentType: string,
     extras: PaymentExtras,
     totalFare: number,
+    paymentDetails?: PaymentRecord,
   ) => {
     const job = paymentJob ?? activeJob;
     if (!job || !driver?.companyId) return;
@@ -1265,7 +1271,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const completedAt = Date.now();
 
     try {
-      await writeClosedJob(driver.companyId, driver.id, closed, paymentType, extras, totalFare);
+      await writeClosedJob(
+        driver.companyId,
+        driver.id,
+        closed,
+        paymentType,
+        extras,
+        totalFare,
+        paymentDetails ?? { paymentType, amount: totalFare },
+      );
     } catch (err) {
       console.warn('[Driver] writeClosedJob failed:', err);
     }
@@ -1304,6 +1318,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setCompletedJobs((prev) => [done, ...prev]);
     setActiveJob(null);
     setPaymentJob(null);
+    paymentJobRef.current = false;
     setHailActive(false);
     hailActiveRef.current = false;
     setHailPickupAddress(null);
@@ -1413,20 +1428,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setHailActive(true);
     hailActiveRef.current = true;
 
-    try {
-      const geo = await reverseGeocodeCurrentAddress();
-      setHailPickupAddress(geo.address);
-      setHailPickupLat(geo.lat);
-      setHailPickupLng(geo.lng);
-    } catch {
-      setHailPickupAddress('Current location (address unavailable)');
-    }
-
     const m = createInitialMeter(selectedTariff);
     setMeter(m);
     meterRef.current = m;
     storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
     startMeterWatch();
+
+    void (async () => {
+      try {
+        const geo = await reverseGeocodeCurrentAddress();
+        setHailPickupAddress(geo.address);
+        setHailPickupLat(geo.lat);
+        setHailPickupLng(geo.lng);
+      } catch {
+        setHailPickupAddress('Current location (address unavailable)');
+      }
+    })();
   };
 
   const endHail = async () => {

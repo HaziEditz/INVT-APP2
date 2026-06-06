@@ -249,11 +249,38 @@ export const DRIVER_PAYMENT_TYPES = [
   'Card',
   'EFTPOS',
   'Account',
-  'TM',
   'ACC',
+  'Gift Card',
+  'TM',
 ] as const;
 
 export type DriverPaymentType = (typeof DRIVER_PAYMENT_TYPES)[number];
+
+export const TM_SUBSIDY_RATE = 0.65;
+export const TM_SUBSIDY_CAP = 37.4;
+
+export interface PaymentRecord {
+  paymentType: string;
+  amount: number;
+  cardNumber?: string;
+  cardExpiry?: string;
+  cardCvc?: string;
+  eftposRef?: string;
+  accountNumber?: string;
+  accClaimNumber?: string;
+  accPurchaseOrder?: string;
+  giftCardNumber?: string;
+  tmCardNumber?: string;
+  tmCardName?: string;
+  tmCardExpiry?: string;
+  tmCouncilPays?: number;
+  tmPassengerPays?: number;
+  tmPassengerPaymentType?: string;
+  tmPassengerCardNumber?: string;
+  tmPassengerCardExpiry?: string;
+  tmPassengerCardCvc?: string;
+  tmPassengerEftposRef?: string;
+}
 
 export interface PaymentExtras {
   bikeCarry: number;

@@ -1,6 +1,6 @@
 import { push, ref, set } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
-import { ActiveJob, PaymentExtras, PaymentType } from '@/types';
+import { ActiveJob, PaymentExtras, PaymentRecord, PaymentType } from '@/types';
 
 export async function writeClosedJob(
   companyId: string,
@@ -9,6 +9,7 @@ export async function writeClosedJob(
   paymentType: PaymentType | string,
   extras: PaymentExtras,
   totalFare: number,
+  paymentDetails?: PaymentRecord,
 ): Promise<string> {
   const database = getDatabaseInstance();
   const entryRef = push(ref(database, `closedJobs/${companyId}`));
@@ -25,9 +26,11 @@ export async function writeClosedJob(
     passengerName: job.passengerName ?? '',
     passengerPhone: job.passengerPhone ?? '',
     paymentType,
+    amount: totalFare,
     fare: totalFare,
     baseFare: job.fare,
     extras,
+    paymentDetails: paymentDetails ?? { paymentType, amount: totalFare },
     distanceKm: meter?.distanceKm ?? job.distanceKm,
     durationMin: job.durationMin,
     waitingMs: meter?.waitingMs,
