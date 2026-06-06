@@ -27,9 +27,10 @@ export function calcDistanceCharge(distanceKm: number, pricePerKm: number): numb
   return distanceKm * 1000 * (pricePerKm / 1000);
 }
 
-/** Waiting cost: every second stopped adds (waitingRatePerMinute / 60). */
+/** Waiting cost: (totalWaitingSeconds / 60) * waitingRatePerMinute */
 export function calcWaitingCharge(waitingMs: number, waitingRatePerMinute: number): number {
-  return (waitingMs / 1000) * (waitingRatePerMinute / 60);
+  const totalWaitingSeconds = waitingMs / 1000;
+  return (totalWaitingSeconds / 60) * waitingRatePerMinute;
 }
 
 /** Cumulative fare: flag fall + distance charge + waiting charge (single tariff). */

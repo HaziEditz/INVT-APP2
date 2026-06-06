@@ -2,8 +2,8 @@ import * as Location from 'expo-location';
 import { calcSegmentedMeterBreakdown, tariffToSnapshot } from '@/lib/tariffs';
 import { MeterMode, MeterState, Tariff } from '@/types';
 
-const SPEED_MOVING_MS = 5 / 3.6; // 5 km/h — at or below this accrues waiting time
-const TICK_MS = 1000; // 1-second ticks: each stopped second accrues waitingRatePerMinute / 60
+const SPEED_MOVING_MS = 5 / 3.6; // 5 km/h — only above this with valid GPS counts as moving
+export const METER_TICK_MS = 1000;
 const UNPAUSE_DISTANCE_M = 50;
 
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -16,9 +16,10 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function normalizeSpeed(speedMs?: number | null): number {
-  if (speedMs == null || !Number.isFinite(speedMs) || speedMs < 0) return 0;
-  return speedMs;
+/** Moving only when GPS reports a positive speed above 5 km/h. */
+export function isConfirmedMoving(speedMs?: number | null): boolean {
+  if (speedMs == null || !Number.isFinite(speedMs) || speedMs <= 0) return false;
+  return speedMs > SPEED_MOVING_MS;
 }
 
 export function createInitialMeter(tariff: Tariff): MeterState {
@@ -69,17 +70,16 @@ export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | 
   };
 
   if (meter.paused) {
-    next.pausedMs += TICK_MS;
+    next.pausedMs += METER_TICK_MS;
     return { meter: applyTariffToMeter(next, tariff) };
   }
 
-  const speed = normalizeSpeed(speedMs);
-  const isMoving = speed > SPEED_MOVING_MS;
+  const isMoving = isConfirmedMoving(speedMs);
   next.mode = isMoving ? 'moving' : 'waiting';
   if (isMoving) {
-    next.movingMs += TICK_MS;
+    next.movingMs += METER_TICK_MS;
   } else {
-    next.waitingMs += TICK_MS;
+    next.waitingMs += METER_TICK_MS;
   }
 
   return { meter: applyTariffToMeter(next, tariff) };
@@ -112,16 +112,14 @@ export function tickMeterWithGps(
   next.lastLat = lat;
   next.lastLng = lng;
 
-  const speed = normalizeSpeed(speedMs);
-  const speedSaysMoving = speed > SPEED_MOVING_MS;
+  const speedSaysMoving = isConfirmedMoving(speedMs);
   const movedEnough = distanceDeltaM > 1.5;
 
-  // Every metre driven adds (pricePerKm / 1000) via distanceKm accumulation.
   if (speedSaysMoving && movedEnough && !next.paused && distanceDeltaM > 1 && distanceDeltaM < 500) {
     next.distanceKm += distanceDeltaM / 1000;
   }
 
-  const tick = tickMeter(next, tariff, speedSaysMoving ? speed : 0);
+  const tick = tickMeter(next, tariff, speedSaysMoving ? speedMs : null);
   return { ...tick, autoUnpaused };
 }
 
@@ -130,44 +128,52 @@ export async function watchMeter(
   getMeter: () => MeterState | null,
   onUpdate: (result: MeterTickResult) => void,
 ): Promise<() => void> {
+  let latestLat: number | undefined;
+  let latestLng: number | undefined;
+  let latestSpeed: number | null | undefined = null;
+  let hasGpsFix = false;
   let sub: Location.LocationSubscription | null = null;
+
+  const runTick = () => {
+    const m = getMeter();
+    if (!m?.running) return;
+    const tariff = getTariff();
+
+    if (hasGpsFix && latestLat != null && latestLng != null) {
+      onUpdate(tickMeterWithGps(m, tariff, latestLat, latestLng, latestSpeed));
+      return;
+    }
+
+    // Expo Go / no GPS fix: default to waiting mode so fare accrues while stopped.
+    onUpdate(tickMeter(m, tariff, null));
+  };
+
+  const intervalId = setInterval(runTick, METER_TICK_MS);
+  runTick();
+
   try {
     const { status } = await Location.getForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      const id = setInterval(() => {
-        const m = getMeter();
-        if (!m?.running) return;
-        onUpdate(tickMeter(m, getTariff(), 0));
-      }, TICK_MS);
-      return () => clearInterval(id);
+    if (status === 'granted') {
+      sub = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          distanceInterval: 0,
+          timeInterval: METER_TICK_MS,
+        },
+        (loc) => {
+          latestLat = loc.coords.latitude;
+          latestLng = loc.coords.longitude;
+          latestSpeed = loc.coords.speed;
+          hasGpsFix = true;
+        },
+      );
     }
-    sub = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.Balanced,
-        distanceInterval: 0,
-        timeInterval: TICK_MS,
-      },
-      (loc) => {
-        const m = getMeter();
-        if (!m?.running) return;
-        onUpdate(
-          tickMeterWithGps(
-            m,
-            getTariff(),
-            loc.coords.latitude,
-            loc.coords.longitude,
-            loc.coords.speed,
-          ),
-        );
-      },
-    );
-    return () => sub?.remove();
   } catch {
-    const id = setInterval(() => {
-      const m = getMeter();
-      if (!m?.running) return;
-      onUpdate(tickMeter(m, getTariff(), 0));
-    }, TICK_MS);
-    return () => clearInterval(id);
+    // Interval-only mode for Expo Go testing.
   }
+
+  return () => {
+    clearInterval(intervalId);
+    sub?.remove();
+  };
 }

@@ -1,4 +1,6 @@
 import { Colors } from '@/constants/theme';
+import { calcWaitingCharge } from '@/lib/tariffs';
+import { METER_TICK_MS } from '@/services/meterEngine';
 import { MeterState } from '@/types';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -15,6 +17,14 @@ function formatClock(ms: number) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+function liveWaitingMs(meter: MeterState, now: number): number {
+  if (!meter.running || meter.paused || meter.mode !== 'waiting') {
+    return meter.waitingMs;
+  }
+  const sinceLastTick = meter.pauseAccumulatedAt ? now - meter.pauseAccumulatedAt : 0;
+  return meter.waitingMs + Math.min(Math.max(0, sinceLastTick), METER_TICK_MS);
+}
+
 export function MeterOverlay({ meter, onPause }: Props) {
   const [now, setNow] = useState(Date.now());
 
@@ -24,11 +34,21 @@ export function MeterOverlay({ meter, onPause }: Props) {
   }, []);
 
   const tripMs = Math.max(0, now - meter.startedAt - meter.pausedMs);
+  const waitingRate = meter.startTariff?.waitingPerMin ?? 0;
+  const waitingMs = liveWaitingMs(meter, now);
+  const waitingCost = calcWaitingCharge(waitingMs, waitingRate);
+  const isMoving = meter.mode === 'moving' && !meter.paused;
 
   return (
     <View style={styles.box}>
       <Text style={styles.time}>{formatClock(tripMs)}</Text>
-      <Text style={styles.distance}>{meter.distanceKm.toFixed(2)} km</Text>
+
+      {isMoving ? (
+        <Text style={styles.modeStat}>Moving: {meter.distanceKm.toFixed(1)} km</Text>
+      ) : (
+        <Text style={styles.modeStat}>Waiting: ${waitingCost.toFixed(2)}</Text>
+      )}
+
       <Text style={styles.fare}>${meter.fare.toFixed(2)}</Text>
 
       <Pressable style={[styles.pauseBtn, meter.paused && styles.pauseBtnActive]} onPress={onPause}>
@@ -57,7 +77,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 22,
   },
-  distance: {
+  modeStat: {
     color: Colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
