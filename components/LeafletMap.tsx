@@ -14,7 +14,6 @@ export default function LeafletMap({
   dropoffLng,
   showRoute = false,
   showsUserLocation = true,
-  zones,
 }: JobMapProps) {
   const webRef = useRef<WebView | null>(null);
   const [ready, setReady] = useState(false);
@@ -42,7 +41,6 @@ export default function LeafletMap({
       dropoffLat: dropoffLat != null ? dropoff.latitude : undefined,
       dropoffLng: dropoffLng != null ? dropoff.longitude : undefined,
       showRoute: showRoute && hasJobCoords && dropoffLat != null && dropoffLng != null,
-      zones,
     };
     if (!hasJobCoords && driverCoords) {
       payload.fitDriver = true;
@@ -63,7 +61,6 @@ export default function LeafletMap({
     pickup.latitude,
     pickup.longitude,
     showRoute,
-    zones,
   ]);
 
   useSafeEffect(() => {

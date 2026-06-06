@@ -9,5 +9,4 @@ export type JobMapProps = {
   dropoffLng?: number;
   showRoute?: boolean;
   showsUserLocation?: boolean;
-  zones?: Array<{ name: string; active?: boolean; boundary: number[][] }>;
 };

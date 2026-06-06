@@ -40,7 +40,6 @@ export default function MainScreen() {
     queuedOffers,
     offersBadgeCount,
     pauseMeter,
-    companyZones,
   } = useDriver();
 
   const [mainTab, setMainTab] = useState<MainPanelTab>('offers');
@@ -100,11 +99,6 @@ export default function MainScreen() {
             dropoffLng={activeJob?.dropoffLng}
             showRoute={mapShowsRoute}
             showsUserLocation={shiftActive}
-            zones={companyZones.map((z) => ({
-              name: z.name,
-              active: z.active,
-              boundary: z.boundary,
-            }))}
           />
         </ErrorBoundary>
 
@@ -169,11 +163,6 @@ export default function MainScreen() {
         showMeter={meterRunning && mapExpanded}
         showRoute={mapShowsRoute}
         showsUserLocation={shiftActive}
-        zones={companyZones.map((z) => ({
-          name: z.name,
-          active: z.active,
-          boundary: z.boundary,
-        }))}
         onPause={pauseMeter}
       />
     </View>

@@ -38,7 +38,7 @@ export function CurrentTripPanel() {
         </Text>
         <Text style={styles.meta}>Started {fmtTime(meter?.startedAt)}</Text>
         {meterRunning ? (
-          <Button title="End Trip" variant="danger" onPress={endTrip} />
+          <Button title="End Trip" variant="danger" onPress={() => void endTrip()} />
         ) : null}
       </View>
     );
@@ -119,7 +119,7 @@ export function CurrentTripPanel() {
           />
         ) : null}
         {meterRunning ? (
-          <Button title="End Trip" variant="danger" onPress={endTrip} />
+          <Button title="End Trip" variant="danger" onPress={() => void endTrip()} />
         ) : (
           <Button title={nextLabel} onPress={onAdvance} />
         )}

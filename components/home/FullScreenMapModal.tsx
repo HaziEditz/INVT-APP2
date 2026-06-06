@@ -13,7 +13,6 @@ type Props = {
   showMeter: boolean;
   showRoute: boolean;
   showsUserLocation: boolean;
-  zones?: Array<{ name: string; active?: boolean; boundary: number[][] }>;
   onPause: () => void;
 };
 
@@ -25,7 +24,6 @@ export function FullScreenMapModal({
   showMeter,
   showRoute,
   showsUserLocation,
-  zones,
   onPause,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -40,7 +38,6 @@ export function FullScreenMapModal({
           dropoffLng={activeJob?.dropoffLng}
           showRoute={showRoute}
           showsUserLocation={showsUserLocation}
-          zones={zones}
         />
 
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>

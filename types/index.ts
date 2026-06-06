@@ -86,10 +86,39 @@ export interface JobStepTimes {
   hailEndedAt?: number;
 }
 
+export interface TariffSnapshot {
+  id: string;
+  name: string;
+  flagFall: number;
+  ratePerKm: number;
+  waitingPerMin: number;
+}
+
 export interface TariffChangeRecord {
   tariffId: string;
   tariffName: string;
   at: number;
+  distanceKmAtChange: number;
+  waitingMsAtChange: number;
+  previousTariffId: string;
+  previousTariffName: string;
+  previousFlagFall: number;
+  previousRatePerKm: number;
+  previousWaitingPerMin: number;
+  newRatePerKm: number;
+  newWaitingPerMin: number;
+}
+
+export interface TariffSegmentBreakdown {
+  tariffName: string;
+  changedAt?: number;
+  distanceKm: number;
+  waitingMinutes: number;
+  ratePerKm: number;
+  waitingPerMin: number;
+  distanceCharge: number;
+  waitingCharge: number;
+  rideSubtotal: number;
 }
 
 export interface MeterFareBreakdown {
@@ -99,6 +128,7 @@ export interface MeterFareBreakdown {
   waitingMinutes: number;
   waitingCharge: number;
   total: number;
+  segments?: TariffSegmentBreakdown[];
 }
 
 export type MeterMode = 'moving' | 'waiting';
@@ -120,6 +150,7 @@ export interface MeterState {
   pauseAnchorLng?: number;
   tariffId: string;
   tariffName: string;
+  startTariff: TariffSnapshot;
   tariffChanges: TariffChangeRecord[];
   breakdown: MeterFareBreakdown;
   fare: number;

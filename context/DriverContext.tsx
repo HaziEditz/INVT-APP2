@@ -34,7 +34,12 @@ import {
 } from '@/lib/bookingSync';
 import { initializeNztaOnLogin } from '@/services/nztaService';
 import { createInitialMeter, watchMeter } from '@/services/meterEngine';
-import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
+import {
+  calcSegmentedMeterBreakdown,
+  isTariffConfigured,
+  NO_TARIFF_CONFIGURED,
+  tariffToSnapshot,
+} from '@/lib/tariffs';
 import { JobStepTimes, PaymentExtras, TariffChangeRecord } from '@/types';
 import {
   ActiveJob,
@@ -262,6 +267,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const shiftActiveRef = useRef(false);
   const readyForJobsRef = useRef(false);
   const hailActiveRef = useRef(false);
+  const activeJobRef = useRef<ActiveJob | null>(null);
+  const selectedTariffRef = useRef<Tariff>(NO_TARIFF_CONFIGURED);
+  const endingTripRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
   const meterRef = useRef<MeterState | null>(null);
@@ -283,7 +291,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     activeJobIdRef.current = activeJob?.id ?? null;
-  }, [activeJob?.id], 'Driver-activeJobRef');
+    activeJobRef.current = activeJob;
+  }, [activeJob?.id, activeJob], 'Driver-activeJobRef');
+
+  useSafeEffect(() => {
+    selectedTariffRef.current = selectedTariff;
+  }, [selectedTariff], 'Driver-selectedTariffRef');
 
   useSafeEffect(() => {
     paymentJobRef.current = !!paymentJob;
@@ -317,8 +330,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         await storeData(STORAGE_KEYS.shiftActive, false);
         const m = await getData<MeterState>(STORAGE_KEYS.meterState);
         if (m?.running && m.mode && m.breakdown) {
-          setMeter(m);
-          meterRef.current = m;
+          const restored: MeterState = {
+            ...m,
+            startTariff:
+              m.startTariff ??
+              tariffToSnapshot({
+                id: m.tariffId,
+                name: m.tariffName,
+                flagFall: m.breakdown.flagFall,
+                ratePerKm:
+                  m.distanceKm > 0
+                    ? m.breakdown.distanceCharge / m.distanceKm
+                    : selectedTariffRef.current.ratePerKm,
+                waitingPerMin:
+                  m.waitingMs > 0
+                    ? m.breakdown.waitingCharge / (m.waitingMs / 60000)
+                    : selectedTariffRef.current.waitingPerMin,
+              }),
+            tariffChanges: m.tariffChanges ?? [],
+          };
+          setMeter(restored);
+          meterRef.current = restored;
           setHailActive(true);
         }
       } catch (err) {
@@ -1125,7 +1157,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const startMeterWatch = () => {
     if (meterStopRef.current) meterStopRef.current();
     void watchMeter(
-      selectedTariff,
+      () => selectedTariffRef.current,
       () => meterRef.current,
       (result) => {
         setMeter(result.meter);
@@ -1344,10 +1376,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const raw = meterRef.current;
     if (!raw) return null;
     const now = Date.now();
-    const waitMin = raw.waitingMs / 60000;
-    const breakdown = calcMeterBreakdown(selectedTariff, raw.distanceKm, waitMin);
-    return {
+    const tariff = selectedTariffRef.current;
+    const withStart: MeterState = {
       ...raw,
+      startTariff:
+        raw.startTariff ??
+        tariffToSnapshot({
+          id: raw.tariffId,
+          name: raw.tariffName,
+          flagFall: raw.breakdown?.flagFall ?? tariff.flagFall,
+          ratePerKm: tariff.ratePerKm,
+          waitingPerMin: tariff.waitingPerMin,
+        }),
+      tariffChanges: raw.tariffChanges ?? [],
+    };
+    const breakdown = calcSegmentedMeterBreakdown(withStart, tariff);
+    return {
+      ...withStart,
       running: false,
       finishedAt: now,
       breakdown,
@@ -1387,13 +1432,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const endHail = async () => {
     if (!hailActiveRef.current && !hailActive) return;
 
-    const snapshot = buildMeterSnapshot();
-    const now = Date.now();
-
     if (meterStopRef.current) {
       meterStopRef.current();
       meterStopRef.current = null;
     }
+
+    const snapshot = buildMeterSnapshot();
+    const now = Date.now();
 
     const hailJob: ActiveJob = {
       id: `hail_${snapshot?.startedAt ?? now}`,
@@ -1421,6 +1466,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
 
     setPaymentJob(hailJob);
+    paymentJobRef.current = true;
     setHailActive(false);
     hailActiveRef.current = false;
     setMeter(null);
@@ -1429,39 +1475,75 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const endTrip = async () => {
-    if (hailActiveRef.current || hailActive) {
-      await endHail();
-      return;
-    }
-    if (!meterRef.current?.running && !activeJob) return;
+    if (endingTripRef.current) return;
+    endingTripRef.current = true;
+    try {
+      if (hailActiveRef.current || hailActive) {
+        await endHail();
+        return;
+      }
 
-    const snapshot = buildMeterSnapshot();
-    const now = Date.now();
+      const job = activeJobRef.current;
+      const raw = meterRef.current;
+      if (!raw?.running && !job) return;
 
-    if (meterStopRef.current) {
-      meterStopRef.current();
-      meterStopRef.current = null;
-    }
+      if (meterStopRef.current) {
+        meterStopRef.current();
+        meterStopRef.current = null;
+      }
 
-    if (activeJob) {
-      const stepTimes: JobStepTimes = { ...activeJob.stepTimes, completeAt: now };
-      const updated: ActiveJob = {
-        ...activeJob,
-        stage: 'complete',
-        stepTimes,
-        meterSnapshot: snapshot ?? activeJob.meterSnapshot,
-        fare: snapshot?.fare ?? activeJob.fare,
-        distanceKm: snapshot?.distanceKm ?? activeJob.distanceKm,
-        durationMin: snapshot?.startedAt
-          ? Math.round((now - snapshot.startedAt) / 60000)
-          : activeJob.durationMin,
-      };
-      setActiveJob(updated);
-      setPaymentJob(updated);
-      setMeter(null);
-      meterRef.current = null;
-      await storeData(STORAGE_KEYS.activeJob, updated);
-      await storeData(STORAGE_KEYS.meterState, snapshot);
+      const snapshot = buildMeterSnapshot();
+      const now = Date.now();
+
+      if (job) {
+        const stepTimes: JobStepTimes = { ...job.stepTimes, completeAt: now };
+        const updated: ActiveJob = {
+          ...job,
+          stage: 'complete',
+          stepTimes,
+          meterSnapshot: snapshot ?? job.meterSnapshot,
+          fare: snapshot?.fare ?? job.fare,
+          distanceKm: snapshot?.distanceKm ?? job.distanceKm,
+          durationMin: snapshot?.startedAt
+            ? Math.round((now - snapshot.startedAt) / 60000)
+            : job.durationMin,
+          tariffChanges: snapshot?.tariffChanges ?? job.tariffChanges ?? [],
+        };
+        setActiveJob(updated);
+        setPaymentJob(updated);
+        paymentJobRef.current = true;
+        setMeter(null);
+        meterRef.current = null;
+        await storeData(STORAGE_KEYS.activeJob, updated);
+        await storeData(STORAGE_KEYS.meterState, snapshot);
+      } else if (snapshot) {
+        setPaymentJob({
+          id: `hail_${snapshot.startedAt}`,
+          type: 'Taxi',
+          pickup: hailPickupAddress || 'Street hail',
+          dropoff: hailPickupAddress || 'Street hail',
+          pickupLat: hailPickupLat,
+          pickupLng: hailPickupLng,
+          stage: 'complete',
+          startedAt: snapshot.startedAt,
+          distanceKm: snapshot.distanceKm,
+          durationMin: Math.round((now - snapshot.startedAt) / 60000),
+          fare: snapshot.fare,
+          stepTimes: { hailStartedAt: snapshot.startedAt, hailEndedAt: now, completeAt: now },
+          tariffChanges: snapshot.tariffChanges ?? [],
+          meterSnapshot: snapshot,
+          source: 'hail',
+          expiresAt: now,
+        });
+        paymentJobRef.current = true;
+        setHailActive(false);
+        hailActiveRef.current = false;
+        setMeter(null);
+        meterRef.current = null;
+        await storeData(STORAGE_KEYS.meterState, null);
+      }
+    } finally {
+      endingTripRef.current = false;
     }
   };
 
@@ -1491,31 +1573,52 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('Tariff locked', 'Tariff cannot be changed during payment.');
       return;
     }
-    const prevId = selectedTariff.id;
+    const prevTariff = selectedTariffRef.current;
+    const prevId = prevTariff.id;
     setSelectedTariffState(t);
+    selectedTariffRef.current = t;
     storeData(STORAGE_KEYS.selectedTariffId, t.id).catch(() => undefined);
 
     if (meterRef.current?.running && prevId !== t.id) {
-      const change: TariffChangeRecord = { tariffId: t.id, tariffName: t.name, at: Date.now() };
-      setMeter((prev) => {
-        if (!prev) return prev;
-        const waitMin = prev.waitingMs / 60000;
-        const breakdown = calcMeterBreakdown(t, prev.distanceKm, waitMin);
-        const next = {
-          ...prev,
+      const prev = meterRef.current;
+      const change: TariffChangeRecord = {
+        tariffId: t.id,
+        tariffName: t.name,
+        at: Date.now(),
+        distanceKmAtChange: prev.distanceKm,
+        waitingMsAtChange: prev.waitingMs,
+        previousTariffId: prevTariff.id,
+        previousTariffName: prevTariff.name,
+        previousFlagFall: prevTariff.flagFall,
+        previousRatePerKm: prevTariff.ratePerKm,
+        previousWaitingPerMin: prevTariff.waitingPerMin,
+        newRatePerKm: t.ratePerKm,
+        newWaitingPerMin: t.waitingPerMin,
+      };
+      setMeter((meterPrev) => {
+        if (!meterPrev) return meterPrev;
+        const withChanges = {
+          ...meterPrev,
           tariffId: t.id,
           tariffName: t.name,
-          tariffChanges: [...prev.tariffChanges, change],
+          tariffChanges: [...(meterPrev.tariffChanges ?? []), change],
+        };
+        const breakdown = calcSegmentedMeterBreakdown(withChanges, t);
+        const next = {
+          ...withChanges,
           breakdown,
           fare: breakdown.total,
         };
         meterRef.current = next;
+        storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
         return next;
       });
-      if (activeJob) {
-        const changes = [...(activeJob.tariffChanges ?? []), change];
-        const updated = { ...activeJob, tariffChanges: changes };
+      if (activeJobRef.current) {
+        const job = activeJobRef.current;
+        const changes = [...(job.tariffChanges ?? []), change];
+        const updated = { ...job, tariffChanges: changes };
         setActiveJob(updated);
+        activeJobRef.current = updated;
         storeData(STORAGE_KEYS.activeJob, updated).catch(() => undefined);
       }
       startMeterWatch();

@@ -1,8 +1,8 @@
 import * as Location from 'expo-location';
-import { calcMeterBreakdown } from '@/lib/tariffs';
+import { calcSegmentedMeterBreakdown, tariffToSnapshot } from '@/lib/tariffs';
 import { MeterMode, MeterState, Tariff } from '@/types';
 
-const SPEED_MOVING_MS = 5 / 3.6; // 5 km/h
+const SPEED_MOVING_MS = 5 / 3.6; // 5 km/h — at or below this accrues waiting time
 const TICK_MS = 2000;
 const UNPAUSE_DISTANCE_M = 50;
 
@@ -22,7 +22,11 @@ function normalizeSpeed(speedMs?: number | null): number {
 }
 
 export function createInitialMeter(tariff: Tariff): MeterState {
-  const breakdown = calcMeterBreakdown(tariff, 0, 0);
+  const startTariff = tariffToSnapshot(tariff);
+  const breakdown = calcSegmentedMeterBreakdown(
+    { startTariff, tariffChanges: [], distanceKm: 0, waitingMs: 0 },
+    tariff,
+  );
   return {
     running: true,
     paused: false,
@@ -34,6 +38,7 @@ export function createInitialMeter(tariff: Tariff): MeterState {
     distanceKm: 0,
     tariffId: tariff.id,
     tariffName: tariff.name,
+    startTariff,
     tariffChanges: [],
     breakdown,
     fare: breakdown.total,
@@ -41,8 +46,7 @@ export function createInitialMeter(tariff: Tariff): MeterState {
 }
 
 function applyTariffToMeter(meter: MeterState, tariff: Tariff): MeterState {
-  const waitMin = meter.waitingMs / 60000;
-  const breakdown = calcMeterBreakdown(tariff, meter.distanceKm, waitMin);
+  const breakdown = calcSegmentedMeterBreakdown(meter, tariff);
   return {
     ...meter,
     tariffId: tariff.id,
@@ -116,13 +120,12 @@ export function tickMeterWithGps(
     next.distanceKm += distanceDeltaM / 1000;
   }
 
-  // Waiting time accrues whenever speed is at or below 5 km/h.
   const tick = tickMeter(next, tariff, speedSaysMoving ? speed : 0);
   return { ...tick, autoUnpaused };
 }
 
 export async function watchMeter(
-  tariff: Tariff,
+  getTariff: () => Tariff,
   getMeter: () => MeterState | null,
   onUpdate: (result: MeterTickResult) => void,
 ): Promise<() => void> {
@@ -133,7 +136,7 @@ export async function watchMeter(
       const id = setInterval(() => {
         const m = getMeter();
         if (!m?.running) return;
-        onUpdate(tickMeter(m, tariff, 0));
+        onUpdate(tickMeter(m, getTariff(), 0));
       }, TICK_MS);
       return () => clearInterval(id);
     }
@@ -147,7 +150,13 @@ export async function watchMeter(
         const m = getMeter();
         if (!m?.running) return;
         onUpdate(
-          tickMeterWithGps(m, tariff, loc.coords.latitude, loc.coords.longitude, loc.coords.speed),
+          tickMeterWithGps(
+            m,
+            getTariff(),
+            loc.coords.latitude,
+            loc.coords.longitude,
+            loc.coords.speed,
+          ),
         );
       },
     );
@@ -156,7 +165,7 @@ export async function watchMeter(
     const id = setInterval(() => {
       const m = getMeter();
       if (!m?.running) return;
-      onUpdate(tickMeter(m, tariff, 0));
+      onUpdate(tickMeter(m, getTariff(), 0));
     }, TICK_MS);
     return () => clearInterval(id);
   }

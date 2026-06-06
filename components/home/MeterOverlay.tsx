@@ -24,23 +24,12 @@ export function MeterOverlay({ meter, onPause }: Props) {
   }, []);
 
   const tripMs = Math.max(0, now - meter.startedAt - meter.pausedMs);
-  const waitMin = meter.waitingMs / 60000;
 
   return (
     <View style={styles.box}>
+      <Text style={styles.time}>{formatClock(tripMs)}</Text>
+      <Text style={styles.distance}>{meter.distanceKm.toFixed(2)} km</Text>
       <Text style={styles.fare}>${meter.fare.toFixed(2)}</Text>
-
-      <View style={styles.statsRow}>
-        <Text style={styles.statText}>
-          {meter.distanceKm.toFixed(2)} km
-        </Text>
-        <Text style={styles.statSep}>·</Text>
-        <Text style={styles.statText}>
-          wait {waitMin.toFixed(1)}m
-        </Text>
-        <Text style={styles.statSep}>·</Text>
-        <Text style={styles.statText}>{formatClock(tripMs)}</Text>
-      </View>
 
       <Pressable style={[styles.pauseBtn, meter.paused && styles.pauseBtnActive]} onPress={onPause}>
         <Text style={styles.pauseText}>{meter.paused ? 'RESUME' : 'PAUSE'}</Text>
@@ -62,26 +51,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     maxHeight: 110,
   },
+  time: {
+    color: Colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    lineHeight: 22,
+  },
+  distance: {
+    color: Colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 2,
+  },
   fare: {
     color: Colors.success,
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '900',
-    lineHeight: 30,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    lineHeight: 28,
     marginTop: 2,
-    gap: 4,
-  },
-  statText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  statSep: {
-    color: Colors.border,
-    fontSize: 11,
   },
   pauseBtn: {
     marginTop: 6,
