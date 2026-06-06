@@ -3,7 +3,7 @@ import { calcSegmentedMeterBreakdown, tariffToSnapshot } from '@/lib/tariffs';
 import { MeterMode, MeterState, Tariff } from '@/types';
 
 const SPEED_MOVING_MS = 5 / 3.6; // 5 km/h — at or below this accrues waiting time
-const TICK_MS = 2000;
+const TICK_MS = 1000; // 1-second ticks: each stopped second accrues waitingRatePerMinute / 60
 const UNPAUSE_DISTANCE_M = 50;
 
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -116,7 +116,8 @@ export function tickMeterWithGps(
   const speedSaysMoving = speed > SPEED_MOVING_MS;
   const movedEnough = distanceDeltaM > 1.5;
 
-  if (speedSaysMoving && movedEnough && !next.paused && distanceDeltaM > 2 && distanceDeltaM < 500) {
+  // Every metre driven adds (pricePerKm / 1000) via distanceKm accumulation.
+  if (speedSaysMoving && movedEnough && !next.paused && distanceDeltaM > 1 && distanceDeltaM < 500) {
     next.distanceKm += distanceDeltaM / 1000;
   }
 

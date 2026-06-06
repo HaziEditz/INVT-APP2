@@ -22,8 +22,8 @@ export function TariffPicker({ tariffs, selected, open, locked, onOpen, onClose,
         <Text style={styles.name}>{selected.name}</Text>
         {hasTariffs ? (
           <Text style={styles.rates}>
-            ${selected.flagFall.toFixed(2)} flag · ${selected.ratePerKm.toFixed(2)}/km · $
-            {selected.waitingPerMin.toFixed(2)}/min wait
+            Flag Fall: ${selected.flagFall.toFixed(2)} | ${selected.ratePerKm.toFixed(2)}/km | $
+            {selected.waitingPerMin.toFixed(2)}/min waiting
           </Text>
         ) : (
           <Text style={styles.rates}>Configure tariffs in Firebase for your company</Text>
@@ -51,7 +51,7 @@ export function TariffPicker({ tariffs, selected, open, locked, onOpen, onClose,
                 >
                   <Text style={styles.optionName}>{t.name}</Text>
                   <Text style={styles.optionRates}>
-                    ${t.flagFall.toFixed(2)} + ${t.ratePerKm.toFixed(2)}/km + ${t.waitingPerMin.toFixed(2)}/min
+                    Flag Fall: ${t.flagFall.toFixed(2)} | ${t.ratePerKm.toFixed(2)}/km | ${t.waitingPerMin.toFixed(2)}/min waiting
                   </Text>
                 </Pressable>
               ))}

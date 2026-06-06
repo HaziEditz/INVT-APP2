@@ -22,6 +22,16 @@ export function tariffToSnapshot(tariff: Tariff): TariffSnapshot {
   };
 }
 
+/** Ride cost: every metre driven adds (pricePerKm / 1000). */
+export function calcDistanceCharge(distanceKm: number, pricePerKm: number): number {
+  return distanceKm * 1000 * (pricePerKm / 1000);
+}
+
+/** Waiting cost: every second stopped adds (waitingRatePerMinute / 60). */
+export function calcWaitingCharge(waitingMs: number, waitingRatePerMinute: number): number {
+  return (waitingMs / 1000) * (waitingRatePerMinute / 60);
+}
+
 /** Cumulative fare: flag fall + distance charge + waiting charge (single tariff). */
 export function calcMeterBreakdown(
   tariff: Tariff,
@@ -29,8 +39,9 @@ export function calcMeterBreakdown(
   waitingMinutes: number,
 ): MeterFareBreakdown {
   const flagFall = tariff.flagFall;
-  const distanceCharge = distanceKm * tariff.ratePerKm;
-  const waitingCharge = waitingMinutes * tariff.waitingPerMin;
+  const waitingMs = waitingMinutes * 60000;
+  const distanceCharge = calcDistanceCharge(distanceKm, tariff.ratePerKm);
+  const waitingCharge = calcWaitingCharge(waitingMs, tariff.waitingPerMin);
   const total = flagFall + distanceCharge + waitingCharge;
   return {
     flagFall,
@@ -60,9 +71,10 @@ function pushSegment(
   changedAt?: number,
 ): { prevDist: number; prevWaitMs: number } {
   const segDist = Math.max(0, distEnd - prevDist);
-  const segWaitMin = Math.max(0, (waitEnd - prevWaitMs) / 60000);
-  const distanceCharge = segDist * tariff.ratePerKm;
-  const waitingCharge = segWaitMin * tariff.waitingPerMin;
+  const segWaitMs = Math.max(0, waitEnd - prevWaitMs);
+  const segWaitMin = segWaitMs / 60000;
+  const distanceCharge = calcDistanceCharge(segDist, tariff.ratePerKm);
+  const waitingCharge = calcWaitingCharge(segWaitMs, tariff.waitingPerMin);
   if (segDist > 0 || segWaitMin > 0 || segments.length === 0) {
     segments.push({
       tariffName: tariff.name,
