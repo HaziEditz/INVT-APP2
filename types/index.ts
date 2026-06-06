@@ -256,9 +256,6 @@ export const DRIVER_PAYMENT_TYPES = [
 
 export type DriverPaymentType = (typeof DRIVER_PAYMENT_TYPES)[number];
 
-export const TM_SUBSIDY_RATE = 0.65;
-export const TM_SUBSIDY_CAP = 37.4;
-
 export interface PaymentRecord {
   paymentType: string;
   amount: number;
@@ -273,8 +270,14 @@ export interface PaymentRecord {
   tmCardNumber?: string;
   tmCardName?: string;
   tmCardExpiry?: string;
+  tmCouncilSubsidyPercent?: number;
+  tmCouncilCapAmount?: number;
+  tmCouncilFarePays?: number;
   tmCouncilPays?: number;
   tmPassengerPays?: number;
+  tmHoistCount?: number;
+  tmHoistCostPerUnit?: number;
+  tmHoistTotal?: number;
   tmPassengerPaymentType?: string;
   tmPassengerCardNumber?: string;
   tmPassengerCardExpiry?: string;

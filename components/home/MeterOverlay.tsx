@@ -42,7 +42,7 @@ export function MeterOverlay({ meter, onPause }: Props) {
   return (
     <View style={styles.box}>
       <Text style={styles.time}>{formatClock(tripMs)}</Text>
-      <Text style={styles.km}>{meter.distanceKm.toFixed(2)} km</Text>
+      <Text style={styles.km}>Distance: {meter.distanceKm.toFixed(2)} km</Text>
 
       {isMoving ? (
         <Text style={styles.modeStat}>Moving</Text>

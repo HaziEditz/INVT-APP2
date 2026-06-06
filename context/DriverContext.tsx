@@ -21,6 +21,7 @@ import {
   writeOnlinePresence,
 } from '@/services/presenceService';
 import { loadCompanyTariffs } from '@/lib/companyTariffs';
+import { DEFAULT_TM_CONFIG, parseTmConfig, TmConfig } from '@/lib/tmConfig';
 import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { completeJobPayment } from '@/lib/dispatchApi';
@@ -87,6 +88,7 @@ interface DriverContextValue {
   historyEarnings: EarningsBreakdown;
   company: CompanyInfo | null;
   activeVehicleBodyType: string;
+  tmConfig: TmConfig;
   isOffline: boolean;
   setSelectedVehicleId: (id: string) => void;
   refreshVehicles: () => Promise<void>;
@@ -257,6 +259,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [jobHistory, setJobHistory] = useState<HistoryJob[]>([]);
   const [jobHistoryLoading, setJobHistoryLoading] = useState(false);
   const [company, setCompany] = useState<CompanyInfo | null>(null);
+  const [tmConfig, setTmConfig] = useState<TmConfig>(DEFAULT_TM_CONFIG);
   const [isOffline, setIsOffline] = useState(false);
   const [hailActive, setHailActive] = useState(false);
   const [hailPickupAddress, setHailPickupAddress] = useState<string | null>(null);
@@ -317,6 +320,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] initializeNztaOnLogin', err),
     );
   }, [driver?.companyId, driver?.uid], 'Driver-nztaInit');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !isFirebaseReady) {
+      setTmConfig(DEFAULT_TM_CONFIG);
+      return;
+    }
+    const database = getDatabaseInstance();
+    const tmRef = ref(database, `companySettings/${driver.companyId}/tmConfig`);
+    const unsub = onValue(tmRef, (snap) => {
+      setTmConfig(parseTmConfig(snap.val()));
+    });
+    return () => unsub();
+  }, [driver?.companyId], 'Driver-tmConfig');
 
   useSafeEffect(() => {
     void (async () => {
@@ -1676,6 +1692,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         historyEarnings,
         company,
         activeVehicleBodyType,
+        tmConfig,
         isOffline,
         setSelectedVehicleId,
         refreshVehicles,

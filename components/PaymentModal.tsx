@@ -2,12 +2,11 @@ import { Button } from '@/components/Button';
 import { ScanCardModal } from '@/components/ScanCardModal';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
+import { calcTmSplit, isWavVehicle } from '@/lib/tmConfig';
 import {
   DRIVER_PAYMENT_TYPES,
   PaymentExtras,
   PaymentRecord,
-  TM_SUBSIDY_CAP,
-  TM_SUBSIDY_RATE,
 } from '@/types';
 import { useMemo, useState } from 'react';
 import {
@@ -31,6 +30,7 @@ const EMPTY_EXTRAS: PaymentExtras = {
 };
 
 const TM_PASSENGER_PAY_TYPES = ['Cash', 'Card', 'EFTPOS'] as const;
+const HOIST_COUNTS = ['1', '2', '3', '4'] as const;
 
 type DropdownProps = {
   label: string;
@@ -44,7 +44,7 @@ function Dropdown({ label, value, options, onChange }: DropdownProps) {
 
   return (
     <View style={styles.dropdownWrap}>
-      <Text style={styles.dropdownLabel}>{label}</Text>
+      {label ? <Text style={styles.dropdownLabel}>{label}</Text> : null}
       <Pressable style={styles.dropdownBtn} onPress={() => setOpen((o) => !o)}>
         <Text style={styles.dropdownValue}>{value}</Text>
         <Text style={styles.dropdownCaret}>{open ? '▲' : '▼'}</Text>
@@ -101,7 +101,7 @@ function Field({
 
 export function PaymentModal() {
   const insets = useSafeAreaInsets();
-  const { paymentJob, finalizePayment } = useDriver();
+  const { paymentJob, finalizePayment, tmConfig, activeVehicleBodyType } = useDriver();
   const [paymentType, setPaymentType] = useState<string>('Cash');
   const [submitting, setSubmitting] = useState(false);
   const [scanTarget, setScanTarget] = useState<string | null>(null);
@@ -117,6 +117,7 @@ export function PaymentModal() {
   const [tmCardNumber, setTmCardNumber] = useState('');
   const [tmCardName, setTmCardName] = useState('');
   const [tmCardExpiry, setTmCardExpiry] = useState('');
+  const [tmHoistCount, setTmHoistCount] = useState('1');
   const [tmPassengerPayType, setTmPassengerPayType] = useState<string>('Cash');
   const [tmPassengerCardNumber, setTmPassengerCardNumber] = useState('');
   const [tmPassengerCardExpiry, setTmPassengerCardExpiry] = useState('');
@@ -131,11 +132,20 @@ export function PaymentModal() {
   const tripFare =
     breakdown?.total ?? meter?.fare ?? paymentJob?.fare ?? paymentJob?.fixedFare ?? 0;
 
+  const isWav = isWavVehicle(activeVehicleBodyType);
+
   const tmSplit = useMemo(() => {
-    const councilPays = +Math.min(tripFare * TM_SUBSIDY_RATE, TM_SUBSIDY_CAP).toFixed(2);
-    const passengerPays = +(tripFare - councilPays).toFixed(2);
-    return { councilPays, passengerPays };
-  }, [tripFare]);
+    const fareSplit = calcTmSplit(tripFare, tmConfig);
+    const hoistCount = isWav ? parseInt(tmHoistCount, 10) || 0 : 0;
+    const hoistTotal = +(hoistCount * tmConfig.hoistCostPerUnit).toFixed(2);
+    const councilTotalPays = +(fareSplit.councilFarePays + hoistTotal).toFixed(2);
+    return {
+      ...fareSplit,
+      hoistCount,
+      hoistTotal,
+      councilTotalPays,
+    };
+  }, [tripFare, tmConfig, tmHoistCount, isWav]);
 
   if (!paymentJob) return null;
 
@@ -158,8 +168,14 @@ export function PaymentModal() {
           tmCardNumber,
           tmCardName,
           tmCardExpiry,
-          tmCouncilPays: tmSplit.councilPays,
+          tmCouncilSubsidyPercent: tmConfig.councilSubsidyPercent,
+          tmCouncilCapAmount: tmConfig.councilCapAmount,
+          tmCouncilFarePays: tmSplit.councilFarePays,
+          tmCouncilPays: tmSplit.councilTotalPays,
           tmPassengerPays: tmSplit.passengerPays,
+          tmHoistCount: tmSplit.hoistCount || undefined,
+          tmHoistCostPerUnit: isWav ? tmConfig.hoistCostPerUnit : undefined,
+          tmHoistTotal: tmSplit.hoistTotal || undefined,
           tmPassengerPaymentType: tmPassengerPayType,
           tmPassengerCardNumber:
             tmPassengerPayType === 'Card' ? tmPassengerCardNumber : undefined,
@@ -250,9 +266,27 @@ export function PaymentModal() {
         return (
           <View style={styles.formBlock}>
             <View style={styles.tmBox}>
-              <Text style={styles.tmLine}>Council pays ${tmSplit.councilPays.toFixed(2)}</Text>
+              <Text style={styles.tmLine}>
+                Council pays ${tmSplit.councilFarePays.toFixed(2)} ({tmConfig.councilSubsidyPercent}% up to $
+                {tmConfig.councilCapAmount.toFixed(2)})
+              </Text>
               <Text style={styles.tmLine}>Passenger pays remaining ${tmSplit.passengerPays.toFixed(2)}</Text>
             </View>
+
+            {isWav ? (
+              <>
+                <Text style={styles.formTitle}>Hoist Charges (WAV)</Text>
+                <Dropdown label="Number of hoists" value={tmHoistCount} options={HOIST_COUNTS} onChange={setTmHoistCount} />
+                <Text style={styles.hoistLine}>
+                  Hoist charges: {tmSplit.hoistCount} hoist{tmSplit.hoistCount === 1 ? '' : 's'} × $
+                  {tmConfig.hoistCostPerUnit.toFixed(2)} = ${tmSplit.hoistTotal.toFixed(2)} (council pays)
+                </Text>
+                <Text style={styles.tmSubLine}>
+                  Council total (fare + hoist): ${tmSplit.councilTotalPays.toFixed(2)}
+                </Text>
+              </>
+            ) : null}
+
             <Text style={styles.formTitle}>TM Card</Text>
             <Pressable style={styles.scanBtn} onPress={() => setScanTarget('tm')}>
               <Text style={styles.scanBtnText}>Scan TM Card</Text>
@@ -260,7 +294,10 @@ export function PaymentModal() {
             <Field label="Card Number" value={tmCardNumber} onChangeText={setTmCardNumber} placeholder="TM card #" keyboardType="number-pad" />
             <Field label="Name on Card" value={tmCardName} onChangeText={setTmCardName} placeholder="Full name" />
             <Field label="Expiry Date" value={tmCardExpiry} onChangeText={setTmCardExpiry} placeholder="MM/YY" />
-            <Text style={[styles.formTitle, { marginTop: 12 }]}>Passenger pays ${tmSplit.passengerPays.toFixed(2)} via:</Text>
+
+            <Text style={[styles.formTitle, { marginTop: 12 }]}>
+              Passenger pays ${tmSplit.passengerPays.toFixed(2)} via:
+            </Text>
             <Dropdown label="" value={tmPassengerPayType} options={TM_PASSENGER_PAY_TYPES} onChange={setTmPassengerPayType} />
             {tmPassengerPayType === 'Card' ? (
               <>
@@ -385,9 +422,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    paddingVertical: 16,
+    paddingVertical: 18,
     paddingHorizontal: 16,
-    minHeight: 56,
+    minHeight: 58,
   },
   dropdownValue: { color: Colors.text, fontSize: 18, fontWeight: '700' },
   dropdownCaret: { color: Colors.textMuted, fontSize: 14 },
@@ -399,7 +436,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     overflow: 'hidden',
   },
-  dropdownItem: { paddingVertical: 14, paddingHorizontal: 16 },
+  dropdownItem: { paddingVertical: 16, paddingHorizontal: 16 },
   dropdownItemOn: { backgroundColor: Colors.accent + '22' },
   dropdownItemText: { color: Colors.text, fontSize: 17 },
   dropdownItemTextOn: { color: Colors.accent, fontWeight: '700' },
@@ -438,4 +475,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tmLine: { color: Colors.text, fontSize: 16, fontWeight: '700' },
+  tmSubLine: { color: Colors.textMuted, fontSize: 14, fontWeight: '600' },
+  hoistLine: { color: Colors.text, fontSize: 15, fontWeight: '600', lineHeight: 22 },
 });
