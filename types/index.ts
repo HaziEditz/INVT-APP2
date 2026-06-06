@@ -294,7 +294,35 @@ export interface PaymentExtras {
   eftposSurcharge: number;
   tolls: number;
   other: number;
-  otherNote?: string;
+  otherNote: string;
+  /** Aliases accepted when normalizing from legacy payloads */
+  eftposFee?: number;
+  bikeFee?: number;
+  otherAmount?: number;
+}
+
+export function normalizePaymentExtras(extras: Partial<PaymentExtras>): PaymentExtras {
+  return {
+    eftposSurcharge: extras.eftposSurcharge ?? extras.eftposFee ?? 0,
+    airportFee: extras.airportFee ?? 0,
+    bikeCarry: extras.bikeCarry ?? extras.bikeFee ?? 0,
+    tolls: extras.tolls ?? 0,
+    other: extras.other ?? extras.otherAmount ?? 0,
+    otherNote: extras.otherNote ?? '',
+  };
+}
+
+/** Shape stored on closedJobs — all fields always defined. */
+export function extrasForFirebase(extras: Partial<PaymentExtras>) {
+  const normalized = normalizePaymentExtras(extras);
+  return {
+    eftposFee: normalized.eftposSurcharge,
+    airportFee: normalized.airportFee,
+    bikeFee: normalized.bikeCarry,
+    otherAmount: normalized.other,
+    otherNote: normalized.otherNote,
+    tolls: normalized.tolls,
+  };
 }
 
 export interface PreBookingForm {

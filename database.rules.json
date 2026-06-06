@@ -1,0 +1,34 @@
+{
+  "rules": {
+    "completedJobs": {
+      "$companyId": {
+        ".read": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()",
+        ".write": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()",
+        ".indexOn": ["bookingId", "driverId", "completedAt"],
+        "$jobId": {
+          ".read": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()",
+          ".write": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()"
+        }
+      }
+    },
+    "allbookings": {
+      "$companyId": {
+        ".read": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()",
+        "$bookingId": {
+          ".read": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()",
+          ".write": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()"
+        }
+      }
+    },
+    "closedJobs": {
+      "$companyId": {
+        ".read": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()",
+        ".write": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()",
+        "$jobId": {
+          ".read": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()",
+          ".write": "auth != null && root.child('drivers').child($companyId).child(auth.uid).exists()"
+        }
+      }
+    }
+  }
+}

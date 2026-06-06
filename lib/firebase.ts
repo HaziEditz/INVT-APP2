@@ -1,5 +1,5 @@
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
-import { Auth, User, getAuth, signInAnonymously } from 'firebase/auth';
+import { Auth, User, getAuth } from 'firebase/auth';
 import { Database, getDatabase } from 'firebase/database';
 import { Platform } from 'react-native';
 
@@ -84,27 +84,41 @@ export function getDatabaseInstance(): Database {
   return database;
 }
 
-/**
- * RTDB writes require an authenticated Firebase user. Logs UID and falls back to
- * anonymous sign-in only when currentUser is missing.
- */
-export async function ensureAuthUserForRtdbWrite(context: string): Promise<User> {
-  const authInstance = getAuthInstance();
-  let user = authInstance.currentUser;
+export class AuthRequiredError extends Error {
+  constructor(context: string) {
+    super(`${context} — signed-in driver required`);
+    this.name = 'AuthRequiredError';
+  }
+}
 
-  if (user) {
-    const provider = user.isAnonymous
-      ? 'anonymous'
-      : user.providerData[0]?.providerId ?? 'password/email';
-    console.log(`[Firebase Auth] ${context} — uid: ${user.uid} (${provider})`);
-    return user;
+/** Returns the logged-in driver account, never anonymous. */
+export function getAuthenticatedUser(): User | null {
+  const user = getAuthInstance().currentUser;
+  if (!user || user.isAnonymous) return null;
+  return user;
+}
+
+/**
+ * RTDB access requires a real driver login. Never falls back to anonymous auth.
+ */
+export async function ensureAuthenticatedUserForRtdb(context: string): Promise<User> {
+  const user = getAuthenticatedUser();
+  if (!user) {
+    throw new AuthRequiredError(context);
   }
 
-  console.warn(`[Firebase Auth] ${context} — currentUser is null, signing in anonymously`);
-  const cred = await signInAnonymously(authInstance);
-  user = cred.user;
-  console.log(`[Firebase Auth] ${context} — anonymous uid: ${user.uid}`);
+  const provider = user.providerData[0]?.providerId ?? 'password/email';
+  console.log(`[Firebase Auth] ${context} — uid: ${user.uid} (${provider})`);
+  await user.getIdToken(false);
   return user;
+}
+
+export async function ensureAuthUserForRtdbWrite(context: string): Promise<User> {
+  return ensureAuthenticatedUserForRtdb(context);
+}
+
+export async function ensureAuthUserForRtdbRead(context: string): Promise<User> {
+  return ensureAuthenticatedUserForRtdb(context);
 }
 
 export { auth, database };

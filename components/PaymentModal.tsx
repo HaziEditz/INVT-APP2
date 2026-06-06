@@ -5,6 +5,7 @@ import { useDriver } from '@/context/DriverContext';
 import { calcTmSplit, isWavVehicle } from '@/lib/tmConfig';
 import {
   DRIVER_PAYMENT_TYPES,
+  normalizePaymentExtras,
   PaymentExtras,
   PaymentRecord,
 } from '@/types';
@@ -184,14 +185,15 @@ export function PaymentModal() {
   }, [tripFare, tmConfig, tmHoistCount, isWav]);
 
   const extras: PaymentExtras = useMemo(
-    () => ({
-      eftposSurcharge: parseFloat(extraEftposFee) || 0,
-      airportFee: parseFloat(extraAirportFee) || 0,
-      bikeCarry: parseFloat(extraBikeCarryFee) || 0,
-      tolls: 0,
-      other: parseFloat(extraOtherAmount) || 0,
-      otherNote: extraOtherNote.trim() || undefined,
-    }),
+    () =>
+      normalizePaymentExtras({
+        eftposSurcharge: parseFloat(extraEftposFee) || 0,
+        airportFee: parseFloat(extraAirportFee) || 0,
+        bikeCarry: parseFloat(extraBikeCarryFee) || 0,
+        tolls: 0,
+        other: parseFloat(extraOtherAmount) || 0,
+        otherNote: extraOtherNote.trim(),
+      }),
     [extraEftposFee, extraAirportFee, extraBikeCarryFee, extraOtherAmount, extraOtherNote],
   );
 

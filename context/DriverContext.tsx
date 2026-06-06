@@ -232,7 +232,7 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
 }
 
 export function DriverProvider({ children }: { children: ReactNode }) {
-  const { driver, signOut } = useAuth();
+  const { driver, signOut, firebaseUser } = useAuth();
   const [presenceStatus, setPresenceStatus] = useState<PresenceDisplayStatus>('Offline');
   const [readyForJobs, setReadyForJobs] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
@@ -457,7 +457,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [driver?.companyId, driver?.uid], 'Driver-company');
 
   const refreshJobHistory = async () => {
-    if (!driver?.companyId || !driver.id) {
+    if (!driver?.companyId || !driver.id || !firebaseUser || firebaseUser.isAnonymous) {
       setJobHistory([]);
       return;
     }
@@ -475,7 +475,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     refreshJobHistory().catch((err) => console.error('[Driver] refreshJobHistory', err));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.companyId, driver?.id], 'Driver-jobHistory');
+  }, [driver?.companyId, driver?.id, firebaseUser?.uid], 'Driver-jobHistory');
 
   useSafeEffect(() => {
     if (!shiftActive) return;
@@ -1086,8 +1086,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const vehicleId = await resolveVehicleId();
     const driverSnapshot = driver;
     endShiftLocal();
+    await endShiftRemote(driverSnapshot, vehicleId);
     await signOut();
-    void endShiftRemote(driverSnapshot, vehicleId);
   };
 
   const acceptOffer = async () => {

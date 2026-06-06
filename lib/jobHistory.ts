@@ -1,5 +1,5 @@
 import { get, limitToLast, query, ref } from 'firebase/database';
-import { getDatabaseInstance } from '@/lib/firebase';
+import { ensureAuthUserForRtdbRead, getDatabaseInstance } from '@/lib/firebase';
 import { JobType, PaymentType } from '@/types';
 
 export type JobHistoryStatus = 'completed' | 'cancelled' | 'noshow';
@@ -146,6 +146,13 @@ export async function loadDriverJobHistory(
   driverUid?: string,
 ): Promise<HistoryJob[]> {
   if (!companyId || !driverId) return [];
+
+  try {
+    await ensureAuthUserForRtdbRead(`loadDriverJobHistory → ${companyId}`);
+  } catch (err) {
+    console.warn('[JobHistory] skipped — authenticated driver required:', err);
+    return [];
+  }
 
   const byId = new Map<string, HistoryJob>();
 
