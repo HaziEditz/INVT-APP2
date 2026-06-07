@@ -145,7 +145,19 @@ function fmtNzTime(d: Date) {
 }
 
 function isOfferPayload(val: Record<string, unknown>): boolean {
-  return !!(val.pickup || val.from || val.dropoff || val.to || val.jobId || val.id);
+  return !!(
+    val.pickup ||
+    val.from ||
+    val.dropoff ||
+    val.to ||
+    val.jobId ||
+    val.id ||
+    val.jobpickup ||
+    val.jobdropoff ||
+    val.joboffer ||
+    val.bookingid ||
+    val.bookingId
+  );
 }
 
 function extractOfferPayloads(val: unknown): Record<string, unknown>[] {
@@ -166,23 +178,46 @@ function extractOfferPayloads(val: unknown): Record<string, unknown>[] {
 function parseJobOffer(val: Record<string, unknown>): JobOffer {
   const allNotes = collectJobNotes(val);
   const primaryNote = allNotes.map((n) => n.text).join('\n\n') || undefined;
+  const rawFare = val.fare ?? val.jobfare ?? val.jobFare;
+  const rawPayment = val.payment ?? val.jobpayment ?? val.paymentType ?? val.PaymentType ?? val.paymentMethod;
+  const rawId = val.id ?? val.jobId ?? val.joboffer ?? val.bookingid ?? val.bookingId ?? Date.now();
+  const idStr = String(rawId);
+  const normalizedId = idStr.includes(',') ? idStr.split(',')[0].trim() : idStr;
   return {
-    id: String(val.id ?? val.jobId ?? Date.now()),
+    id: normalizedId,
     type: (val.type as JobOffer['type']) ?? 'Taxi',
-    pickup: String(val.pickup ?? val.from ?? ''),
-    dropoff: String(val.dropoff ?? val.to ?? ''),
-    passengerName: val.passengerName ? String(val.passengerName) : undefined,
-    passengerPhone: val.passengerPhone ? String(val.passengerPhone) : undefined,
+    pickup: String(val.pickup ?? val.from ?? val.jobpickup ?? ''),
+    dropoff: String(val.dropoff ?? val.to ?? val.jobdropoff ?? ''),
+    passengerName: val.passengerName
+      ? String(val.passengerName)
+      : val.name || val.jobname
+        ? String(val.name ?? val.jobname)
+        : undefined,
+    passengerPhone: val.passengerPhone
+      ? String(val.passengerPhone)
+      : val.phone || val.JobphoneNo
+        ? String(val.phone ?? val.JobphoneNo)
+        : undefined,
     passengerEmail: val.passengerEmail ? String(val.passengerEmail) : undefined,
-    fixedFare: val.fixedFare != null ? Number(val.fixedFare) : undefined,
-    estimatedFare: val.estimatedFare != null ? Number(val.estimatedFare) : undefined,
+    fixedFare:
+      val.fixedFare != null
+        ? Number(val.fixedFare)
+        : rawFare != null && rawFare !== ''
+          ? Number(rawFare)
+          : undefined,
+    estimatedFare:
+      val.estimatedFare != null
+        ? Number(val.estimatedFare)
+        : rawFare != null && rawFare !== ''
+          ? Number(rawFare)
+          : undefined,
     estimatedDistanceKm:
       val.estimatedDistanceKm != null
         ? Number(val.estimatedDistanceKm)
         : val.distanceKm != null
           ? Number(val.distanceKm)
           : undefined,
-    paymentType: val.paymentType as PaymentType | undefined,
+    paymentType: (val.paymentType ?? val.PaymentType ?? rawPayment) as PaymentType | undefined,
     isAcc: !!val.isAcc,
     isTotalMobility: !!val.isTotalMobility,
     expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
@@ -674,26 +709,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (val.removed || val.declined) return;
     await handleIncomingOffer(val);
   };
-
-  useSafeEffect(() => {
-    if (!canReceiveJobOffers || !isFirebaseReady || !driver?.companyId || !driver.id) return;
-    try {
-      const offerRef = ref(getDatabaseInstance(), `jobOffers/${driver.companyId}/${driver.id}`);
-      return onValue(offerRef, async (snap) => {
-        try {
-          const payloads = extractOfferPayloads(snap.val());
-          for (const payload of payloads) {
-            await processOfferPayload(payload);
-          }
-        } catch (err) {
-          console.error('[Driver] job offer listener', err);
-        }
-      });
-    } catch (err) {
-      console.error('[Driver] job offer subscribe failed', err);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canReceiveJobOffers, driver?.companyId, driver?.id, activeJob?.stage], 'Driver-jobOffers');
 
   useSafeEffect(() => {
     if (!canReceiveJobOffers || !isFirebaseReady || !driver?.id) return;
