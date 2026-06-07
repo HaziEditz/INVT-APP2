@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useRef, useState, useCallback, ReactNode } from 'react';
 import { Alert } from 'react-native';
 import { get, onValue, ref, update } from 'firebase/database';
 import { getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
@@ -17,6 +17,7 @@ import {
   clearOnlinePresence,
   isVehicleStatusAvailable,
   moveDriverToEndOfQueue,
+  setPresenceShiftActive,
   startShiftOnline,
   writeOnlinePresence,
 } from '@/services/presenceService';
@@ -276,6 +277,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
   const currentZoneNameRef = useRef('');
   const onlineSnapshotRef = useRef<unknown>(null);
+  const jobHistoryInFlightRef = useRef(false);
+  const endShiftInProgressRef = useRef(false);
 
   useSafeEffect(() => {
     shiftActiveRef.current = shiftActive;
@@ -456,11 +459,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       .catch((err) => console.error('[Driver] loadCompanyInfo', err));
   }, [driver?.companyId, driver?.uid], 'Driver-company');
 
-  const refreshJobHistory = async () => {
+  const refreshJobHistory = useCallback(async () => {
+    if (jobHistoryInFlightRef.current || endShiftInProgressRef.current) return;
     if (!driver?.companyId || !driver.id || !firebaseUser || firebaseUser.isAnonymous) {
       setJobHistory([]);
       return;
     }
+    jobHistoryInFlightRef.current = true;
     setJobHistoryLoading(true);
     try {
       const rows = await loadDriverJobHistory(driver.companyId, driver.id, driver.uid);
@@ -468,14 +473,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn('[Driver] refreshJobHistory failed:', err);
     } finally {
+      jobHistoryInFlightRef.current = false;
       setJobHistoryLoading(false);
     }
-  };
+  }, [driver?.companyId, driver?.id, driver?.uid, firebaseUser]);
 
   useSafeEffect(() => {
+    if (endShiftInProgressRef.current) return;
     refreshJobHistory().catch((err) => console.error('[Driver] refreshJobHistory', err));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.companyId, driver?.id, firebaseUser?.uid], 'Driver-jobHistory');
+  }, [driver?.companyId, driver?.id, firebaseUser?.uid, refreshJobHistory], 'Driver-jobHistory');
 
   useSafeEffect(() => {
     if (!shiftActive) return;
@@ -895,6 +901,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     setShiftActive(true);
     shiftActiveRef.current = true;
+    setPresenceShiftActive(true);
     setReadyForJobs(false);
     readyForJobsRef.current = false;
     awayIntentRef.current = 'none';
@@ -914,6 +921,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('Connection issue', 'Could not register with dispatch. Check your network and try again.');
       setShiftActive(false);
       shiftActiveRef.current = false;
+      setPresenceShiftActive(false);
       await storeData(STORAGE_KEYS.shiftActive, false);
       return;
     }
@@ -1022,6 +1030,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const endShiftLocal = () => {
+    setPresenceShiftActive(false);
+    endShiftInProgressRef.current = true;
     setShiftActive(false);
     shiftActiveRef.current = false;
     awayIntentRef.current = 'none';
@@ -1054,7 +1064,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   ) => {
     if (driverSnapshot && vehicleId) {
       try {
-        await writeOnlinePresence(driverSnapshot, vehicleId, 'Offline');
+        await writeOnlinePresence(driverSnapshot, vehicleId, 'Offline', false, { force: true });
       } catch {
         // non-fatal
       }
@@ -1078,7 +1088,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const vehicleId = await resolveVehicleId();
     const driverSnapshot = driver;
     endShiftLocal();
-    await endShiftRemote(driverSnapshot, vehicleId);
+    try {
+      await endShiftRemote(driverSnapshot, vehicleId);
+    } finally {
+      endShiftInProgressRef.current = false;
+    }
   };
 
   const endShiftAndSignOut = async () => {
@@ -1086,8 +1100,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const vehicleId = await resolveVehicleId();
     const driverSnapshot = driver;
     endShiftLocal();
-    await endShiftRemote(driverSnapshot, vehicleId);
-    await signOut();
+    try {
+      await endShiftRemote(driverSnapshot, vehicleId);
+      await signOut();
+    } finally {
+      endShiftInProgressRef.current = false;
+    }
   };
 
   const acceptOffer = async () => {

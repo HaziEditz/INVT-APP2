@@ -5,6 +5,17 @@ import { getCurrentCoords } from '@/services/locationService';
 
 export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned';
 
+/** When false, routine presence writes (including GPS enrich) are skipped. */
+let shiftActiveForPresence = false;
+
+export function setPresenceShiftActive(active: boolean): void {
+  shiftActiveForPresence = active;
+}
+
+function canWritePresence(force = false): boolean {
+  return shiftActiveForPresence || force;
+}
+
 export function mapVehicleStatusToDisplay(raw: string | undefined | null): PresenceDisplayStatus {
   const s = String(raw ?? '').trim();
   if (!s || s.toLowerCase() === 'offline') return 'Offline';
@@ -85,10 +96,13 @@ function fmtNzTime(d: Date): string {
 function enrichShiftPresenceInBackground(driver: DriverProfile, vehicleId: string, startedAt: Date) {
   void (async () => {
     try {
+      if (!canWritePresence()) return;
+
       const onlinePath = `online/${driver.companyId}/${vehicleId}`;
       await ensureAuthUserForRtdbWrite(`enrichShiftPresence → ${onlinePath}`);
 
       const { lat, lng } = await getGps();
+      if (!canWritePresence()) return;
       const record = buildPresenceRecord(driver, vehicleId, 'Available', lat, lng);
       const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
 
@@ -164,9 +178,16 @@ export async function writeOnlinePresence(
   vehicleId: string,
   status: FirebaseDriverStatus,
   resetZone = false,
+  options?: { force?: boolean },
 ) {
   if (!driver.companyId || !vehicleId) {
     console.warn('[Presence] skipped — missing companyId or vehicleId');
+    return;
+  }
+
+  const force = options?.force === true;
+  if (!canWritePresence(force)) {
+    console.log('[Presence] skipped write — shift not active', { status });
     return;
   }
 
@@ -199,6 +220,7 @@ export async function writeOnlinePresence(
 
   void getGps()
     .then(({ lat, lng }) => {
+      if (!canWritePresence(force)) return;
       const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
       return update(presencePath, {
         ...record,
@@ -214,6 +236,7 @@ export async function writeOnlinePresence(
 /** After missed offer — driver re-joins zone at end of queue. */
 export async function moveDriverToEndOfQueue(driver: DriverProfile, vehicleId: string): Promise<void> {
   if (!driver.companyId || !vehicleId) return;
+  if (!canWritePresence()) return;
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
   const endPos = 9999;
   try {
