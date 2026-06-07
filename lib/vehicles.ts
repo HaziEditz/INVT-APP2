@@ -40,8 +40,10 @@ function collectIdsFromField(raw: unknown, into: string[]) {
 
 function extractAllocatedIds(profile: Record<string, unknown>): string[] {
   const allocated: string[] = [];
-  collectIdsFromField(profile.allocatedVehicles, allocated);
+  // Canonical field from Owner Panel / SA: assignedVehicles (uppercase string array).
   collectIdsFromField(profile.assignedVehicles, allocated);
+  // Legacy Owner Panel object-map field — read until all profiles are re-saved.
+  collectIdsFromField(profile.allocatedVehicles, allocated);
   collectIdsFromField(profile.assignedVehicleIds, allocated);
   collectIdsFromField(profile.vehicles, allocated);
 
