@@ -32,7 +32,6 @@ export function buildLeafletMapHtml(): string {
     var pickupMarker = null;
     var dropoffMarker = null;
     var routeLayer = null;
-    var zoneLayers = [];
     var mapReady = false;
 
     function setStatus(msg) {
@@ -74,12 +73,6 @@ export function buildLeafletMapHtml(): string {
       if (!map) return;
       if (pickupMarker) { map.removeLayer(pickupMarker); pickupMarker = null; }
       if (dropoffMarker) { map.removeLayer(dropoffMarker); dropoffMarker = null; }
-    }
-
-    function clearZones() {
-      if (!map) return;
-      zoneLayers.forEach(function(l){ map.removeLayer(l); });
-      zoneLayers = [];
     }
 
     function setDriver(lat, lng) {
@@ -138,21 +131,6 @@ export function buildLeafletMapHtml(): string {
       } else if (payload.pickupLat && payload.pickupLng && !payload.dropoffLat) {
         map.setView([payload.pickupLat, payload.pickupLng], 14);
       }
-      if (payload.zones && Array.isArray(payload.zones)) {
-        clearZones();
-        payload.zones.forEach(function(z) {
-          if (!z.boundary || !z.boundary.length) return;
-          var latlngs = z.boundary.map(function(p){ return [p[0], p[1]]; });
-          var layer = L.polygon(latlngs, {
-            color: z.active === false ? '#94a3b8' : '#00695C',
-            weight: 2,
-            fillColor: z.active === false ? '#cbd5e1' : '#00695C',
-            fillOpacity: z.active === false ? 0.08 : 0.15
-          }).addTo(map);
-          if (z.name) layer.bindPopup(z.name);
-          zoneLayers.push(layer);
-        });
-      }
     }
 
     window.updateMap = updateMap;
@@ -188,5 +166,4 @@ export type LeafletMapPayload = {
   centerLat?: number;
   centerLng?: number;
   centerZoom?: number;
-  zones?: Array<{ name: string; active?: boolean; boundary: number[][] }>;
 };

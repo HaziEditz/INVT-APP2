@@ -11,7 +11,7 @@ export function HomeBottomBar() {
     zone.position > 0
       ? `#${zone.position}${zone.totalInQueue > 0 ? ` of ${zone.totalInQueue}` : ''}`
       : shiftActive
-        ? 'No queue data'
+        ? 'Waiting'
         : '—';
 
   return (

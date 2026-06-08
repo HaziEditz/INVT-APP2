@@ -24,7 +24,7 @@ export default function ZoneQueueScreen() {
           <Text style={styles.position}>
             {hasQueuePosition
               ? `You are #${zone.position}${zone.totalInQueue > 0 ? ` of ${zone.totalInQueue}` : ''}`
-              : 'No queue position from dispatch yet'}
+              : 'Waiting'}
           </Text>
         ) : (
           <Text style={styles.position}>Start your shift to join the queue</Text>

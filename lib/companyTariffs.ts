@@ -13,10 +13,11 @@ function parseTariffNode(id: string, val: unknown): Tariff | null {
     t.ratePerKm ?? t.perKm ?? t.kmRate ?? t.pricePerKm ?? NaN,
   );
   const waitingPerMin = Number(
-    t.waitingPerMin ??
+    t.waitingRatePerMinute ??
+      t.waitingRate ??
+      t.waitingPerMin ??
       t.waitPerMin ??
       t.waiting ??
-      t.waitingRate ??
       t.waitingCostPerMin ??
       t.waitingPerMinute ??
       NaN,

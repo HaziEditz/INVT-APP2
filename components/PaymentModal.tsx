@@ -57,15 +57,14 @@ export function PaymentModal() {
   };
 
   return (
-    <Modal visible animationType="slide" transparent statusBarTranslucent>
-      <View style={styles.overlay}>
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
+    <Modal visible animationType="slide" presentationStyle="fullScreen" statusBarTranslucent>
+      <View style={[styles.root, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
             <Text style={styles.title}>Collect Payment</Text>
             <Text style={styles.sub} numberOfLines={2}>
               {paymentJob.pickup}
@@ -145,25 +144,18 @@ export function PaymentModal() {
               disabled={submitting}
             />
           </View>
-        </View>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
-  sheet: {
+  root: {
+    flex: 1,
     backgroundColor: Colors.surface,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    maxHeight: '92%',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
   },
-  scroll: { flexGrow: 0 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 8 },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 8, flexGrow: 1 },
   title: { color: Colors.text, fontSize: 22, fontWeight: '800' },
   sub: { color: Colors.textMuted, fontSize: 14, marginTop: 4, marginBottom: 12 },
   breakdownCard: {

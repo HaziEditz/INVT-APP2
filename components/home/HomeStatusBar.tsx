@@ -47,7 +47,9 @@ export function HomeStatusBar() {
   const queueLabel =
     shiftActive && zone.position > 0
       ? `#${zone.position}`
-      : '—';
+      : shiftActive
+        ? 'Waiting'
+        : '—';
   const timeInZone =
     shiftActive && zoneEnteredAt ? formatZoneElapsed(Date.now() - zoneEnteredAt) : '—';
 
