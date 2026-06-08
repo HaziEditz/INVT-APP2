@@ -231,7 +231,26 @@ export interface PaymentExtras {
   tolls: number;
   other: number;
   otherNote?: string;
+  hoistCount?: number;
+  hoistCost?: number;
 }
+
+export interface TmPaymentDetails {
+  councilPays: number;
+  passengerPays: number;
+  tmCardNumber?: string;
+  tmCardName?: string;
+  tmCardExpiry?: string;
+  totalFare: number;
+}
+
+export const TM_PASSENGER_PAYMENT_TYPES = [
+  'Cash',
+  'Card',
+  'EFTPOS',
+  'Account',
+  'ACC',
+] as const;
 
 export interface PreBookingForm {
   passengerName: string;

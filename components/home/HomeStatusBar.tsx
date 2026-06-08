@@ -45,7 +45,7 @@ export function HomeStatusBar() {
 
   const zoneName = shiftActive ? zone.name?.trim() || '—' : '—';
   const queueLabel =
-    shiftActive && zone.position > 0
+    shiftActive && (zone.position ?? 0) > 0
       ? `#${zone.position}`
       : shiftActive
         ? 'Waiting'

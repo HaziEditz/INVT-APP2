@@ -47,6 +47,7 @@ import {
   PresenceDisplayStatus,
   QueuedOffer,
   Tariff,
+  TmPaymentDetails,
   Vehicle,
   ZoneInfo,
 } from '@/types';
@@ -95,7 +96,12 @@ interface DriverContextValue {
   advanceStage: () => Promise<void>;
   setPaymentType: (payment: PaymentType) => void;
   completeJob: () => Promise<void>;
-  finalizePayment: (paymentType: string, extras: PaymentExtras, totalFare: number) => Promise<void>;
+  finalizePayment: (
+    paymentType: string,
+    extras: PaymentExtras,
+    totalFare: number,
+    tmDetails?: TmPaymentDetails,
+  ) => Promise<void>;
   dismissPayment: () => void;
   cancelActiveJob: () => Promise<void>;
   noShowActiveJob: () => Promise<void>;
@@ -1059,7 +1065,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
-      writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+      writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
     }
   };
 
@@ -1101,7 +1107,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
-      writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+      writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
     }
   };
 
@@ -1227,6 +1233,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     paymentType: string,
     extras: PaymentExtras,
     totalFare: number,
+    tmDetails?: TmPaymentDetails,
   ) => {
     const job = paymentJob ?? activeJob;
     if (!job || !driver?.companyId) return;
@@ -1248,7 +1255,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const completedAt = Date.now();
 
     try {
-      await writeClosedJob(driver.companyId, driver.id, closed, paymentType, extras, totalFare);
+      await writeClosedJob(driver.companyId, driver.id, closed, paymentType, extras, totalFare, tmDetails);
     } catch (err) {
       console.warn('[Driver] writeClosedJob failed:', err);
     }
@@ -1397,6 +1404,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     meterRef.current = m;
     storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
     startMeterWatch();
+
+    if (driver) {
+      const vehicleId = await resolveVehicleId();
+      if (vehicleId) {
+        writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+      }
+    }
   };
 
   const endHail = async () => {

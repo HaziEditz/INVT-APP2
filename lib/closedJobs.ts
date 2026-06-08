@@ -1,6 +1,6 @@
 import { push, ref, set } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
-import { ActiveJob, PaymentExtras, PaymentType } from '@/types';
+import { ActiveJob, PaymentExtras, PaymentType, TmPaymentDetails } from '@/types';
 
 export async function writeClosedJob(
   companyId: string,
@@ -9,6 +9,7 @@ export async function writeClosedJob(
   paymentType: PaymentType | string,
   extras: PaymentExtras,
   totalFare: number,
+  tmDetails?: TmPaymentDetails,
 ): Promise<string> {
   const database = getDatabaseInstance();
   const entryRef = push(ref(database, `closedJobs/${companyId}`));
@@ -47,6 +48,16 @@ export async function writeClosedJob(
     completedAt: now,
     closedAt: now,
     status: 'closed',
+    ...(tmDetails
+      ? {
+          tmCouncilPays: tmDetails.councilPays,
+          tmPassengerPays: tmDetails.passengerPays,
+          tmCardNumber: tmDetails.tmCardNumber ?? '',
+          tmCardName: tmDetails.tmCardName ?? '',
+          tmCardExpiry: tmDetails.tmCardExpiry ?? '',
+          tmTotalFare: tmDetails.totalFare,
+        }
+      : {}),
   });
 
   return id;
