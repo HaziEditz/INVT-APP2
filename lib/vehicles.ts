@@ -38,7 +38,8 @@ function collectIdsFromField(raw: unknown, into: string[]) {
   }
 }
 
-function extractAllocatedIds(profile: Record<string, unknown>): string[] {
+/** Uppercase vehicle IDs from driver profile — assignedVehicles array is canonical. */
+export function extractAssignedVehicleIds(profile: Record<string, unknown>): string[] {
   const allocated: string[] = [];
   // Canonical field from Owner Panel / SA: assignedVehicles (uppercase string array).
   collectIdsFromField(profile.assignedVehicles, allocated);
@@ -178,14 +179,14 @@ export async function loadDriverVehicles(
 
   const profileSnap = await get(ref(getDatabaseInstance(), `drivers/${companyId}/${uid}`));
   if (profileSnap.exists()) {
-    allocated.push(...extractAllocatedIds(profileSnap.val() as Record<string, unknown>));
+    allocated.push(...extractAssignedVehicleIds(profileSnap.val() as Record<string, unknown>));
   }
 
   if (driverIdHint && driverIdHint !== uid) {
     try {
       const altSnap = await get(ref(getDatabaseInstance(), `drivers/${companyId}/${driverIdHint}`));
       if (altSnap.exists()) {
-        allocated.push(...extractAllocatedIds(altSnap.val() as Record<string, unknown>));
+        allocated.push(...extractAssignedVehicleIds(altSnap.val() as Record<string, unknown>));
       }
     } catch {
       // non-fatal

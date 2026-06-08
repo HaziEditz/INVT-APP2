@@ -5,6 +5,7 @@ import type { DataSnapshot } from 'firebase/database';
 import { get, ref } from 'firebase/database';
 import { getAuthInstance, getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
 import { getData, removeData, storeData, STORAGE_KEYS } from '@/lib/storage';
+import { extractAssignedVehicleIds } from '@/lib/vehicles';
 import { DriverProfile } from '@/types';
 
 function normalizeDriverId(id: string) {
@@ -34,7 +35,12 @@ function buildProfileFromFirebase(
     email: String(fb.email ?? ''),
     phone: String(fb.phone ?? ''),
     companyId: String(fb.companyId ?? companyId),
-    vehicleId: String(fb.vehicleId ?? fb.vehicle ?? ''),
+    vehicleId: (() => {
+      const fromField = String(fb.vehicleId ?? fb.vehicle ?? '').trim().toUpperCase();
+      if (fromField) return fromField;
+      const assigned = extractAssignedVehicleIds(fb);
+      return assigned[0] ?? '';
+    })(),
     driverType: (fb.driverType as DriverProfile['driverType']) ?? 'Taxi',
     passforlink: String(fb.passforlink ?? fb.PassForLink ?? ''),
   };
