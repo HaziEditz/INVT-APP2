@@ -153,13 +153,14 @@ export function PaymentModal() {
   };
 
   return (
-    <Modal visible animationType="slide" presentationStyle="fullScreen" statusBarTranslucent>
-      <View
-        style={[
-          styles.sheet,
-          { paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 12) },
-        ]}
-      >
+    <Modal visible animationType="slide" presentationStyle="fullScreen">
+      <View style={styles.fullScreen}>
+        <View
+          style={[
+            styles.sheet,
+            { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 12) },
+          ]}
+        >
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
@@ -354,6 +355,7 @@ export function PaymentModal() {
             onPress={onDone}
             disabled={submitting}
           />
+          </View>
         </View>
       </View>
     </Modal>
@@ -361,6 +363,12 @@ export function PaymentModal() {
 }
 
 const styles = StyleSheet.create({
+  fullScreen: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: Colors.surface,
+  },
   sheet: {
     position: 'absolute',
     top: 0,
@@ -368,7 +376,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: '100%',
+    width: '100%',
     backgroundColor: Colors.surface,
+    flex: 1,
   },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingBottom: 8, flexGrow: 1 },

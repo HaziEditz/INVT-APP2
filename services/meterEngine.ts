@@ -6,6 +6,12 @@ const SPEED_MOVING_MS = 5 / 3.6; // 5 km/h
 const TICK_MS = 2000;
 const UNPAUSE_DISTANCE_M = 50;
 
+type GpsSample = {
+  lat: number;
+  lng: number;
+  speedMs: number | null;
+};
+
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -16,8 +22,9 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/** Expo Go often returns null, undefined, -1, or 0 when stationary — treat as not moving. */
 function normalizeSpeed(speedMs?: number | null): number {
-  if (speedMs == null || !Number.isFinite(speedMs) || speedMs < 0) return 0;
+  if (speedMs == null || !Number.isFinite(speedMs) || speedMs <= 0) return 0;
   return speedMs;
 }
 
@@ -52,6 +59,19 @@ function applyTariffToMeter(meter: MeterState, tariff: Tariff): MeterState {
   };
 }
 
+function logMeterTick(speed: number, mode: MeterMode, meter: MeterState, tariff: Tariff) {
+  const waitMin = meter.waitingMs / 60000;
+  console.log('[Meter]', {
+    speed: +speed.toFixed(2),
+    mode,
+    waitingMs: meter.waitingMs,
+    waitingMin: +waitMin.toFixed(3),
+    waitingPerMin: tariff.waitingPerMin,
+    waitingCharge: +(waitMin * tariff.waitingPerMin).toFixed(2),
+    fare: meter.fare,
+  });
+}
+
 export type MeterTickResult = {
   meter: MeterState;
   autoUnpaused?: boolean;
@@ -66,7 +86,9 @@ export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | 
 
   if (meter.paused) {
     next.pausedMs += TICK_MS;
-    return { meter: applyTariffToMeter(next, tariff) };
+    const result = applyTariffToMeter(next, tariff);
+    logMeterTick(0, result.mode, result, tariff);
+    return { meter: result };
   }
 
   const speed = normalizeSpeed(speedMs);
@@ -78,7 +100,9 @@ export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | 
     next.waitingMs += TICK_MS;
   }
 
-  return { meter: applyTariffToMeter(next, tariff) };
+  const result = applyTariffToMeter(next, tariff);
+  logMeterTick(speed, result.mode, result, tariff);
+  return { meter: result };
 }
 
 export function tickMeterWithGps(
@@ -116,9 +140,23 @@ export function tickMeterWithGps(
     next.distanceKm += distanceDeltaM / 1000;
   }
 
-  // Waiting time accrues whenever speed is at or below 5 km/h.
   const tick = tickMeter(next, tariff, speedSaysMoving ? speed : 0);
   return { ...tick, autoUnpaused };
+}
+
+function runMeterTick(
+  getMeter: () => MeterState | null,
+  tariff: Tariff,
+  gps: GpsSample | null,
+  onUpdate: (result: MeterTickResult) => void,
+) {
+  const m = getMeter();
+  if (!m?.running) return;
+  if (gps) {
+    onUpdate(tickMeterWithGps(m, tariff, gps.lat, gps.lng, gps.speedMs));
+  } else {
+    onUpdate(tickMeter(m, tariff, 0));
+  }
 }
 
 export async function watchMeter(
@@ -127,37 +165,38 @@ export async function watchMeter(
   onUpdate: (result: MeterTickResult) => void,
 ): Promise<() => void> {
   let sub: Location.LocationSubscription | null = null;
+  let lastGps: GpsSample | null = null;
+
+  const intervalId = setInterval(() => {
+    runMeterTick(getMeter, tariff, lastGps, onUpdate);
+  }, TICK_MS);
+
   try {
-    const { status } = await Location.getForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      const id = setInterval(() => {
-        const m = getMeter();
-        if (!m?.running) return;
-        onUpdate(tickMeter(m, tariff, 0));
-      }, TICK_MS);
-      return () => clearInterval(id);
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === 'granted') {
+      sub = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          distanceInterval: 0,
+          timeInterval: TICK_MS,
+        },
+        (loc) => {
+          lastGps = {
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+            speedMs: loc.coords.speed ?? null,
+          };
+        },
+      );
     }
-    sub = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.Balanced,
-        distanceInterval: 0,
-        timeInterval: TICK_MS,
-      },
-      (loc) => {
-        const m = getMeter();
-        if (!m?.running) return;
-        onUpdate(
-          tickMeterWithGps(m, tariff, loc.coords.latitude, loc.coords.longitude, loc.coords.speed),
-        );
-      },
-    );
-    return () => sub?.remove();
-  } catch {
-    const id = setInterval(() => {
-      const m = getMeter();
-      if (!m?.running) return;
-      onUpdate(tickMeter(m, tariff, 0));
-    }, TICK_MS);
-    return () => clearInterval(id);
+  } catch (err) {
+    console.warn('[Meter] GPS watch failed, using interval-only ticks:', err);
   }
+
+  runMeterTick(getMeter, tariff, null, onUpdate);
+
+  return () => {
+    clearInterval(intervalId);
+    sub?.remove();
+  };
 }

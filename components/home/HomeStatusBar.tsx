@@ -44,12 +44,13 @@ export function HomeStatusBar() {
   }, [shiftActive, zoneEnteredAt]);
 
   const zoneName = shiftActive ? zone.name?.trim() || '—' : '—';
-  const queueLabel =
-    shiftActive && (zone.position ?? 0) > 0
-      ? `#${zone.position}`
-      : shiftActive
-        ? 'Waiting'
-        : '—';
+  const queueLabel = !shiftActive
+    ? '—'
+    : hasTripInProgress
+      ? 'On Trip'
+      : (zone.position ?? 0) > 0
+        ? `#${zone.position}`
+        : 'Waiting';
   const timeInZone =
     shiftActive && zoneEnteredAt ? formatZoneElapsed(Date.now() - zoneEnteredAt) : '—';
 
