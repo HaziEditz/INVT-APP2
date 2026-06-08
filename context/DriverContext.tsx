@@ -1040,8 +1040,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const vehicleId = await resolveVehicleId();
     const driverSnapshot = driver;
     endShiftLocal();
+    await endShiftRemote(driverSnapshot, vehicleId);
     await signOut();
-    void endShiftRemote(driverSnapshot, vehicleId);
   };
 
   const acceptOffer = async () => {
