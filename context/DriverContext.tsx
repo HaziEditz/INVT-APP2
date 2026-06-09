@@ -9,7 +9,8 @@ import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, declineJobOffer } from '@/lib/dispatchApi';
+import { acceptJobOffer, declineJobOffer, recallJobOnDispatch } from '@/lib/dispatchApi';
+import { subscribeDriverQueue } from '@/lib/driverQueue';
 import { tickWorkedMinutes } from '@/services/nztaService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
@@ -111,6 +112,7 @@ interface DriverContextValue {
   cancelActiveJob: () => Promise<void>;
   noShowActiveJob: () => Promise<void>;
   recallJob: () => Promise<void>;
+  recallQueuedOffer: (offerId: string) => Promise<void>;
   startHail: () => Promise<void>;
   endHail: () => Promise<void>;
   endTrip: () => Promise<void>;
@@ -500,6 +502,25 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] pending jobs subscribe failed', err);
     }
   }, [shiftActive, driver?.companyId, selectedVehicleId, activeVehicle?.id], 'Driver-pendingJobs');
+
+  useSafeEffect(() => {
+    if (!shiftActive || !driver?.companyId || !driver.id) {
+      setQueuedOffers([]);
+      return;
+    }
+    try {
+      return subscribeDriverQueue(driver.companyId, driver.id, activeVehicle, (offers) => {
+        setQueuedOffers(
+          offers.map((o) => ({
+            ...o,
+            queuedAt: o.queuedAt ?? Date.now(),
+          })),
+        );
+      });
+    } catch (err) {
+      console.error('[Driver] driverQueue subscribe failed', err);
+    }
+  }, [shiftActive, driver?.companyId, driver?.id, activeVehicle?.id], 'Driver-firebaseQueue');
 
   useSafeEffect(() => {
     if (!isFirebaseReady || !driver?.companyId) {
@@ -1104,6 +1125,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: jobOffer.id } });
     }
     const job = defaultActiveJob(jobOffer);
+    job.originalStatus = jobOffer.originalStatus ?? 'pending';
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
@@ -1140,12 +1162,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      await acceptJobOffer(offer.id, driver.id);
+      const result = await acceptJobOffer(offer.id, driver.id) as { queued?: boolean; status?: string };
+      if (result?.queued || result?.status === 'Queued') {
+        Alert.alert('Job queued', 'You will be notified when your current trip finishes.');
+        return;
+      }
     } catch {
       await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offer.id } });
     }
 
     const job = defaultActiveJob(offer);
+    job.originalStatus = offer.originalStatus ?? 'pending';
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
@@ -1392,13 +1419,59 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const recallJob = async () => {
-    if (!activeJob) return;
-    const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
-    const idx = order.indexOf(activeJob.stage);
-    if (idx <= 0) return;
-    const updated = { ...activeJob, stage: order[idx - 1] };
-    setActiveJob(updated);
-    await storeData(STORAGE_KEYS.activeJob, updated);
+    if (!driver) return;
+    const job = activeJob;
+    if (!job) {
+      const q = queuedOffers[0];
+      if (!q) return;
+      try {
+        await recallJobOnDispatch(q.id, driver.id, q.originalStatus ?? 'pending');
+      } catch (err) {
+        Alert.alert('Recall failed', err instanceof Error ? err.message : 'Could not recall job');
+        return;
+      }
+      setQueuedOffers((prev) => prev.filter((o) => o.id !== q.id));
+      Alert.alert('Job recalled', 'Job returned to dispatch.');
+      return;
+    }
+
+    try {
+      await recallJobOnDispatch(job.id, driver.id, job.originalStatus ?? 'pending');
+    } catch (err) {
+      Alert.alert('Recall failed', err instanceof Error ? err.message : 'Could not recall job');
+      return;
+    }
+
+    stopMeterForJob();
+    setMeter(null);
+    meterRef.current = null;
+    setActiveJob(null);
+    activeJobIdRef.current = null;
+    await storeData(STORAGE_KEYS.activeJob, null);
+    await storeData(STORAGE_KEYS.meterState, null);
+
+    const vehicleId = await resolveVehicleId();
+    if (vehicleId && shiftActive) {
+      writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
+      setPresenceStatus('Online');
+      setReadyForJobs(true);
+      readyForJobsRef.current = true;
+    }
+    Alert.alert('Job recalled', 'Job returned to dispatch.');
+  };
+
+  const recallQueuedOffer = async (offerId: string) => {
+    if (!driver) return;
+    const q = queuedOffers.find((o) => o.id === offerId);
+    if (!q) return;
+    try {
+      await recallJobOnDispatch(q.id, driver.id, q.originalStatus ?? 'pending');
+    } catch (err) {
+      Alert.alert('Recall failed', err instanceof Error ? err.message : 'Could not recall job');
+      return;
+    }
+    setQueuedOffers((prev) => prev.filter((o) => o.id !== offerId));
+    Alert.alert('Job recalled', 'Job returned to dispatch.');
   };
 
   const stopMeterTimers = () => {
@@ -1655,6 +1728,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         cancelActiveJob,
         noShowActiveJob,
         recallJob,
+        recallQueuedOffer,
         startHail,
         endHail,
         endTrip,

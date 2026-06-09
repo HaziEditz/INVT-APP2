@@ -16,7 +16,7 @@ function parseLatLng(raw?: string): { lat?: number; lng?: number } {
 export function parsePendingJobNode(id: string, val: Record<string, unknown>): JobOffer | null {
   if (val.claimedBy || val.takenBy) return null;
   const status = String(val.Status ?? val.status ?? 'Pending').toLowerCase();
-  if (status && !['pending', 'offered', ''].includes(status)) return null;
+  if (status && status !== 'pending') return null;
 
   const pickup = String(val.PickAddress ?? val.pickAddress ?? val.pickup ?? '');
   const dropoff = String(val.DropAddress ?? val.dropAddress ?? val.dropoff ?? '');

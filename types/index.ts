@@ -70,6 +70,8 @@ export interface JobOffer {
   vehicleTypeRequired?: string;
   passengers?: number;
   serviceTypeRaw?: string;
+  originalStatus?: 'pending' | 'manual';
+  queuedAt?: number;
 }
 
 export interface QueuedOffer extends JobOffer {

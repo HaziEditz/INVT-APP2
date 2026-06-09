@@ -5,7 +5,13 @@ import { useDriver } from '@/context/DriverContext';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function QueuePanel() {
-  const { queuedOffers, promoteQueuedOffer } = useDriver();
+  const { queuedOffers, promoteQueuedOffer, recallQueuedOffer } = useDriver();
+
+  const waitLabel = (queuedAt?: number) => {
+    if (!queuedAt) return '';
+    const mins = Math.max(0, Math.round((Date.now() - queuedAt) / 60000));
+    return mins < 1 ? 'Just queued' : `${mins} min waiting`;
+  };
 
   if (queuedOffers.length === 0) {
     return (
@@ -28,12 +34,19 @@ export function QueuePanel() {
           <Text style={styles.addr} numberOfLines={1}>
             → {o.dropoff}
           </Text>
-          <Button
-            title="Show when ready"
-            variant="secondary"
-            onPress={() => promoteQueuedOffer(o.id)}
-            style={{ marginTop: 8 }}
-          />
+          {o.passengerName ? (
+            <Text style={styles.meta}>{o.passengerName}{o.passengerPhone ? ` · ${o.passengerPhone}` : ''}</Text>
+          ) : null}
+          <Text style={styles.meta}>{waitLabel(o.queuedAt)}</Text>
+          <View style={styles.actions}>
+            <Button
+              title="Show when ready"
+              variant="secondary"
+              onPress={() => promoteQueuedOffer(o.id)}
+              style={{ flex: 1 }}
+            />
+            <Button title="Recall" variant="secondary" onPress={() => recallQueuedOffer(o.id)} style={{ flex: 1 }} />
+          </View>
         </View>
       ))}
     </ScrollView>
@@ -55,4 +68,6 @@ const styles = StyleSheet.create({
   },
   queuePos: { color: Colors.accent, fontWeight: '800', marginBottom: 6 },
   addr: { color: Colors.text, fontSize: 14, marginTop: 4 },
+  meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 10 },
 });

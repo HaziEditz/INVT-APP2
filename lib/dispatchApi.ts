@@ -115,8 +115,13 @@ export async function acceptJobOffer(jobId: string, driverId: string) {
   return dispatchPost('/api/job/accept', { jobId, driverId });
 }
 
-export async function declineJobOffer(jobId: string, driverId: string) {
-  return dispatchPost('/api/job/decline', { jobId, driverId });
+export async function recallJobOnDispatch(jobId: string, driverId: string, originalStatus?: string) {
+  return dispatchPost<{ ok: boolean; restoredStatus?: string }>('/api/job/recall', {
+    jobId,
+    bookingId: jobId,
+    driverId,
+    originalStatus: originalStatus ?? 'pending',
+  });
 }
 
 export async function createPreBooking(payload: Record<string, unknown>) {
