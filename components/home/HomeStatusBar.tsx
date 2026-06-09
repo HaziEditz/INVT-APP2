@@ -2,7 +2,7 @@ import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { formatQueueDisplay } from '@/lib/zoneQueue';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function formatZoneElapsed(ms: number): string {
@@ -13,7 +13,7 @@ function formatZoneElapsed(ms: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-/** Top bar: Available/Away | Zone | Queue | Time in zone */
+/** Top bar: Available/Away | ZQ | Zone | Time — single compact row */
 export function HomeStatusBar() {
   const insets = useSafeAreaInsets();
   const { presenceStatus, shiftActive, togglePresence, zone, readyForJobs, hasTripInProgress } =
@@ -55,10 +55,10 @@ export function HomeStatusBar() {
   const timeInZone =
     shiftActive && zoneEnteredAt ? formatZoneElapsed(Date.now() - zoneEnteredAt) : '—';
 
-  const toggleLabel = !shiftActive ? 'Off shift' : isAvailable ? 'Available' : isAway ? 'Away' : 'Available';
+  const toggleLabel = !shiftActive ? 'Off' : isAvailable ? 'Avail' : isAway ? 'Away' : 'Avail';
 
   return (
-    <View style={[styles.bar, { paddingTop: insets.top + 6 }]}>
+    <View style={[styles.bar, { paddingTop: insets.top + 4 }]}>
       <Pressable
         style={[styles.toggle, isAvailable ? styles.toggleOn : isAway ? styles.toggleAway : styles.toggleOff]}
         onPress={
@@ -74,27 +74,20 @@ export function HomeStatusBar() {
         }
         disabled={!shiftActive}
       >
-        <Text style={styles.toggleText}>{toggleLabel}</Text>
+        <Text style={styles.toggleText} numberOfLines={1}>
+          {toggleLabel}
+        </Text>
       </Pressable>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.metaScroll}
-        contentContainerStyle={styles.metaRow}
-      >
-        <Text style={styles.meta}>
+      <View style={styles.metaLine}>
+        <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
+          ZQ: <Text style={styles.metaVal}>{queueLabel}</Text>
+          <Text style={styles.sep}> | </Text>
           Zone: <Text style={styles.metaVal}>{zoneName}</Text>
+          <Text style={styles.sep}> | </Text>
+          Time: <Text style={styles.metaVal}>{timeInZone}</Text>
         </Text>
-        <Text style={styles.sep}>|</Text>
-        <Text style={styles.meta}>
-          Queue: <Text style={styles.metaVal}>{queueLabel}</Text>
-        </Text>
-        <Text style={styles.sep}>|</Text>
-        <Text style={styles.meta}>
-          Time in zone: <Text style={styles.metaVal}>{timeInZone}</Text>
-        </Text>
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -103,27 +96,27 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingBottom: 8,
+    paddingHorizontal: 6,
+    paddingBottom: 5,
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
-    gap: 8,
+    gap: 4,
   },
   toggle: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
-    minWidth: 88,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 14,
+    minWidth: 52,
+    maxWidth: 56,
     alignItems: 'center',
   },
   toggleOn: { backgroundColor: Colors.success },
   toggleAway: { backgroundColor: Colors.warning },
   toggleOff: { backgroundColor: Colors.textMuted },
-  toggleText: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  metaScroll: { flex: 1, minWidth: 0 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 8 },
-  meta: { color: Colors.textMuted, fontSize: 12, fontWeight: '600' },
-  metaVal: { color: Colors.text, fontWeight: '700' },
-  sep: { color: Colors.border, fontSize: 12, fontWeight: '300' },
+  toggleText: { color: '#fff', fontWeight: '800', fontSize: 10 },
+  metaLine: { flex: 1, minWidth: 0 },
+  meta: { color: Colors.textMuted, fontSize: 11, fontWeight: '600' },
+  metaVal: { color: Colors.text, fontWeight: '700', fontSize: 11 },
+  sep: { color: Colors.border, fontSize: 11, fontWeight: '400' },
 });
