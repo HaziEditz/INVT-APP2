@@ -685,6 +685,30 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const promptQueuedOfferAfterTrip = () => {
+    setTimeout(() => {
+      setQueuedOffers((q) => {
+        if (q.length === 0) return q;
+        const next = q[0];
+        Alert.alert(
+          'Queued job waiting',
+          `You have a queued job (#${next.id}) — tap Accept when you are ready.`,
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Accept',
+              onPress: () => {
+                setQueuedOffers((prev) => prev.filter((o) => o.id !== next.id));
+                setJobOffer({ ...next, silent: false });
+              },
+            },
+          ],
+        );
+        return q;
+      });
+    }, 400);
+  };
+
   const enqueueOffer = (offer: JobOffer) => {
     const queued: QueuedOffer = { ...offer, queuedAt: Date.now(), silent: true };
     setQueuedOffers((prev) => {
@@ -1388,9 +1412,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         readyForJobsRef.current = true;
       }
     }
-    if (queuedOffers.length > 0) {
-      setTimeout(flushQueuedOffer, 400);
-    }
+    promptQueuedOfferAfterTrip();
   };
 
   const cancelActiveJobInternal = async () => {
@@ -1406,7 +1428,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const vehicleId = await resolveVehicleId();
       if (vehicleId) writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
     }
-    if (queuedOffers.length > 0) setTimeout(flushQueuedOffer, 400);
+    promptQueuedOfferAfterTrip();
   };
 
   const cancelActiveJob = async () => {
