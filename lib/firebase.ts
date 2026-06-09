@@ -1,5 +1,13 @@
 import { FirebaseApp, getApps, initializeApp } from 'firebase/app';
-import { Auth, User, getAuth, signInAnonymously } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  Auth,
+  User,
+  getAuth,
+  getReactNativePersistence,
+  initializeAuth,
+  signInAnonymously,
+} from 'firebase/auth';
 import { Database, getDatabase } from 'firebase/database';
 import { Platform } from 'react-native';
 
@@ -23,24 +31,17 @@ function initAuth(instance: FirebaseApp): Auth {
     return getAuth(instance);
   }
 
-  const isNew = getApps().length === 1;
-  if (!isNew) {
-    try {
-      return getAuth(instance);
-    } catch (err) {
-      console.warn('[Firebase] getAuth on existing app:', err);
-    }
-  }
-
   try {
-    return getAuth(instance);
+    return initializeAuth(instance, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('already-initialized') || message.includes('already initialized')) {
       console.log('[Firebase] Auth already initialized, reusing instance');
       return getAuth(instance);
     }
-    console.warn('[Firebase] getAuth failed:', err);
+    console.warn('[Firebase] initializeAuth failed:', err);
     throw err;
   }
 }
