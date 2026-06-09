@@ -11,7 +11,7 @@ type RouteTarget = '/(auth)/login' | '/select-vehicle' | '/(tabs)';
 /** Route guard: auth → vehicle selection → main tabs. */
 export function AuthNavigator() {
   const { firebaseUser, driver, loading } = useAuth();
-  const { shiftActive } = useDriver();
+  const { shiftActive, endShiftInProgress } = useDriver();
   const segments = useSegments();
   const router = useRouter();
   const [vehicleReady, setVehicleReady] = useState<boolean | null>(null);
@@ -33,6 +33,7 @@ export function AuthNavigator() {
 
   useEffect(() => {
     if (loading || vehicleReady === null) return;
+    if (endShiftInProgress) return;
     if (Date.now() < guardUntilRef.current) return;
 
     const root = segments[0] ?? '';
@@ -85,7 +86,7 @@ export function AuthNavigator() {
 
     console.log('[AuthNavigator] redirect', { from: root, to: target, shiftActive, vehicleReady });
     router.replace(target);
-  }, [firebaseUser, driver, loading, vehicleReady, shiftActive, segments, router]);
+  }, [firebaseUser, driver, loading, vehicleReady, shiftActive, endShiftInProgress, segments, router]);
 
   return null;
 }

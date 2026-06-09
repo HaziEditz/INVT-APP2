@@ -55,6 +55,7 @@ export default function ProfileScreen() {
     vehicles,
     shiftActive,
     endShiftAndSignOut,
+    endShiftInProgress,
     hasTripInProgress,
     refreshJobHistory,
     refreshVehicles,
@@ -78,9 +79,10 @@ export default function ProfileScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (endShiftInProgress) return;
       refreshNzta();
       refreshJobHistory().catch(() => undefined);
-    }, [refreshNzta, refreshJobHistory]),
+    }, [refreshNzta, refreshJobHistory, endShiftInProgress]),
   );
 
   useEffect(() => {
@@ -129,6 +131,7 @@ export default function ProfileScreen() {
   }, [refreshNzta]);
 
   useEffect(() => {
+    if (endShiftInProgress) return;
     if (!nzta || !shiftActive || !notifications) return;
     if (needsBreak(nzta)) {
       notifyBreakReminder(
@@ -149,7 +152,7 @@ export default function ProfileScreen() {
         `Maximum ${NZTA_MAX_SHIFT_HOURS}-hour shift reached (${NZTA_MAX_WORK_HOURS}h work + 1h break). Please end your shift.`,
       );
     }
-  }, [nzta, shiftActive, notifications, showBreakChoice]);
+  }, [nzta, shiftActive, notifications, showBreakChoice, endShiftInProgress]);
 
   const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
   const vehicleIdForMeta = selectedVehicleId || driver?.vehicleId || '';
@@ -257,8 +260,9 @@ export default function ProfileScreen() {
       </View>
 
       <Button
-        title="End Shift"
+        title={endShiftInProgress ? 'Ending shift…' : 'End Shift'}
         variant="danger"
+        disabled={endShiftInProgress}
         style={{ marginTop: 16 }}
         onPress={() => {
           if (hasTripInProgress) {

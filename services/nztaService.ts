@@ -83,6 +83,23 @@ export async function startShiftClock(companyId?: string, uid?: string) {
   return next;
 }
 
+export type EndShiftSummary = {
+  workedMinutes: number;
+  weeklyWorkedMinutes: number;
+  breakMinutes: number;
+  shiftElapsedMinutes: number;
+};
+
+export async function captureEndShiftSummary(): Promise<EndShiftSummary> {
+  const state = await loadNztaHours();
+  return {
+    workedMinutes: state.workedMinutes,
+    weeklyWorkedMinutes: state.weeklyWorkedMinutes,
+    breakMinutes: state.breakMinutes,
+    shiftElapsedMinutes: shiftElapsedMinutes(state),
+  };
+}
+
 export async function endShiftClock(companyId: string, uid: string, driverId: string) {
   const state = await loadNztaHours();
   const now = Date.now();

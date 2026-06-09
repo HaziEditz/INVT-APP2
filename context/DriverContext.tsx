@@ -33,6 +33,7 @@ import {
   subscribeBooking,
 } from '@/lib/bookingSync';
 import { initializeNztaOnLogin } from '@/services/nztaService';
+import type { EndShiftSummary } from '@/services/nztaService';
 import { createInitialMeter, watchMeter } from '@/services/meterEngine';
 import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
 import { JobStepTimes, PaymentExtras, TariffChangeRecord } from '@/types';
@@ -52,6 +53,7 @@ import {
   ZoneInfo,
 } from '@/types';
 import { useAuth } from '@/context/AuthContext';
+import { router } from 'expo-router';
 
 interface DriverContextValue {
   presenceStatus: PresenceDisplayStatus;
@@ -90,6 +92,9 @@ interface DriverContextValue {
   startShift: (vehicleId?: string) => Promise<void>;
   endShift: () => Promise<void>;
   endShiftAndSignOut: () => Promise<void>;
+  endShiftInProgress: boolean;
+  endShiftSummary: EndShiftSummary | null;
+  acknowledgeEndShiftSummary: () => void;
   togglePresence: () => Promise<void>;
   acceptOffer: () => Promise<void>;
   declineOffer: () => Promise<void>;
@@ -300,7 +305,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [pendingOffers, setPendingOffers] = useState<JobOffer[]>([]);
   const awayIntentRef = useRef<AwayIntent>('none');
   const [jobEditNotice, setJobEditNotice] = useState<string | null>(null);
+  const [endShiftInProgress, setEndShiftInProgress] = useState(false);
+  const [endShiftSummary, setEndShiftSummary] = useState<EndShiftSummary | null>(null);
   const shiftActiveRef = useRef(false);
+  const endShiftInProgressRef = useRef(false);
+  const endShiftSummaryAckRef = useRef<(() => void) | null>(null);
   const readyForJobsRef = useRef(false);
   const hailActiveRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
@@ -1011,7 +1020,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const endShiftRemote = async (
     driverSnapshot: typeof driver,
     vehicleId: string | null,
-  ) => {
+  ): Promise<EndShiftSummary | null> => {
+    let summary: EndShiftSummary | null = null;
+
+    if (driverSnapshot?.companyId && driverSnapshot.uid) {
+      const { captureEndShiftSummary } = await import('@/services/nztaService');
+      summary = await captureEndShiftSummary();
+    }
+
     if (driverSnapshot && vehicleId) {
       try {
         await writeOnlinePresence(driverSnapshot, vehicleId, 'Offline');
@@ -1031,23 +1047,69 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     const { stopBackgroundTracking } = await import('@/services/locationService');
     await stopBackgroundTracking();
+    return summary;
+  };
+
+  const waitForEndShiftSummaryAck = () =>
+    new Promise<void>((resolve) => {
+      endShiftSummaryAckRef.current = resolve;
+    });
+
+  const acknowledgeEndShiftSummary = () => {
+    setEndShiftSummary(null);
+    endShiftSummaryAckRef.current?.();
+    endShiftSummaryAckRef.current = null;
   };
 
   const endShift = async () => {
     if (blockIfTripInProgress()) return;
-    const vehicleId = await resolveVehicleId();
-    const driverSnapshot = driver;
-    endShiftLocal();
-    await endShiftRemote(driverSnapshot, vehicleId);
+    if (endShiftInProgressRef.current) return;
+
+    endShiftInProgressRef.current = true;
+    setEndShiftInProgress(true);
+    try {
+      const vehicleId = await resolveVehicleId();
+      const driverSnapshot = driver;
+      await endShiftRemote(driverSnapshot, vehicleId);
+      endShiftLocal();
+    } catch (err) {
+      console.error('[Driver] endShift failed:', err);
+      Alert.alert('End shift failed', err instanceof Error ? err.message : 'Could not end shift');
+    } finally {
+      endShiftInProgressRef.current = false;
+      setEndShiftInProgress(false);
+      setEndShiftSummary(null);
+    }
   };
 
   const endShiftAndSignOut = async () => {
     if (blockIfTripInProgress()) return;
-    const vehicleId = await resolveVehicleId();
-    const driverSnapshot = driver;
-    endShiftLocal();
-    await endShiftRemote(driverSnapshot, vehicleId);
-    await signOut();
+    if (endShiftInProgressRef.current) return;
+
+    endShiftInProgressRef.current = true;
+    setEndShiftInProgress(true);
+    try {
+      const vehicleId = await resolveVehicleId();
+      const driverSnapshot = driver;
+      const summary = await endShiftRemote(driverSnapshot, vehicleId);
+
+      if (summary) {
+        setEndShiftSummary(summary);
+        await waitForEndShiftSummaryAck();
+      }
+
+      endShiftLocal();
+      await signOut();
+      router.replace('/(auth)/login');
+    } catch (err) {
+      console.error('[Driver] endShiftAndSignOut failed:', err);
+      Alert.alert('End shift failed', err instanceof Error ? err.message : 'Could not end shift');
+    } finally {
+      endShiftInProgressRef.current = false;
+      setEndShiftInProgress(false);
+      setEndShiftSummary(null);
+      endShiftSummaryAckRef.current = null;
+    }
   };
 
   const acceptOffer = async () => {
@@ -1592,6 +1654,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         startShift,
         endShift,
         endShiftAndSignOut,
+        endShiftInProgress,
+        endShiftSummary,
+        acknowledgeEndShiftSummary,
         togglePresence,
         tariffLocked,
         acceptOffer,
