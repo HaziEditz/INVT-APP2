@@ -167,13 +167,27 @@ export async function watchMeter(
   let sub: Location.LocationSubscription | null = null;
   let lastGps: GpsSample | null = null;
 
+  runMeterTick(getMeter, tariff, null, onUpdate);
+
   const intervalId = setInterval(() => {
     runMeterTick(getMeter, tariff, lastGps, onUpdate);
   }, TICK_MS);
 
-  try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status === 'granted') {
+  void (async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+
+      const cached = await Location.getLastKnownPositionAsync({ maxAge: 600_000 });
+      if (cached) {
+        lastGps = {
+          lat: cached.coords.latitude,
+          lng: cached.coords.longitude,
+          speedMs: cached.coords.speed ?? null,
+        };
+        runMeterTick(getMeter, tariff, lastGps, onUpdate);
+      }
+
       sub = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.Balanced,
@@ -188,12 +202,10 @@ export async function watchMeter(
           };
         },
       );
+    } catch (err) {
+      console.warn('[Meter] GPS watch failed, using interval-only ticks:', err);
     }
-  } catch (err) {
-    console.warn('[Meter] GPS watch failed, using interval-only ticks:', err);
-  }
-
-  runMeterTick(getMeter, tariff, null, onUpdate);
+  })();
 
   return () => {
     clearInterval(intervalId);

@@ -153,10 +153,71 @@ export async function getCurrentCoords() {
     if (last) return last.coords;
     throw new Error('Location permission not granted');
   }
+  const last = await Location.getLastKnownPositionAsync({ maxAge: 120_000 });
+  if (last) return last.coords;
   const { coords } = await Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.Balanced,
   });
   return coords;
+}
+
+export async function getLastKnownCoords(maxAgeMs = 600_000) {
+  const { status } = await Location.getForegroundPermissionsAsync();
+  if (status !== 'granted') return null;
+  const last = await Location.getLastKnownPositionAsync({ maxAge: maxAgeMs });
+  return last?.coords ?? null;
+}
+
+export type HailPickupLocation = {
+  address: string;
+  lat?: number;
+  lng?: number;
+};
+
+export async function reverseGeocodeCoords(lat: number, lng: number): Promise<string> {
+  const results = await Location.reverseGeocodeAsync({
+    latitude: lat,
+    longitude: lng,
+  });
+  const formatted = results[0] ? formatGeocodedAddress(results[0]) : '';
+  return formatted || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
+/** Last-known coords first, then a fresh GPS fix — for hail pickup without blocking the meter. */
+export async function refreshHailPickupLocation(
+  onUpdate: (pickup: HailPickupLocation) => void,
+): Promise<void> {
+  const apply = (pickup: HailPickupLocation) => {
+    try {
+      onUpdate(pickup);
+    } catch (e) {
+      console.warn('[Location] hail pickup callback failed', e);
+    }
+  };
+
+  const last = await getLastKnownCoords();
+  if (last) {
+    const address = await reverseGeocodeCoords(last.latitude, last.longitude).catch(
+      () => `${last.latitude.toFixed(5)}, ${last.longitude.toFixed(5)}`,
+    );
+    apply({ address, lat: last.latitude, lng: last.longitude });
+  }
+
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      if (!last) apply({ address: 'Current location (address unavailable)' });
+      return;
+    }
+    const fresh = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+    const { latitude, longitude } = fresh.coords;
+    const address = await reverseGeocodeCoords(latitude, longitude);
+    apply({ address, lat: latitude, lng: longitude });
+  } catch {
+    if (!last) apply({ address: 'Current location (address unavailable)' });
+  }
 }
 
 export function formatGeocodedAddress(place: Location.LocationGeocodedAddress): string {
@@ -175,13 +236,6 @@ export async function reverseGeocodeCurrentAddress(): Promise<{
   lng: number;
 }> {
   const coords = await getCurrentCoords();
-  const results = await Location.reverseGeocodeAsync({
-    latitude: coords.latitude,
-    longitude: coords.longitude,
-  });
-  const formatted = results[0] ? formatGeocodedAddress(results[0]) : '';
-  const address =
-    formatted ||
-    `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
+  const address = await reverseGeocodeCoords(coords.latitude, coords.longitude);
   return { address, lat: coords.latitude, lng: coords.longitude };
 }

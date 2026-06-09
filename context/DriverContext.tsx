@@ -25,7 +25,7 @@ import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { completeJobPayment } from '@/lib/dispatchApi';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
-import { reverseGeocodeCurrentAddress, getCurrentCoords } from '@/services/locationService';
+import { getCurrentCoords, refreshHailPickupLocation } from '@/services/locationService';
 import * as Location from 'expo-location';
 import {
   diffBookingChanges,
@@ -1439,7 +1439,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  const startHail = async () => {
+  const startHail = () => {
     if (!shiftActive) {
       Alert.alert('Start shift', 'Start your shift before hailing a passenger.');
       return;
@@ -1448,18 +1448,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('No tariff configured', 'Ask dispatch to set up tariffs for your company in Firebase.');
       return;
     }
+
     setHailPickupAddress('Locating…');
     setHailActive(true);
     hailActiveRef.current = true;
-
-    try {
-      const geo = await reverseGeocodeCurrentAddress();
-      setHailPickupAddress(geo.address);
-      setHailPickupLat(geo.lat);
-      setHailPickupLng(geo.lng);
-    } catch {
-      setHailPickupAddress('Current location (address unavailable)');
-    }
 
     const m = createInitialMeter(selectedTariff);
     setMeter(m);
@@ -1468,11 +1460,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     startMeterWatch();
 
     if (driver) {
-      const vehicleId = await resolveVehicleId();
-      if (vehicleId) {
-        writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
-      }
+      void resolveVehicleId().then((vehicleId) => {
+        if (vehicleId && hailActiveRef.current) {
+          writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+        }
+      });
     }
+
+    void refreshHailPickupLocation((pickup) => {
+      if (!hailActiveRef.current) return;
+      setHailPickupAddress(pickup.address);
+      if (pickup.lat != null && pickup.lng != null) {
+        setHailPickupLat(pickup.lat);
+        setHailPickupLng(pickup.lng);
+      }
+    });
   };
 
   const endHail = async () => {
