@@ -4,14 +4,22 @@ import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
+import { formatQueueHero } from '@/lib/zoneQueue';
 import { StyleSheet, Text, View } from 'react-native';
 
 export default function ZoneQueueScreen() {
   const { driver } = useAuth();
-  const { zone, shiftActive } = useDriver();
+  const { zone, shiftActive, presenceStatus, readyForJobs, hasTripInProgress } = useDriver();
   const zoneName = zone.name?.trim();
-  const hasQueuePosition = zone.position > 0;
   const hasZone = !!zoneName;
+  const positionLabel = formatQueueHero({
+    shiftActive,
+    hasTripInProgress,
+    presenceStatus,
+    readyForJobs,
+    position: zone.position ?? 0,
+    totalInQueue: zone.totalInQueue,
+  });
 
   return (
     <ScreenScroll>
@@ -20,15 +28,7 @@ export default function ZoneQueueScreen() {
       <View style={[sharedStyles.card, styles.hero]}>
         <Text style={styles.zoneLabel}>Current zone</Text>
         <Text style={styles.zoneName}>{hasZone ? zoneName : 'Not assigned'}</Text>
-        {shiftActive ? (
-          <Text style={styles.position}>
-            {hasQueuePosition
-              ? `You are #${zone.position}${zone.totalInQueue > 0 ? ` of ${zone.totalInQueue}` : ''}`
-              : 'Waiting'}
-          </Text>
-        ) : (
-          <Text style={styles.position}>Start your shift to join the queue</Text>
-        )}
+        <Text style={styles.position}>{positionLabel}</Text>
       </View>
 
       <View style={sharedStyles.card}>

@@ -136,16 +136,7 @@ const EMPTY_ZONE: ZoneInfo = {
   nearbyDrivers: 0,
 };
 
-function parseZoneNode(val: unknown): ZoneInfo {
-  if (!val || typeof val !== 'object') return EMPTY_ZONE;
-  const z = val as Record<string, unknown>;
-  return {
-    name: String(z.name ?? z.zonename ?? z.zoneName ?? z.ZoneName ?? '').trim(),
-    position: Number(z.position ?? z.queue ?? z.zonequeue ?? z.zoneQueue ?? 0),
-    totalInQueue: Number(z.totalInQueue ?? z.total ?? z.queueSize ?? 0),
-    nearbyDrivers: Number(z.nearbyDrivers ?? z.nearby ?? 0),
-  };
-}
+import { parseZoneFromOnlineNode } from '@/lib/zoneQueue';
 
 function fmtNzDate(d: Date) {
   return d.toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -528,29 +519,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const zoneRef = ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/zone`);
-      return onValue(zoneRef, (snap) => {
+      const onlineRef = ref(
+        getDatabaseInstance(),
+        `online/${driver.companyId}/${selectedVehicleId}`,
+      );
+      return onValue(onlineRef, (snap) => {
         try {
-          if (snap.exists()) {
-            const parsed = parseZoneNode(snap.val());
-            setZone((prev) => ({
-              ...parsed,
-              name: prev.name || parsed.name,
-            }));
+          if (!snap.exists()) {
+            setZone(EMPTY_ZONE);
             return;
           }
-          get(ref(getDatabaseInstance(), `online/${driver.companyId}/${selectedVehicleId}/current`))
-            .then((cur) => {
-              if (!cur.exists()) return;
-              const d = cur.val() as Record<string, unknown>;
-              setZone((prev) => ({
-                name: prev.name || String(d.zonename ?? d.zoneName ?? '').trim(),
-                position: Number(d.zonequeue ?? d.zoneQueue ?? prev.position ?? 0),
-                totalInQueue: prev.totalInQueue ?? 0,
-                nearbyDrivers: prev.nearbyDrivers ?? 0,
-              }));
-            })
-            .catch((err) => console.error('[Driver] zone fallback read', err));
+          const parsed = parseZoneFromOnlineNode(snap.val());
+          setZone((prev) => ({
+            ...parsed,
+            name: parsed.name || prev.name,
+            position: parsed.position || prev.position,
+          }));
         } catch (err) {
           console.error('[Driver] zone listener', err);
         }

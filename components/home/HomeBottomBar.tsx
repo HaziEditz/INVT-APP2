@@ -1,18 +1,22 @@
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
+import { formatQueueDisplay } from '@/lib/zoneQueue';
 import { StyleSheet, Text, View } from 'react-native';
 
 export function HomeBottomBar() {
-  const { shiftActive, presenceStatus, zone, readyForJobs } = useDriver();
+  const { shiftActive, presenceStatus, zone, readyForJobs, hasTripInProgress } = useDriver();
 
   const online = shiftActive && presenceStatus === 'Online' && readyForJobs;
   const zoneName = zone.name?.trim() || (shiftActive ? 'No zone assigned' : '—');
-  const queue =
-    zone.position > 0
-      ? `#${zone.position}${zone.totalInQueue > 0 ? ` of ${zone.totalInQueue}` : ''}`
-      : shiftActive
-        ? 'Waiting'
-        : '—';
+  const queue = formatQueueDisplay({
+    shiftActive,
+    hasTripInProgress,
+    presenceStatus,
+    readyForJobs,
+    position: zone.position ?? 0,
+    totalInQueue: zone.totalInQueue,
+    includeTotal: true,
+  });
 
   return (
     <View style={styles.bar}>

@@ -1,5 +1,6 @@
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
+import { formatQueueDisplay } from '@/lib/zoneQueue';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -44,13 +45,13 @@ export function HomeStatusBar() {
   }, [shiftActive, zoneEnteredAt]);
 
   const zoneName = shiftActive ? zone.name?.trim() || '—' : '—';
-  const queueLabel = !shiftActive
-    ? '—'
-    : hasTripInProgress
-      ? 'On Trip'
-      : (zone.position ?? 0) > 0
-        ? `#${zone.position}`
-        : 'Waiting';
+  const queueLabel = formatQueueDisplay({
+    shiftActive,
+    hasTripInProgress,
+    presenceStatus,
+    readyForJobs,
+    position: zone.position ?? 0,
+  });
   const timeInZone =
     shiftActive && zoneEnteredAt ? formatZoneElapsed(Date.now() - zoneEnteredAt) : '—';
 
