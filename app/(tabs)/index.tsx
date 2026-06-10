@@ -14,7 +14,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { MainPanelTab } from '@/types';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -41,9 +41,12 @@ export default function MainScreen() {
     companyZones,
   } = useDriver();
 
-  const [mainTab, setMainTab] = useState<MainPanelTab>('offers');
+  const [mainTab, setMainTab] = useState<MainPanelTab>('current');
   const [tariffOpen, setTariffOpen] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
+  const prevHasCurrentRef = useRef(false);
+  const prevShiftActiveRef = useRef(false);
+  const prevQueueLenRef = useRef(0);
 
   const hasCurrent = !!activeJob || hailActive;
   const meterRunning = !!meter?.running;
@@ -54,8 +57,24 @@ export default function MainScreen() {
   }, [firebaseUser?.uid], 'MainScreen-loadProfile');
 
   useSafeEffect(() => {
-    if (hasCurrent) setMainTab('current');
-    else if (queuedOffers.length > 0) setMainTab('queue');
+    if (shiftActive && !prevShiftActiveRef.current) {
+      setMainTab('current');
+    }
+    prevShiftActiveRef.current = shiftActive;
+  }, [shiftActive], 'MainScreen-shiftStartTab');
+
+  useSafeEffect(() => {
+    if (hasCurrent && !prevHasCurrentRef.current) {
+      setMainTab('current');
+    } else if (
+      !hasCurrent &&
+      queuedOffers.length > 0 &&
+      prevQueueLenRef.current === 0
+    ) {
+      setMainTab('queue');
+    }
+    prevHasCurrentRef.current = hasCurrent;
+    prevQueueLenRef.current = queuedOffers.length;
   }, [hasCurrent, queuedOffers.length], 'MainScreen-autoTab');
 
   const mapShowsRoute = !!activeJob || hailActive;

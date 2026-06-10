@@ -126,6 +126,8 @@ export interface MeterState {
   tariffChanges: TariffChangeRecord[];
   breakdown: MeterFareBreakdown;
   fare: number;
+  /** GPS trail sampled during the trip (for closed-job route map). */
+  routePoints?: { lat: number; lng: number; at: number }[];
 }
 
 export interface ActiveJob extends JobOffer {

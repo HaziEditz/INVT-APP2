@@ -5,6 +5,8 @@ import { MeterMode, MeterState, Tariff } from '@/types';
 const SPEED_MOVING_MS = 5 / 3.6; // 5 km/h
 const TICK_MS = 2000;
 const UNPAUSE_DISTANCE_M = 50;
+const MIN_DISTANCE_M = 2;
+const MAX_DISTANCE_M = 500;
 
 type GpsSample = {
   lat: number;
@@ -28,6 +30,15 @@ function normalizeSpeed(speedMs?: number | null): number {
   return speedMs;
 }
 
+function appendRoutePoint(meter: MeterState, lat: number, lng: number): MeterState {
+  const routePoints = [...(meter.routePoints ?? [])];
+  const last = routePoints[routePoints.length - 1];
+  if (!last || haversineM(last.lat, last.lng, lat, lng) > 5) {
+    routePoints.push({ lat, lng, at: Date.now() });
+  }
+  return { ...meter, routePoints };
+}
+
 export function createInitialMeter(tariff: Tariff): MeterState {
   const breakdown = calcMeterBreakdown(tariff, 0, 0);
   return {
@@ -44,6 +55,7 @@ export function createInitialMeter(tariff: Tariff): MeterState {
     tariffChanges: [],
     breakdown,
     fare: breakdown.total,
+    routePoints: [],
   };
 }
 
@@ -57,19 +69,6 @@ function applyTariffToMeter(meter: MeterState, tariff: Tariff): MeterState {
     breakdown,
     fare: breakdown.total,
   };
-}
-
-function logMeterTick(speed: number, mode: MeterMode, meter: MeterState, tariff: Tariff) {
-  const waitMin = meter.waitingMs / 60000;
-  console.log('[Meter]', {
-    speed: +speed.toFixed(2),
-    mode,
-    waitingMs: meter.waitingMs,
-    waitingMin: +waitMin.toFixed(3),
-    waitingPerMin: tariff.waitingPerMin,
-    waitingCharge: +(waitMin * tariff.waitingPerMin).toFixed(2),
-    fare: meter.fare,
-  });
 }
 
 export type MeterTickResult = {
@@ -87,7 +86,6 @@ export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | 
   if (meter.paused) {
     next.pausedMs += TICK_MS;
     const result = applyTariffToMeter(next, tariff);
-    logMeterTick(0, result.mode, result, tariff);
     return { meter: result };
   }
 
@@ -101,7 +99,6 @@ export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | 
   }
 
   const result = applyTariffToMeter(next, tariff);
-  logMeterTick(speed, result.mode, result, tariff);
   return { meter: result };
 }
 
@@ -131,12 +128,13 @@ export function tickMeterWithGps(
   }
   next.lastLat = lat;
   next.lastLng = lng;
+  next = appendRoutePoint(next, lat, lng);
 
   const speed = normalizeSpeed(speedMs);
   const speedSaysMoving = speed > SPEED_MOVING_MS;
-  const movedEnough = distanceDeltaM > 1.5;
 
-  if (speedSaysMoving && movedEnough && !next.paused && distanceDeltaM > 2 && distanceDeltaM < 500) {
+  // Distance from GPS positions — do not require speed (many devices report speed=0 while moving).
+  if (!next.paused && distanceDeltaM > MIN_DISTANCE_M && distanceDeltaM < MAX_DISTANCE_M) {
     next.distanceKm += distanceDeltaM / 1000;
   }
 
@@ -190,9 +188,9 @@ export async function watchMeter(
 
       sub = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.Balanced,
-          distanceInterval: 0,
-          timeInterval: TICK_MS,
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 3,
+          timeInterval: 1000,
         },
         (loc) => {
           lastGps = {
@@ -200,6 +198,7 @@ export async function watchMeter(
             lng: loc.coords.longitude,
             speedMs: loc.coords.speed ?? null,
           };
+          runMeterTick(getMeter, tariff, lastGps, onUpdate);
         },
       );
     } catch (err) {

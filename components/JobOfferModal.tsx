@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function JobOfferModal() {
-  const { jobOffer, acceptOffer, declineOffer, hailActive, activeJob } = useDriver();
+  const { jobOffer, acceptOffer, declineOffer, hailActive, activeJob, paymentJob } = useDriver();
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   useSafeEffect(() => {
@@ -27,7 +27,7 @@ export function JobOfferModal() {
     return () => clearInterval(id);
   }, [jobOffer, declineOffer], 'JobOfferModal-timer');
 
-  if (!jobOffer || hailActive || !!activeJob) return null;
+  if (!jobOffer || hailActive || !!activeJob || !!paymentJob) return null;
 
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
 
@@ -40,13 +40,15 @@ export function JobOfferModal() {
           <JobTypeBadge type={jobOffer.type} />
 
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+            <Text style={styles.jobId}>Job #{jobOffer.id}</Text>
+
             <View style={styles.row}>
               <Text style={styles.label}>Pickup</Text>
-              <Text style={styles.value}>{jobOffer.pickup}</Text>
+              <Text style={styles.value}>{jobOffer.pickup || '—'}</Text>
             </View>
             <View style={styles.row}>
               <Text style={styles.label}>Dropoff</Text>
-              <Text style={styles.value}>{jobOffer.dropoff}</Text>
+              <Text style={styles.value}>{jobOffer.dropoff || '—'}</Text>
             </View>
 
             {estFare != null ? (
@@ -61,7 +63,13 @@ export function JobOfferModal() {
 
             <Text style={styles.section}>Job details</Text>
             {jobOffer.source ? <Text style={styles.detail}>Source: {jobOffer.source}</Text> : null}
-            <Text style={styles.detail}>Type: {jobOffer.type}</Text>
+            <Text style={styles.detail}>Service type: {jobOffer.serviceTypeRaw ?? jobOffer.type}</Text>
+            {jobOffer.vehicleTypeRequired ? (
+              <Text style={styles.detail}>Vehicle required: {jobOffer.vehicleTypeRequired}</Text>
+            ) : null}
+            {jobOffer.passengers != null ? (
+              <Text style={styles.detail}>Passengers: {jobOffer.passengers}</Text>
+            ) : null}
             {jobOffer.passengerName ? (
               <Text style={styles.detail}>Passenger: {jobOffer.passengerName}</Text>
             ) : null}
@@ -72,15 +80,17 @@ export function JobOfferModal() {
               <Text style={styles.detail}>Email: {jobOffer.passengerEmail}</Text>
             ) : null}
             {jobOffer.dispatcherName ? (
-              <Text style={styles.detail}>Dispatcher: {jobOffer.dispatcherName}</Text>
+              <Text style={styles.detail}>Assigned by: {jobOffer.dispatcherName}</Text>
             ) : null}
             <JobNotesSection job={jobOffer} />
-            {jobOffer.isAcc ? <Text style={styles.special}>ACC Job</Text> : null}
-            {jobOffer.isTotalMobility ? <Text style={styles.special}>Total Mobility</Text> : null}
+            {jobOffer.isAcc ? <Text style={styles.special}>ACC Job — special requirements apply</Text> : null}
+            {jobOffer.isTotalMobility ? (
+              <Text style={styles.special}>Total Mobility — special requirements apply</Text>
+            ) : null}
           </ScrollView>
 
           <View style={styles.actions}>
-            <Button title="Decline" variant="secondary" onPress={declineOffer} style={styles.btn} />
+            <Button title="Reject" variant="secondary" onPress={declineOffer} style={styles.btn} />
             <Button title="Accept" onPress={acceptOffer} style={styles.btn} />
           </View>
         </View>
@@ -106,6 +116,7 @@ const styles = StyleSheet.create({
   },
   title: { color: Colors.text, fontSize: 24, fontWeight: '800' },
   timer: { color: Colors.warning, fontWeight: '800', fontSize: 16, marginVertical: 6 },
+  jobId: { color: Colors.textMuted, fontSize: 12, marginBottom: 8, fontWeight: '700' },
   scroll: { maxHeight: 340, marginVertical: 8 },
   row: { gap: 4, marginBottom: 12 },
   label: { color: Colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
@@ -114,7 +125,6 @@ const styles = StyleSheet.create({
   meta: { color: Colors.textMuted, fontSize: 14, marginTop: 4 },
   section: { color: Colors.text, fontWeight: '700', marginTop: 12, marginBottom: 6 },
   detail: { color: Colors.textMuted, fontSize: 14, marginBottom: 4 },
-  notes: { color: Colors.warning, fontSize: 14, marginTop: 4 },
   special: { color: Colors.acc, fontWeight: '700', marginTop: 4 },
   actions: { flexDirection: 'row', gap: 12, marginTop: 12 },
   btn: { flex: 1 },

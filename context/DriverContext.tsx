@@ -9,7 +9,7 @@ import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, declineJobOffer, recallJobOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, declineJobOffer, recallJobOnDispatch, reportNoShow } from '@/lib/dispatchApi';
 import { subscribeDriverQueue } from '@/lib/driverQueue';
 import { tickWorkedMinutes } from '@/services/nztaService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
@@ -1142,7 +1142,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
-      writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+      writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
     }
   };
 
@@ -1189,7 +1189,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
-      writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+      writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
     }
   };
 
@@ -1248,7 +1248,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const advanceStage = async () => {
-    if (!activeJob) return;
+    if (!activeJob || !driver) return;
     const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
     const idx = order.indexOf(activeJob.stage);
     const nextStage = order[Math.min(idx + 1, order.length - 1)];
@@ -1279,6 +1279,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
     setActiveJob(updated);
     await storeData(STORAGE_KEYS.activeJob, updated);
+
+    const vehicleId = await resolveVehicleId();
+    if (vehicleId) {
+      if (nextStage === 'onboard' || nextStage === 'complete') {
+        writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+      } else {
+        writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+      }
+    }
+
     if (nextStage === 'complete') {
       setPaymentJob(updated);
     }
@@ -1341,7 +1351,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const completedAt = Date.now();
 
     try {
-      await writeClosedJob(driver.companyId, driver.id, closed, paymentType, extras, totalFare, tmDetails);
+      await writeClosedJob(
+        driver.companyId,
+        driver.id,
+        closed,
+        paymentType,
+        extras,
+        totalFare,
+        tmDetails,
+        { driverName: driver.name, vehicleId: await resolveVehicleId() },
+      );
     } catch (err) {
       console.warn('[Driver] writeClosedJob failed:', err);
     }
@@ -1425,8 +1444,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const noShowActiveJob = async () => {
-    await cancelActiveJob();
-    Alert.alert('No show', 'Job marked as no show.');
+    if (!activeJob || !driver) return;
+    try {
+      await reportNoShow(activeJob.id, driver.id, driver.companyId);
+    } catch {
+      await enqueueOfflineItem({
+        type: 'job_update',
+        payload: { action: 'no_show', jobId: activeJob.id },
+      });
+    }
+    stopMeterForJob();
+    setMeter(null);
+    meterRef.current = null;
+    setActiveJob(null);
+    activeJobIdRef.current = null;
+    bookingRawRef.current = null;
+    await storeData(STORAGE_KEYS.activeJob, null);
+    await storeData(STORAGE_KEYS.meterState, null);
+    if (shiftActive) {
+      const vehicleId = await resolveVehicleId();
+      if (vehicleId) {
+        writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
+        setPresenceStatus('Online');
+        setReadyForJobs(true);
+        readyForJobsRef.current = true;
+      }
+    }
+    releaseQueuedOffersAfterTrip();
+    Alert.alert('No show', 'Job marked as no show. You are available for new jobs.');
   };
 
   const recallJob = async () => {

@@ -131,3 +131,13 @@ export async function createPreBooking(payload: Record<string, unknown>) {
 export async function completeJobPayment(payload: Record<string, unknown>) {
   return dispatchPost('/api/job/complete', payload);
 }
+
+export async function reportNoShow(jobId: string, driverId: string, companyId: string) {
+  return dispatchPost('/api/cancel', {
+    bookingId: jobId,
+    driverId,
+    companyId,
+    cancelledBy: 'driver',
+    reason: 'No Show',
+  });
+}
