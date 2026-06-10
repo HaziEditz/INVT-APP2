@@ -73,6 +73,8 @@ export interface JobOffer {
   originalStatus?: 'pending' | 'manual';
   queuedAt?: number;
   postedAt?: number;
+  /** Set when promoted from Queue tab after trip ends. */
+  fromQueue?: boolean;
 }
 
 export interface QueuedOffer extends JobOffer {

@@ -5,7 +5,7 @@ import { useDriver } from '@/context/DriverContext';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function QueuePanel() {
-  const { queuedOffers, promoteQueuedOffer, recallQueuedOffer } = useDriver();
+  const { queuedOffers, recallQueuedOffer } = useDriver();
 
   const waitLabel = (queuedAt?: number) => {
     if (!queuedAt) return '';
@@ -17,7 +17,7 @@ export function QueuePanel() {
     return (
       <View style={styles.empty}>
         <Text style={styles.emptyText}>No jobs in your queue.</Text>
-        <Text style={styles.emptySub}>Pick an offer while on a trip — taxi allows 1 queued job.</Text>
+        <Text style={styles.emptySub}>Accept an offer while on a trip and it will appear here.</Text>
       </View>
     );
   }
@@ -38,15 +38,7 @@ export function QueuePanel() {
             <Text style={styles.meta}>{o.passengerName}{o.passengerPhone ? ` · ${o.passengerPhone}` : ''}</Text>
           ) : null}
           <Text style={styles.meta}>{waitLabel(o.queuedAt)}</Text>
-          <View style={styles.actions}>
-            <Button
-              title="Show when ready"
-              variant="secondary"
-              onPress={() => promoteQueuedOffer(o.id)}
-              style={{ flex: 1 }}
-            />
-            <Button title="Recall" variant="secondary" onPress={() => recallQueuedOffer(o.id)} style={{ flex: 1 }} />
-          </View>
+          <Button title="Recall" variant="secondary" onPress={() => recallQueuedOffer(o.id)} style={{ marginTop: 10 }} />
         </View>
       ))}
     </ScrollView>
@@ -69,5 +61,4 @@ const styles = StyleSheet.create({
   queuePos: { color: Colors.accent, fontWeight: '800', marginBottom: 6 },
   addr: { color: Colors.text, fontSize: 14, marginTop: 4 },
   meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 10 },
 });

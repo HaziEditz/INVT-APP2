@@ -9,16 +9,16 @@ type Props = {
 };
 
 export function QueuedOffersSheet({ visible, onClose }: Props) {
-  const { queuedOffers, promoteQueuedOffer } = useDriver();
+  const { queuedOffers, recallQueuedOffer } = useDriver();
 
   return (
     <Modal visible={visible} transparent animationType="slide">
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.title}>Queued offers ({queuedOffers.length})</Text>
+          <Text style={styles.title}>Queued jobs ({queuedOffers.length})</Text>
           <ScrollView style={styles.list}>
             {queuedOffers.length === 0 ? (
-              <Text style={styles.empty}>No queued offers</Text>
+              <Text style={styles.empty}>No queued jobs</Text>
             ) : (
               queuedOffers.map((o) => (
                 <View key={o.id} style={styles.card}>
@@ -26,10 +26,10 @@ export function QueuedOffersSheet({ visible, onClose }: Props) {
                   <Text style={styles.addr} numberOfLines={2}>{o.pickup}</Text>
                   <Text style={styles.addr} numberOfLines={1}>→ {o.dropoff}</Text>
                   <Button
-                    title="Show offer"
+                    title="Recall"
                     variant="secondary"
                     onPress={() => {
-                      promoteQueuedOffer(o.id);
+                      recallQueuedOffer(o.id);
                       onClose();
                     }}
                     style={{ marginTop: 8 }}

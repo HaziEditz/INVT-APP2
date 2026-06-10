@@ -10,10 +10,14 @@ import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
 import { acceptJobOffer, declineJobOffer, recallJobOnDispatch, reportNoShow } from '@/lib/dispatchApi';
+import {
+  clearDriverNotification,
+  readNotificationJobId,
+  readNotificationType,
+} from '@/lib/driverNotifications';
 import { subscribeDriverQueue } from '@/lib/driverQueue';
-import { tickWorkedMinutes } from '@/services/nztaService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
-import { subscribePendingJobs } from '@/lib/pendingJobs';
+import { tickWorkedMinutes } from '@/services/nztaService';
 import {
   clearOnlinePresence,
   isVehicleStatusAvailable,
@@ -44,6 +48,7 @@ import {
   CompletedJob,
   JobOffer,
   JobStage,
+  MainPanelTab,
   MeterState,
   PaymentType,
   PresenceDisplayStatus,
@@ -75,8 +80,12 @@ interface DriverContextValue {
   tariffs: Tariff[];
   selectedTariff: Tariff;
   queuedOffers: QueuedOffer[];
+  broadcastOffers: JobOffer[];
+  /** @deprecated use broadcastOffers */
   pendingOffers: JobOffer[];
   offersBadgeCount: number;
+  preferredPanelTab: MainPanelTab | null;
+  clearPreferredPanelTab: () => void;
   activeVehicle: Vehicle | undefined;
   jobEditNotice: string | null;
   completedJobs: CompletedJob[];
@@ -98,7 +107,7 @@ interface DriverContextValue {
   acknowledgeEndShiftSummary: () => void;
   togglePresence: () => Promise<void>;
   acceptOffer: () => Promise<void>;
-  declineOffer: () => Promise<void>;
+  declineOffer: (opts?: { timedOut?: boolean }) => Promise<void>;
   advanceStage: () => Promise<void>;
   setPaymentType: (payment: PaymentType) => void;
   completeJob: () => Promise<void>;
@@ -121,7 +130,6 @@ interface DriverContextValue {
   tariffLocked: boolean;
   setSelectedTariff: (t: Tariff) => void;
   dismissJobEditNotice: () => void;
-  promoteQueuedOffer: (offerId: string) => void;
   pickOfferFromList: (offerId: string) => Promise<void>;
   canReceiveJobOffers: boolean;
   goAway: () => Promise<void>;
@@ -246,6 +254,10 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
           ? Number(val.passengers)
           : undefined,
     serviceTypeRaw: val.ServiceType ? String(val.ServiceType) : val.serviceType ? String(val.serviceType) : undefined,
+    originalStatus:
+      val.originalStatus === 'manual' || val.manualOffer === true || val.manualOffer === 'true'
+        ? 'manual'
+        : 'pending',
   };
 }
 
@@ -295,7 +307,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [tariffs, setTariffsState] = useState<Tariff[]>([]);
   const [selectedTariff, setSelectedTariffState] = useState<Tariff>(NO_TARIFF_CONFIGURED);
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
-  const [pendingOffers, setPendingOffers] = useState<JobOffer[]>([]);
+  const [broadcastOffers, setBroadcastOffers] = useState<JobOffer[]>([]);
+  const [preferredPanelTab, setPreferredPanelTab] = useState<MainPanelTab | null>(null);
+  const broadcastOffersRef = useRef<Map<string, JobOffer>>(new Map());
   const awayIntentRef = useRef<AwayIntent>('none');
   const [jobEditNotice, setJobEditNotice] = useState<string | null>(null);
   const [endShiftInProgress, setEndShiftInProgress] = useState(false);
@@ -492,18 +506,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const tariffLocked = !!paymentJob;
 
   useSafeEffect(() => {
-    if (!shiftActive || !driver?.companyId || !activeVehicle) {
-      setPendingOffers([]);
-      return;
-    }
-    try {
-      return subscribePendingJobs(driver.companyId, activeVehicle, setPendingOffers);
-    } catch (err) {
-      console.error('[Driver] pending jobs subscribe failed', err);
-    }
-  }, [shiftActive, driver?.companyId, selectedVehicleId, activeVehicle?.id], 'Driver-pendingJobs');
-
-  useSafeEffect(() => {
     if (!shiftActive || !driver?.companyId || !driver.id) {
       setQueuedOffers([]);
       return;
@@ -521,6 +523,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] driverQueue subscribe failed', err);
     }
   }, [shiftActive, driver?.companyId, driver?.id, activeVehicle?.id], 'Driver-firebaseQueue');
+
+  const upsertBroadcastOffer = (offer: JobOffer) => {
+    broadcastOffersRef.current.set(offer.id, offer);
+    setBroadcastOffers(Array.from(broadcastOffersRef.current.values()));
+  };
+
+  const removeBroadcastOffer = (offerId: string) => {
+    broadcastOffersRef.current.delete(offerId);
+    setBroadcastOffers(Array.from(broadcastOffersRef.current.values()));
+  };
+
+  const clearBroadcastOffers = () => {
+    broadcastOffersRef.current.clear();
+    setBroadcastOffers([]);
+  };
+
+  useSafeEffect(() => {
+    if (!shiftActive) return;
+    const id = setInterval(() => {
+      const now = Date.now();
+      for (const [offerId, offer] of broadcastOffersRef.current) {
+        if (offer.expiresAt && offer.expiresAt < now - 5000) {
+          removeBroadcastOffer(offerId);
+        }
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [shiftActive], 'Driver-staleOffers');
 
   useSafeEffect(() => {
     if (!isFirebaseReady || !driver?.companyId) {
@@ -669,9 +699,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     Alert.alert('Job in progress', TRIP_BLOCK_MSG);
     return true;
   };
-  const offersBadgeCount = shiftActive
-    ? pendingOffers.length + (tripInProgress() ? queuedOffers.length : 0)
-    : 0;
+  const offersBadgeCount = shiftActive ? broadcastOffers.length : 0;
   const nextQueuedOffer = canReceiveJobOffers ? (queuedOffers[0] ?? null) : null;
 
   useSafeEffect(() => {
@@ -699,20 +727,35 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setQueuedOffers((q) => {
         if (q.length === 0) return q;
         const [next, ...rest] = q;
-        setJobOffer({ ...next, silent: false });
+        setJobOffer({ ...next, silent: false, fromQueue: true });
         return rest;
       });
     }, 600);
   };
 
-  const enqueueOffer = (offer: JobOffer) => {
-    const queued: QueuedOffer = { ...offer, queuedAt: Date.now(), silent: true };
-    setQueuedOffers((prev) => {
-      const isTaxi = offer.type === 'Taxi';
-      if (isTaxi && prev.length >= 1) return prev;
-      if (prev.some((o) => o.id === offer.id)) return prev;
-      return [...prev, queued];
-    });
+  const restoreAvailableAfterJobClear = async () => {
+    if (!driver || !shiftActive) return;
+    const vehicleId = await resolveVehicleId();
+    if (vehicleId) {
+      writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
+      setPresenceStatus('Online');
+      setReadyForJobs(true);
+      readyForJobsRef.current = true;
+    }
+  };
+
+  const clearActiveJobInternal = async (opts?: { skipReleaseQueue?: boolean }) => {
+    stopMeterForJob();
+    setMeter(null);
+    meterRef.current = null;
+    setActiveJob(null);
+    activeJobIdRef.current = null;
+    bookingRawRef.current = null;
+    await storeData(STORAGE_KEYS.activeJob, null);
+    await storeData(STORAGE_KEYS.meterState, null);
+    if (!opts?.skipReleaseQueue) {
+      releaseQueuedOffersAfterTrip();
+    }
   };
 
   const handleIncomingOffer = async (val: Record<string, unknown>) => {
@@ -723,22 +766,94 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (seen?.id === offer.id && Date.now() - seen.at < 2500) return;
     lastOfferSeenRef.current = { id: offer.id, at: Date.now() };
 
+    upsertBroadcastOffer(offer);
+
     if (hailActiveRef.current || activeJobIdRef.current) {
-      enqueueOffer(offer);
       return;
     }
 
+    setPreferredPanelTab('offers');
     setJobOffer(offer);
+  };
+
+  const handleDriverNotification = async (val: Record<string, unknown>) => {
+    if (!driver?.id) return;
+    const type = readNotificationType(val);
+    const jobId = readNotificationJobId(val);
+
+    if (type === 'job_removed') {
+      Alert.alert('Job taken back', 'Job has been taken back by dispatcher');
+      if (jobId && activeJobIdRef.current === jobId) {
+        await clearActiveJobInternal();
+        await restoreAvailableAfterJobClear();
+      }
+      if (jobId) {
+        removeBroadcastOffer(jobId);
+        setQueuedOffers((prev) => prev.filter((o) => o.id !== jobId));
+      }
+      setJobOffer(null);
+      await clearDriverNotification(driver.id);
+      return;
+    }
+
+    if (type === 'no_show') {
+      if (jobId && activeJobIdRef.current === jobId) {
+        await clearActiveJobInternal();
+        await restoreAvailableAfterJobClear();
+      }
+      setJobOffer(null);
+      await clearDriverNotification(driver.id);
+      return;
+    }
+
+    if (type === 'job_cancelled' || val.removed || val.declined) {
+      Alert.alert('Job cancelled', 'Job has been cancelled');
+      if (jobId && activeJobIdRef.current === jobId) {
+        await clearActiveJobInternal();
+        await restoreAvailableAfterJobClear();
+      }
+      if (jobId) {
+        removeBroadcastOffer(jobId);
+        setQueuedOffers((prev) => prev.filter((o) => o.id !== jobId));
+      }
+      setJobOffer(null);
+      await clearDriverNotification(driver.id);
+      return;
+    }
+
+    if (type === 'job_updated' || val.editNotice) {
+      const changes: string[] = [];
+      if (val.pickup || val.jobpickup) changes.push(`Pickup: ${val.pickup ?? val.jobpickup}`);
+      if (val.dropoff || val.jobdropoff) changes.push(`Dropoff: ${val.dropoff ?? val.jobdropoff}`);
+      if (val.notes || val.jobinfo) changes.push(`Notes updated`);
+      if (val.Pickingtime || val.pickupTime) changes.push(`Time updated`);
+      Alert.alert('Job updated', changes.length ? changes.join('\n') : String(val.editNotice ?? 'Details changed'));
+
+      if (jobId && activeJobIdRef.current === jobId) {
+        setActiveJob((prev) => {
+          if (!prev) return prev;
+          const patch: Partial<ActiveJob> = {};
+          if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
+          if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
+          if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
+          const merged = { ...prev, ...patch };
+          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+          return merged;
+        });
+      }
+      await clearDriverNotification(driver.id);
+      return;
+    }
+
+    if (type === 'job_offer' || isOfferPayload(val)) {
+      await handleIncomingOffer(val);
+      return;
+    }
   };
 
   const processOfferPayload = async (val: Record<string, unknown>) => {
     if (!shiftActiveRef.current || !readyForJobsRef.current) return;
-
-    if (val.editNotice && activeJobIdRef.current === String(val.jobId ?? val.id)) {
-      setJobEditNotice(String(val.editNotice));
-    }
-    if (val.removed || val.declined) return;
-    await handleIncomingOffer(val);
+    await handleDriverNotification(val);
   };
 
   useSafeEffect(() => {
@@ -753,7 +868,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const notifyRef = ref(getDatabaseInstance(), `notification/${driver.id}`);
       return onValue(notifyRef, async (snap) => {
         try {
-          const payloads = extractOfferPayloads(snap.val());
+          const val = snap.val();
+          if (!val) return;
+          if (typeof val === 'object' && !Array.isArray(val) && (val.type || val.eventType || isOfferPayload(val as Record<string, unknown>))) {
+            await handleDriverNotification(val as Record<string, unknown>);
+            return;
+          }
+          const payloads = extractOfferPayloads(val);
           for (const payload of payloads) {
             await processOfferPayload(payload);
           }
@@ -1012,7 +1133,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     void storeData(STORAGE_KEYS.vehicleSessionReady, false);
     setReadyForJobs(false);
     readyForJobsRef.current = false;
-    setPendingOffers([]);
+    clearBroadcastOffers();
     stopMeterTimers();
     setHailActive(false);
     hailActiveRef.current = false;
@@ -1128,80 +1249,108 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const acceptOffer = async () => {
     if (!jobOffer || !driver) return;
+    const offerSnapshot = jobOffer;
+    let queued = false;
     try {
-      await acceptJobOffer(jobOffer.id, driver.id);
+      const result = (await acceptJobOffer(offerSnapshot.id, driver.id)) as {
+        queued?: boolean;
+        status?: string;
+      };
+      queued = !!(result?.queued || result?.status === 'Queued');
     } catch {
-      await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: jobOffer.id } });
+      await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offerSnapshot.id } });
     }
-    const job = defaultActiveJob(jobOffer);
-    job.originalStatus = jobOffer.originalStatus ?? 'pending';
+
+    removeBroadcastOffer(offerSnapshot.id);
+    setJobOffer(null);
+
+    if (queued) {
+      setPreferredPanelTab('queue');
+      Alert.alert('Job queued', 'This job is in your Queue until your current trip finishes.');
+      return;
+    }
+
+    const job = defaultActiveJob(offerSnapshot);
+    job.originalStatus = offerSnapshot.originalStatus ?? 'pending';
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
-    setJobOffer(null);
+    setPreferredPanelTab('current');
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
       writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
     }
+    await clearDriverNotification(driver.id);
   };
 
-  const declineOffer = async () => {
+  const declineOffer = async (opts?: { timedOut?: boolean }) => {
     if (!jobOffer || !driver) return;
-    try {
-      await declineJobOffer(jobOffer.id, driver.id);
-    } catch {
-      await enqueueOfflineItem({ type: 'job_update', payload: { action: 'decline', jobId: jobOffer.id } });
+    const offerSnapshot = jobOffer;
+    const timedOut = !!opts?.timedOut;
+
+    if (offerSnapshot.fromQueue) {
+      try {
+        await recallJobOnDispatch(
+          offerSnapshot.id,
+          driver.id,
+          offerSnapshot.originalStatus ?? 'pending',
+        );
+      } catch {
+        await enqueueOfflineItem({
+          type: 'job_update',
+          payload: { action: 'recall', jobId: offerSnapshot.id },
+        });
+      }
+      setQueuedOffers((prev) => prev.filter((o) => o.id !== offerSnapshot.id));
+    } else {
+      try {
+        await declineJobOffer(offerSnapshot.id, driver.id, {
+          originalStatus: offerSnapshot.originalStatus ?? 'pending',
+          timedOut,
+        });
+      } catch {
+        await enqueueOfflineItem({ type: 'job_update', payload: { action: 'decline', jobId: offerSnapshot.id } });
+      }
+      removeBroadcastOffer(offerSnapshot.id);
+      if (shiftActive && timedOut) {
+        await setAwayAfterMissedOffer();
+      }
     }
+
     setJobOffer(null);
     lastOfferSeenRef.current = null;
-    if (shiftActive) {
-      await setAwayAfterMissedOffer();
-    }
+    await clearDriverNotification(driver.id);
   };
 
   const pickOfferFromList = async (offerId: string) => {
-    const offer = pendingOffers.find((o) => o.id === offerId);
+    const offer = broadcastOffers.find((o) => o.id === offerId);
     if (!offer || !driver) return;
 
-    if (hailActiveRef.current || activeJobIdRef.current) {
-      enqueueOffer(offer);
-      Alert.alert('Offer saved', 'This job is waiting in your queue until your current trip finishes.');
-      return;
-    }
-
     try {
-      const result = await acceptJobOffer(offer.id, driver.id) as { queued?: boolean; status?: string };
+      const result = (await acceptJobOffer(offer.id, driver.id)) as { queued?: boolean; status?: string };
       if (result?.queued || result?.status === 'Queued') {
-        Alert.alert('Job queued', 'You will be notified when your current trip finishes.');
+        removeBroadcastOffer(offer.id);
+        setPreferredPanelTab('queue');
+        Alert.alert('Job queued', 'This job is in your Queue until your current trip finishes.');
         return;
       }
     } catch {
       await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offer.id } });
     }
 
+    removeBroadcastOffer(offer.id);
     const job = defaultActiveJob(offer);
     job.originalStatus = offer.originalStatus ?? 'pending';
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
-    setJobOffer(null);
+    setPreferredPanelTab('current');
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
       writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
     }
-  };
-
-  const promoteQueuedOffer = (offerId: string) => {
-    if (hailActiveRef.current || activeJobIdRef.current) {
-      Alert.alert('On trip', 'Finish your current trip before accepting another job.');
-      return;
-    }
-    const offer = queuedOffers.find((o) => o.id === offerId);
-    if (!offer) return;
-    setQueuedOffers((prev) => prev.filter((o) => o.id !== offerId));
-    setJobOffer({ ...offer, silent: false });
   };
 
   const startMeterForJob = () => {
@@ -1424,19 +1573,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const cancelActiveJobInternal = async () => {
-    stopMeterForJob();
-    setMeter(null);
-    meterRef.current = null;
-    setActiveJob(null);
-    activeJobIdRef.current = null;
-    bookingRawRef.current = null;
-    await storeData(STORAGE_KEYS.activeJob, null);
-    await storeData(STORAGE_KEYS.meterState, null);
-    if (driver && shiftActive) {
-      const vehicleId = await resolveVehicleId();
-      if (vehicleId) writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
-    }
-    releaseQueuedOffersAfterTrip();
+    await clearActiveJobInternal();
+    await restoreAvailableAfterJobClear();
   };
 
   const cancelActiveJob = async () => {
@@ -1751,8 +1889,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         tariffs,
         selectedTariff,
         queuedOffers,
-        pendingOffers,
+        broadcastOffers,
+        pendingOffers: broadcastOffers,
         offersBadgeCount,
+        preferredPanelTab,
+        clearPreferredPanelTab: () => setPreferredPanelTab(null),
         activeVehicle,
         jobEditNotice,
         completedJobs,
@@ -1792,7 +1933,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         toggleWaitMeter,
         setSelectedTariff,
         dismissJobEditNotice,
-        promoteQueuedOffer,
         pickOfferFromList,
         canReceiveJobOffers,
         goAway,

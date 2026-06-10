@@ -4,20 +4,27 @@ import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function JobOfferModal() {
   const { jobOffer, acceptOffer, declineOffer, hailActive, activeJob, paymentJob } = useDriver();
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const timedOutRef = useRef(false);
 
   useSafeEffect(() => {
-    if (!jobOffer) return;
+    if (!jobOffer) {
+      timedOutRef.current = false;
+      return;
+    }
     const tick = () => {
       try {
         const left = Math.max(0, Math.ceil((jobOffer.expiresAt - Date.now()) / 1000));
         setSecondsLeft(left);
-        if (left <= 0) declineOffer().catch((err) => console.error('[JobOfferModal] decline', err));
+        if (left <= 0 && !timedOutRef.current) {
+          timedOutRef.current = true;
+          declineOffer({ timedOut: true }).catch((err) => console.error('[JobOfferModal] decline', err));
+        }
       } catch (err) {
         console.error('[JobOfferModal] tick', err);
       }
@@ -90,7 +97,7 @@ export function JobOfferModal() {
           </ScrollView>
 
           <View style={styles.actions}>
-            <Button title="Reject" variant="secondary" onPress={declineOffer} style={styles.btn} />
+            <Button title="Reject" variant="secondary" onPress={() => declineOffer()} style={styles.btn} />
             <Button title="Accept" onPress={acceptOffer} style={styles.btn} />
           </View>
         </View>

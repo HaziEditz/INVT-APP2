@@ -115,6 +115,20 @@ export async function acceptJobOffer(jobId: string, driverId: string) {
   return dispatchPost('/api/job/accept', { jobId, driverId });
 }
 
+export async function declineJobOffer(
+  jobId: string,
+  driverId: string,
+  opts?: { originalStatus?: string; timedOut?: boolean },
+) {
+  return dispatchPost('/api/job/decline', {
+    jobId,
+    bookingId: jobId,
+    driverId,
+    originalStatus: opts?.originalStatus ?? 'pending',
+    timedOut: !!opts?.timedOut,
+  });
+}
+
 export async function recallJobOnDispatch(jobId: string, driverId: string, originalStatus?: string) {
   return dispatchPost<{ ok: boolean; restoredStatus?: string }>('/api/job/recall', {
     jobId,

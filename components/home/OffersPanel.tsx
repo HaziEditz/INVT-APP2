@@ -16,28 +16,27 @@ function timeSince(ts?: number): string {
 }
 
 export function OffersPanel() {
-  const { pendingOffers, pickOfferFromList, shiftActive } = useDriver();
+  const { broadcastOffers, pickOfferFromList, shiftActive } = useDriver();
 
   if (!shiftActive) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>Start your shift to see company offers.</Text>
+        <Text style={styles.emptyText}>Start your shift to see offers.</Text>
       </View>
     );
   }
 
-  if (pendingOffers.length === 0) {
+  if (broadcastOffers.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyText}>No pending jobs for you right now.</Text>
-        <Text style={styles.emptySub}>New offers appear here when dispatch posts jobs for your fleet.</Text>
+        <Text style={styles.emptyText}>No offers available</Text>
       </View>
     );
   }
 
   return (
     <ScrollView style={styles.list} contentContainerStyle={styles.listContent} nestedScrollEnabled showsVerticalScrollIndicator>
-      {pendingOffers.map((o) => {
+      {broadcastOffers.map((o) => {
         const fare = o.fixedFare ?? o.estimatedFare;
         return (
           <View key={o.id} style={styles.card}>
@@ -77,7 +76,6 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: 12, paddingVertical: 8, paddingBottom: 16 },
   empty: { padding: 20, alignItems: 'center', flex: 1, justifyContent: 'center' },
   emptyText: { color: Colors.textMuted, fontSize: 15, textAlign: 'center' },
-  emptySub: { color: Colors.textMuted, fontSize: 13, marginTop: 8, textAlign: 'center' },
   card: {
     backgroundColor: Colors.surfaceElevated,
     borderRadius: 10,

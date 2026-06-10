@@ -34,9 +34,12 @@ export default function MainScreen() {
     selectedTariff,
     setSelectedTariff,
     tariffLocked,
+    broadcastOffers,
     pendingOffers,
     queuedOffers,
     offersBadgeCount,
+    preferredPanelTab,
+    clearPreferredPanelTab,
     pauseMeter,
     companyZones,
   } = useDriver();
@@ -55,6 +58,13 @@ export default function MainScreen() {
     if (!firebaseUser) return;
     refreshDriver().catch((err) => console.error('[Main] refreshDriver failed:', err));
   }, [firebaseUser?.uid], 'MainScreen-loadProfile');
+
+  useSafeEffect(() => {
+    if (preferredPanelTab) {
+      setMainTab(preferredPanelTab);
+      clearPreferredPanelTab();
+    }
+  }, [preferredPanelTab, clearPreferredPanelTab], 'MainScreen-preferredTab');
 
   useSafeEffect(() => {
     if (shiftActive && !prevShiftActiveRef.current) {
