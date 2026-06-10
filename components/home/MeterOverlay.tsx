@@ -26,24 +26,30 @@ export function MeterOverlay({ meter, onPause }: Props) {
   const tripMs = Math.max(0, now - meter.startedAt - meter.pausedMs);
   const breakdown = meter.breakdown;
   const waitMin = breakdown.waitingMinutes;
+  const modeLabel = meter.mode === 'moving' ? 'Moving' : 'Waiting';
 
   return (
     <View style={styles.box}>
       <Text style={styles.fare}>${meter.fare.toFixed(2)}</Text>
+      <Text style={[styles.mode, meter.mode === 'moving' ? styles.modeMoving : styles.modeWaiting]}>
+        {modeLabel}
+      </Text>
 
       <View style={styles.statsRow}>
         <Text style={styles.statText}>{meter.distanceKm.toFixed(2)} km</Text>
         <Text style={styles.statSep}>·</Text>
-        <Text style={styles.statText}>dist ${breakdown.distanceCharge.toFixed(2)}</Text>
-        <Text style={styles.statSep}>·</Text>
         <Text style={styles.statText}>wait {waitMin.toFixed(1)}m</Text>
-        <Text style={styles.statSep}>·</Text>
-        <Text style={styles.statText}>wait ${breakdown.waitingCharge.toFixed(2)}</Text>
       </View>
 
-      <Text style={styles.subStat}>
-        Flag ${breakdown.flagFall.toFixed(2)} · Trip {formatClock(tripMs)}
-      </Text>
+      <View style={styles.statsRow}>
+        <Text style={styles.statText}>Flag ${breakdown.flagFall.toFixed(2)}</Text>
+        <Text style={styles.statSep}>·</Text>
+        <Text style={styles.statText}>Dist ${breakdown.distanceCharge.toFixed(2)}</Text>
+        <Text style={styles.statSep}>·</Text>
+        <Text style={styles.statText}>Wait ${breakdown.waitingCharge.toFixed(2)}</Text>
+      </View>
+
+      <Text style={styles.subStat}>Trip {formatClock(tripMs)}</Text>
 
       <Pressable style={[styles.pauseBtn, meter.paused && styles.pauseBtnActive]} onPress={onPause}>
         <Text style={styles.pauseText}>{meter.paused ? 'RESUME' : 'PAUSE'}</Text>
@@ -63,7 +69,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
-    maxHeight: 130,
+    maxHeight: 150,
   },
   fare: {
     color: Colors.success,
@@ -71,6 +77,15 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     lineHeight: 30,
   },
+  mode: {
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  modeMoving: { color: Colors.success },
+  modeWaiting: { color: Colors.warning },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',

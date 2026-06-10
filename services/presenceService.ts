@@ -3,7 +3,7 @@ import { getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase'
 import { DriverProfile, PresenceDisplayStatus } from '@/types';
 import { getCurrentCoords } from '@/services/locationService';
 
-export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned';
+export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned' | 'Picking' | 'Arrived' | 'Active';
 
 export function mapVehicleStatusToDisplay(raw: string | undefined | null): PresenceDisplayStatus {
   const s = String(raw ?? '').trim();
@@ -50,7 +50,10 @@ function buildPresenceRecord(
         ? driver.name.split('@')[0]
         : `Driver ${vehicleId}`;
 
-  const vehiclestatus = status === 'Assigned' ? 'Picking' : status;
+  const vehiclestatus =
+    status === 'Assigned' ? 'Picking'
+    : status === 'Active' ? 'Active'
+    : status;
 
   return {
     driverid: parseDriverId(driver.id),
@@ -206,6 +209,8 @@ export async function writeOnlinePresence(
   const topStatus = status === 'Assigned' ? 'Picking' : status;
   await update(ref(getDatabaseInstance(), onlinePath), {
     vehiclestatus: topStatus,
+    VehicleStatus: topStatus,
+    lastSeen: Date.now(),
   });
 }
 

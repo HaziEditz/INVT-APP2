@@ -2,16 +2,18 @@ import * as Location from 'expo-location';
 import { calcMeterBreakdown } from '@/lib/tariffs';
 import { MeterMode, MeterState, Tariff } from '@/types';
 
-const SPEED_MOVING_MS = 5 / 3.6; // 5 km/h
+const SPEED_MOVING_KMH = 3;
+const SPEED_MOVING_MS = SPEED_MOVING_KMH / 3.6;
+const MAX_GPS_ACCURACY_M = 50;
+const MAX_JUMP_M = 500;
 const TICK_MS = 2000;
 const UNPAUSE_DISTANCE_M = 50;
-const MIN_DISTANCE_M = 2;
-const MAX_DISTANCE_M = 500;
 
 type GpsSample = {
   lat: number;
   lng: number;
   speedMs: number | null;
+  accuracyM: number | null;
 };
 
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -24,10 +26,13 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Expo Go often returns null, undefined, -1, or 0 when stationary — treat as not moving. */
 function normalizeSpeed(speedMs?: number | null): number {
   if (speedMs == null || !Number.isFinite(speedMs) || speedMs <= 0) return 0;
   return speedMs;
+}
+
+function speedKmh(speedMs: number): number {
+  return speedMs * 3.6;
 }
 
 function appendRoutePoint(meter: MeterState, lat: number, lng: number): MeterState {
@@ -85,8 +90,7 @@ export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | 
 
   if (meter.paused) {
     next.pausedMs += TICK_MS;
-    const result = applyTariffToMeter(next, tariff);
-    return { meter: result };
+    return { meter: applyTariffToMeter(next, tariff) };
   }
 
   const speed = normalizeSpeed(speedMs);
@@ -98,8 +102,7 @@ export function tickMeter(meter: MeterState, tariff: Tariff, speedMs?: number | 
     next.waitingMs += TICK_MS;
   }
 
-  const result = applyTariffToMeter(next, tariff);
-  return { meter: result };
+  return { meter: applyTariffToMeter(next, tariff) };
 }
 
 export function tickMeterWithGps(
@@ -108,9 +111,14 @@ export function tickMeterWithGps(
   lat: number,
   lng: number,
   speedMs?: number | null,
+  accuracyM?: number | null,
 ): MeterTickResult {
   let autoUnpaused = false;
   let next = { ...meter };
+
+  if (accuracyM != null && accuracyM > MAX_GPS_ACCURACY_M) {
+    return { meter: applyTariffToMeter(next, tariff) };
+  }
 
   if (meter.paused && meter.pauseAnchorLat != null && meter.pauseAnchorLng != null) {
     const moved = haversineM(meter.pauseAnchorLat, meter.pauseAnchorLng, lat, lng);
@@ -125,20 +133,27 @@ export function tickMeterWithGps(
   let distanceDeltaM = 0;
   if (next.lastLat != null && next.lastLng != null) {
     distanceDeltaM = haversineM(next.lastLat, next.lastLng, lat, lng);
+    if (distanceDeltaM > MAX_JUMP_M) {
+      next.lastLat = lat;
+      next.lastLng = lng;
+      return { meter: applyTariffToMeter(next, tariff), autoUnpaused };
+    }
   }
   next.lastLat = lat;
   next.lastLng = lng;
   next = appendRoutePoint(next, lat, lng);
 
   const speed = normalizeSpeed(speedMs);
-  const speedSaysMoving = speed > SPEED_MOVING_MS;
+  const derivedSpeedMs = distanceDeltaM > 0 && TICK_MS > 0 ? distanceDeltaM / (TICK_MS / 1000) : 0;
+  const effectiveSpeedMs = Math.max(speed, derivedSpeedMs);
+  const isMoving = effectiveSpeedMs > SPEED_MOVING_MS || speedKmh(effectiveSpeedMs) > SPEED_MOVING_KMH;
 
-  // Distance from GPS positions — do not require speed (many devices report speed=0 while moving).
-  if (!next.paused && distanceDeltaM > MIN_DISTANCE_M && distanceDeltaM < MAX_DISTANCE_M) {
+  if (!next.paused && isMoving && distanceDeltaM > 0) {
     next.distanceKm += distanceDeltaM / 1000;
   }
 
-  const tick = tickMeter(next, tariff, speedSaysMoving ? speed : 0);
+  next.mode = isMoving ? 'moving' : 'waiting';
+  const tick = tickMeter(next, tariff, isMoving ? effectiveSpeedMs : 0);
   return { ...tick, autoUnpaused };
 }
 
@@ -151,7 +166,7 @@ function runMeterTick(
   const m = getMeter();
   if (!m?.running) return;
   if (gps) {
-    onUpdate(tickMeterWithGps(m, tariff, gps.lat, gps.lng, gps.speedMs));
+    onUpdate(tickMeterWithGps(m, tariff, gps.lat, gps.lng, gps.speedMs, gps.accuracyM));
   } else {
     onUpdate(tickMeter(m, tariff, 0));
   }
@@ -182,6 +197,7 @@ export async function watchMeter(
           lat: cached.coords.latitude,
           lng: cached.coords.longitude,
           speedMs: cached.coords.speed ?? null,
+          accuracyM: cached.coords.accuracy ?? null,
         };
         runMeterTick(getMeter, tariff, lastGps, onUpdate);
       }
@@ -197,6 +213,7 @@ export async function watchMeter(
             lat: loc.coords.latitude,
             lng: loc.coords.longitude,
             speedMs: loc.coords.speed ?? null,
+            accuracyM: loc.coords.accuracy ?? null,
           };
           runMeterTick(getMeter, tariff, lastGps, onUpdate);
         },

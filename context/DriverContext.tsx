@@ -24,6 +24,7 @@ import {
   moveDriverToEndOfQueue,
   startShiftOnline,
   writeOnlinePresence,
+  FirebaseDriverStatus,
 } from '@/services/presenceService';
 import { loadCompanyTariffs } from '@/lib/companyTariffs';
 import { markBookingCompleted } from '@/lib/allbookings';
@@ -693,6 +694,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const canReceiveJobOffers =
     shiftActive && readyForJobs && presenceStatus === 'Online' && !paymentJob;
+  const canListenForOffers = shiftActive && !paymentJob;
   const tripInProgress = () => hailActiveRef.current || !!activeJobIdRef.current;
   const blockIfTripInProgress = () => {
     if (!tripInProgress()) return false;
@@ -703,11 +705,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const nextQueuedOffer = canReceiveJobOffers ? (queuedOffers[0] ?? null) : null;
 
   useSafeEffect(() => {
-    if (canReceiveJobOffers) return;
+    if (canListenForOffers) return;
     setJobOffer(null);
-    setQueuedOffers([]);
+    if (!shiftActive) {
+      clearBroadcastOffers();
+      setQueuedOffers([]);
+    }
     lastOfferSeenRef.current = null;
-  }, [canReceiveJobOffers], 'Driver-clearOffersWhenOffline');
+  }, [canListenForOffers, shiftActive], 'Driver-clearOffersWhenOffline');
 
   const flushQueuedOffer = () => {
     setQueuedOffers((q) => {
@@ -759,7 +764,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const handleIncomingOffer = async (val: Record<string, unknown>) => {
-    if (!shiftActiveRef.current || !readyForJobsRef.current || paymentJobRef.current) return;
+    if (!shiftActiveRef.current || paymentJobRef.current) return;
 
     const offer = parseJobOffer(val);
     const seen = lastOfferSeenRef.current;
@@ -852,7 +857,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const processOfferPayload = async (val: Record<string, unknown>) => {
-    if (!shiftActiveRef.current || !readyForJobsRef.current) return;
+    if (!shiftActiveRef.current) return;
     await handleDriverNotification(val);
   };
 
@@ -863,7 +868,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [hailActive, activeJob?.id], 'Driver-clearOfferModalOnTrip');
 
   useSafeEffect(() => {
-    if (!canReceiveJobOffers || !isFirebaseReady || !driver?.id) return;
+    if (!canListenForOffers || !isFirebaseReady || !driver?.id) return;
     try {
       const notifyRef = ref(getDatabaseInstance(), `notification/${driver.id}`);
       return onValue(notifyRef, async (snap) => {
@@ -886,7 +891,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] notification subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canReceiveJobOffers, driver?.id], 'Driver-notification');
+  }, [canListenForOffers, driver?.id], 'Driver-notification');
 
   useSafeEffect(() => {
     if (!driver?.companyId || !activeJob?.id) {
@@ -1247,6 +1252,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const syncJobStageToDispatch = async (stage: JobStage) => {
+    if (!driver || !shiftActive) return;
+    const vehicleId = await resolveVehicleId();
+    if (!vehicleId) return;
+    const statusMap: Record<JobStage, FirebaseDriverStatus> = {
+      pickup: 'Assigned',
+      arrived: 'Arrived',
+      onboard: 'Active',
+      complete: 'Available',
+    };
+    writeOnlinePresence(driver, vehicleId, statusMap[stage]).catch(() => undefined);
+  };
+
   const acceptOffer = async () => {
     if (!jobOffer || !driver) return;
     const offerSnapshot = jobOffer;
@@ -1280,6 +1298,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
       writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+      syncJobStageToDispatch('pickup');
     }
     await clearDriverNotification(driver.id);
   };
@@ -1350,6 +1369,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
       writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+      syncJobStageToDispatch('pickup');
     }
   };
 
@@ -1431,10 +1451,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
-      if (nextStage === 'onboard' || nextStage === 'complete') {
+      if (nextStage === 'onboard') {
+        writeOnlinePresence(driver, vehicleId, 'Active').catch(() => undefined);
+        syncJobStageToDispatch('onboard');
+      } else if (nextStage === 'arrived') {
+        writeOnlinePresence(driver, vehicleId, 'Arrived').catch(() => undefined);
+        syncJobStageToDispatch('arrived');
+      } else if (nextStage === 'complete') {
         writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
       } else {
         writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+        syncJobStageToDispatch(nextStage);
       }
     }
 
@@ -1531,11 +1558,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       await completeJobPayment({
         jobId: job.id,
+        bookingId: job.id,
         driverId: driver.id,
         companyId: driver.companyId,
         paymentType,
         fare: totalFare,
+        totalFare,
+        distanceKm: closed.distanceKm,
+        distance: closed.distanceKm,
         extras,
+        ...(tmDetails ?? {}),
+        payload: {
+          fare: totalFare,
+          totalFare,
+          distanceKm: closed.distanceKm,
+          distance: closed.distanceKm,
+          paymentType,
+          extras,
+        },
       });
     } catch {
       await enqueueOfflineItem({

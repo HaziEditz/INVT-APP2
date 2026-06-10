@@ -12,14 +12,14 @@ export async function dispatchGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function dispatchPost<T>(path: string, body: Record<string, unknown>): Promise<T> {
+export async function dispatchPost<T>(path: string, body: Record<string, unknown>, opts?: { userKey?: string }): Promise<T> {
   const token = await getAuthInstance().currentUser?.getIdToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (opts?.userKey) headers['X-User-Key'] = opts.userKey;
   const res = await fetch(`${DISPATCH_API_URL}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Dispatch POST ${path} failed: ${res.status}`);
@@ -143,7 +143,8 @@ export async function createPreBooking(payload: Record<string, unknown>) {
 }
 
 export async function completeJobPayment(payload: Record<string, unknown>) {
-  return dispatchPost('/api/job/complete', payload);
+  const config = await getDispatchConfig();
+  return dispatchPost('/api/job/complete', payload, { userKey: config.passforlink });
 }
 
 export async function reportNoShow(jobId: string, driverId: string, companyId: string) {
