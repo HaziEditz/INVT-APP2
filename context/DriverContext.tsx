@@ -664,6 +664,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const canReceiveJobOffers =
     shiftActive && readyForJobs && presenceStatus === 'Online' && !paymentJob;
   const tripInProgress = () => hailActiveRef.current || !!activeJobIdRef.current;
+  const blockIfTripInProgress = () => {
+    if (!tripInProgress()) return false;
+    Alert.alert('Job in progress', TRIP_BLOCK_MSG);
+    return true;
+  };
   const offersBadgeCount = shiftActive
     ? pendingOffers.length + (tripInProgress() ? queuedOffers.length : 0)
     : 0;
@@ -951,14 +956,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     console.log('[Shift] startShift complete — safe to navigate to tabs');
-  };
-
-  const tripInProgress = () => hailActiveRef.current || !!activeJobIdRef.current;
-
-  const blockIfTripInProgress = () => {
-    if (!tripInProgress()) return false;
-    Alert.alert('Job in progress', TRIP_BLOCK_MSG);
-    return true;
   };
 
   const goAway = async () => {
