@@ -29,6 +29,15 @@ export function CurrentTripPanel() {
 
   const meterRunning = !!meter?.running;
 
+  const confirmEndTrip = (onConfirm: () => void) => {
+    Alert.alert(
+      'Confirm End Trip?',
+      'Are you sure you want to end this trip?',
+      [{ text: 'Confirm', onPress: onConfirm }],
+      { cancelable: false },
+    );
+  };
+
   if (hailActive) {
     return (
       <View style={styles.panel}>
@@ -38,7 +47,7 @@ export function CurrentTripPanel() {
         </Text>
         <Text style={styles.meta}>Started {fmtTime(meter?.startedAt)}</Text>
         {meterRunning ? (
-          <Button title="End Trip" variant="danger" onPress={endTrip} />
+          <Button title="End Trip" variant="danger" onPress={() => confirmEndTrip(() => void endTrip())} />
         ) : null}
       </View>
     );
@@ -72,6 +81,10 @@ export function CurrentTripPanel() {
   const canNavigate = canOpenNavigation(navTarget);
 
   const onAdvance = async () => {
+    if (nextStage === 'complete') {
+      confirmEndTrip(() => void advanceStage());
+      return;
+    }
     await advanceStage();
   };
 
@@ -119,7 +132,7 @@ export function CurrentTripPanel() {
           />
         ) : null}
         {meterRunning ? (
-          <Button title="End Trip" variant="danger" onPress={endTrip} />
+          <Button title="End Trip" variant="danger" onPress={() => confirmEndTrip(() => void endTrip())} />
         ) : (
           <Button title={nextLabel} onPress={onAdvance} />
         )}

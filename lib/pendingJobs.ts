@@ -1,6 +1,7 @@
 import { get, onValue, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { collectJobNotes } from '@/lib/jobNotes';
+import { isDispatchWindowOpen } from '@/lib/dispatchWindow';
 import { jobMatchesDriverVehicle, serviceTypeToJobType } from '@/lib/jobMatching';
 import { JobOffer, Vehicle } from '@/types';
 
@@ -17,6 +18,7 @@ export function parsePendingJobNode(id: string, val: Record<string, unknown>): J
   if (val.claimedBy || val.takenBy) return null;
   const status = String(val.Status ?? val.status ?? 'Pending').toLowerCase();
   if (status && status !== 'pending') return null;
+  if (!isDispatchWindowOpen(val)) return null;
 
   const pickup = String(val.PickAddress ?? val.pickAddress ?? val.pickup ?? '');
   const dropoff = String(val.DropAddress ?? val.dropAddress ?? val.dropoff ?? '');
@@ -41,6 +43,12 @@ export function parsePendingJobNode(id: string, val: Record<string, unknown>): J
     passengers: Number(val.Passengers ?? val.passengers ?? 1) || 1,
     serviceTypeRaw: serviceRaw,
     expiresAt: Date.now() + 3600000,
+    postedAt: (() => {
+      const raw = val.createdAt ?? val.CreatedAt ?? val.OfferedAt ?? val.offeredAt;
+      if (raw == null) return Date.now();
+      const n = typeof raw === 'number' ? raw : Date.parse(String(raw));
+      return Number.isFinite(n) ? n : Date.now();
+    })(),
     source: String(val.BookingSource ?? val.CreatedBy ?? 'dispatch'),
     notes: primaryNote,
     allNotes: allNotes.length ? allNotes : undefined,

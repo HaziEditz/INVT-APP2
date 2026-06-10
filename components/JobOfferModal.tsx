@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function JobOfferModal() {
-  const { jobOffer, acceptOffer, declineOffer } = useDriver();
+  const { jobOffer, acceptOffer, declineOffer, hailActive, activeJob } = useDriver();
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   useSafeEffect(() => {
@@ -27,7 +27,7 @@ export function JobOfferModal() {
     return () => clearInterval(id);
   }, [jobOffer, declineOffer], 'JobOfferModal-timer');
 
-  if (!jobOffer) return null;
+  if (!jobOffer || hailActive || !!activeJob) return null;
 
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
 

@@ -70,8 +70,16 @@ export default function MainScreen() {
       Alert.alert('On dispatch job', 'Complete or cancel the active job before hailing.');
       return;
     }
-    void startHail();
-    setMainTab('current');
+    Alert.alert('Start Hail Trip?', 'Begin a street hail trip with the meter running.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Confirm',
+        onPress: () => {
+          void startHail();
+          setMainTab('current');
+        },
+      },
+    ]);
   };
 
   const mapShowsRoute = !!activeJob || hailActive;
@@ -143,9 +151,11 @@ export default function MainScreen() {
         />
 
         <ErrorBoundary name="MainPanel">
-          {mainTab === 'offers' ? <OffersPanel /> : null}
-          {mainTab === 'current' ? <CurrentTripPanel /> : null}
-          {mainTab === 'queue' ? <QueuePanel /> : null}
+          <View style={styles.panelWrap}>
+            {mainTab === 'offers' ? <OffersPanel /> : null}
+            {mainTab === 'current' ? <CurrentTripPanel /> : null}
+            {mainTab === 'queue' ? <QueuePanel /> : null}
+          </View>
         </ErrorBoundary>
 
         {showHailButton ? (
@@ -217,9 +227,15 @@ const styles = StyleSheet.create({
   },
   bottomChrome: {
     flexShrink: 0,
+    maxHeight: '46%',
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.background,
+  },
+  panelWrap: {
+    flex: 1,
+    minHeight: 160,
+    maxHeight: 280,
   },
   hailBtn: {
     marginHorizontal: 14,

@@ -72,6 +72,7 @@ export interface JobOffer {
   serviceTypeRaw?: string;
   originalStatus?: 'pending' | 'manual';
   queuedAt?: number;
+  postedAt?: number;
 }
 
 export interface QueuedOffer extends JobOffer {

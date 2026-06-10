@@ -663,7 +663,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const canReceiveJobOffers =
     shiftActive && readyForJobs && presenceStatus === 'Online' && !paymentJob;
-  const offersBadgeCount = shiftActive ? pendingOffers.length : 0;
+  const tripInProgress = () => hailActiveRef.current || !!activeJobIdRef.current;
+  const offersBadgeCount = shiftActive
+    ? pendingOffers.length + (tripInProgress() ? queuedOffers.length : 0)
+    : 0;
   const nextQueuedOffer = canReceiveJobOffers ? (queuedOffers[0] ?? null) : null;
 
   useSafeEffect(() => {
@@ -685,28 +688,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const promptQueuedOfferAfterTrip = () => {
+  const releaseQueuedOffersAfterTrip = () => {
     setTimeout(() => {
+      if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
       setQueuedOffers((q) => {
         if (q.length === 0) return q;
-        const next = q[0];
-        Alert.alert(
-          'Queued job waiting',
-          `You have a queued job (#${next.id}) — tap Accept when you are ready.`,
-          [
-            { text: 'Later', style: 'cancel' },
-            {
-              text: 'Accept',
-              onPress: () => {
-                setQueuedOffers((prev) => prev.filter((o) => o.id !== next.id));
-                setJobOffer({ ...next, silent: false });
-              },
-            },
-          ],
-        );
-        return q;
+        const [next, ...rest] = q;
+        setJobOffer({ ...next, silent: false });
+        return rest;
       });
-    }, 400);
+    }, 600);
   };
 
   const enqueueOffer = (offer: JobOffer) => {
@@ -727,16 +718,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (seen?.id === offer.id && Date.now() - seen.at < 2500) return;
     lastOfferSeenRef.current = { id: offer.id, at: Date.now() };
 
-    const onHail = hailActiveRef.current;
-    const onJob = !!activeJobIdRef.current;
-    const onboard = activeJob?.stage === 'onboard';
-
-    if (onHail || (onJob && !onboard && activeJob?.type === 'Taxi')) {
-      enqueueOffer(offer);
-      return;
-    }
-
-    if (onJob && onboard) {
+    if (hailActiveRef.current || activeJobIdRef.current) {
       enqueueOffer(offer);
       return;
     }
@@ -753,6 +735,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (val.removed || val.declined) return;
     await handleIncomingOffer(val);
   };
+
+  useSafeEffect(() => {
+    if (hailActiveRef.current || activeJobIdRef.current) {
+      setJobOffer(null);
+    }
+  }, [hailActive, activeJob?.id], 'Driver-clearOfferModalOnTrip');
 
   useSafeEffect(() => {
     if (!canReceiveJobOffers || !isFirebaseReady || !driver?.id) return;
@@ -1179,9 +1167,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const offer = pendingOffers.find((o) => o.id === offerId);
     if (!offer || !driver) return;
 
-    const onTrip = hailActiveRef.current || !!activeJobIdRef.current;
-    if (onTrip) {
+    if (hailActiveRef.current || activeJobIdRef.current) {
       enqueueOffer(offer);
+      Alert.alert('Offer saved', 'This job is waiting in your queue until your current trip finishes.');
       return;
     }
 
@@ -1209,6 +1197,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const promoteQueuedOffer = (offerId: string) => {
+    if (hailActiveRef.current || activeJobIdRef.current) {
+      Alert.alert('On trip', 'Finish your current trip before accepting another job.');
+      return;
+    }
     const offer = queuedOffers.find((o) => o.id === offerId);
     if (!offer) return;
     setQueuedOffers((prev) => prev.filter((o) => o.id !== offerId));
@@ -1412,7 +1404,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         readyForJobsRef.current = true;
       }
     }
-    promptQueuedOfferAfterTrip();
+    releaseQueuedOffersAfterTrip();
   };
 
   const cancelActiveJobInternal = async () => {
@@ -1428,7 +1420,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const vehicleId = await resolveVehicleId();
       if (vehicleId) writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
     }
-    promptQueuedOfferAfterTrip();
+    releaseQueuedOffersAfterTrip();
   };
 
   const cancelActiveJob = async () => {

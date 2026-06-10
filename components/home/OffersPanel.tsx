@@ -6,6 +6,15 @@ import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+function timeSince(ts?: number): string {
+  if (!ts) return 'Just now';
+  const mins = Math.max(0, Math.floor((Date.now() - ts) / 60000));
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m ago`;
+}
+
 export function OffersPanel() {
   const { pendingOffers, pickOfferFromList, shiftActive } = useDriver();
 
@@ -27,36 +36,46 @@ export function OffersPanel() {
   }
 
   return (
-    <ScrollView style={styles.list} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-      {pendingOffers.map((o) => (
-        <View key={o.id} style={styles.card}>
-          <View style={styles.cardHead}>
-            <JobTypeBadge type={o.type} />
-            {o.vehicleTypeRequired ? (
-              <Text style={styles.vehicleReq}>{o.vehicleTypeRequired}</Text>
+    <ScrollView style={styles.list} contentContainerStyle={styles.listContent} nestedScrollEnabled showsVerticalScrollIndicator>
+      {pendingOffers.map((o) => {
+        const fare = o.fixedFare ?? o.estimatedFare;
+        return (
+          <View key={o.id} style={styles.card}>
+            <View style={styles.cardHead}>
+              <JobTypeBadge type={o.type} />
+              <Text style={styles.jobId}>#{o.id}</Text>
+              <Text style={styles.posted}>{timeSince(o.postedAt)}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.label}>Pickup</Text>
+              <Text style={styles.addr}>{o.pickup || '—'}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.label}>Dropoff</Text>
+              <Text style={styles.addr}>{o.dropoff || '—'}</Text>
+            </View>
+            {o.passengerName ? (
+              <Text style={styles.meta}>
+                <Text style={styles.metaLabel}>Passenger: </Text>
+                {o.passengerName}
+                {o.passengerPhone ? ` · ${o.passengerPhone}` : ''}
+              </Text>
             ) : null}
+            {o.vehicleTypeRequired ? <Text style={styles.meta}>Vehicle: {o.vehicleTypeRequired}</Text> : null}
+            {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
+            {fare != null ? <Text style={styles.fare}>Est. fare ${fare.toFixed(2)}</Text> : null}
+            <Button title="Accept" onPress={() => pickOfferFromList(o.id)} style={{ marginTop: 10 }} />
           </View>
-          <Text style={styles.addr} numberOfLines={2}>
-            ↑ {o.pickup || '—'}
-          </Text>
-          <Text style={styles.addr} numberOfLines={1}>
-            ↓ {o.dropoff || '—'}
-          </Text>
-          {o.passengerName ? <Text style={styles.meta}>{o.passengerName}</Text> : null}
-          {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
-          {(o.estimatedFare ?? o.fixedFare) != null ? (
-            <Text style={styles.fare}>${(o.fixedFare ?? o.estimatedFare)!.toFixed(2)}</Text>
-          ) : null}
-          <Button title="Take job" onPress={() => pickOfferFromList(o.id)} style={{ marginTop: 8 }} />
-        </View>
-      ))}
+        );
+      })}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { maxHeight: 220, paddingHorizontal: 12, paddingVertical: 8 },
-  empty: { padding: 20, alignItems: 'center' },
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 12, paddingVertical: 8, paddingBottom: 16 },
+  empty: { padding: 20, alignItems: 'center', flex: 1, justifyContent: 'center' },
   emptyText: { color: Colors.textMuted, fontSize: 15, textAlign: 'center' },
   emptySub: { color: Colors.textMuted, fontSize: 13, marginTop: 8, textAlign: 'center' },
   card: {
@@ -67,9 +86,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  vehicleReq: { color: Colors.textMuted, fontSize: 12 },
-  addr: { color: Colors.text, fontSize: 15, marginBottom: 4 },
-  meta: { color: Colors.textMuted, fontSize: 13 },
-  fare: { color: Colors.success, fontSize: 17, fontWeight: '800', marginTop: 4 },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
+  jobId: { color: Colors.textMuted, fontSize: 12, fontWeight: '700' },
+  posted: { color: Colors.textMuted, fontSize: 11, marginLeft: 'auto' },
+  row: { marginBottom: 6 },
+  label: { color: Colors.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 2 },
+  addr: { color: Colors.text, fontSize: 15, lineHeight: 20 },
+  meta: { color: Colors.textMuted, fontSize: 13, marginTop: 2 },
+  metaLabel: { fontWeight: '700', color: Colors.text },
+  fare: { color: Colors.success, fontSize: 17, fontWeight: '800', marginTop: 6 },
 });
