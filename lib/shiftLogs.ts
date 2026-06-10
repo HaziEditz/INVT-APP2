@@ -9,6 +9,19 @@ export type ShiftLogEntry = {
   driverId?: string;
 };
 
+/** Firebase RTDB rejects `undefined`; coerce missing fields to null. */
+function sanitizeForFirebase(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) {
+      out[key] = null;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 export async function loadLastShiftEnd(
   companyId: string,
   uid: string,
@@ -52,9 +65,13 @@ export async function writeShiftEndLog(
   if (!companyId || !uid) return;
   const database = getDatabaseInstance();
   const entryRef = push(ref(database, `shiftLogs/${companyId}/${uid}`));
-  await set(entryRef, {
-    ...payload,
+  const record = sanitizeForFirebase({
     shiftEndAt: payload.shiftEndAt || Date.now(),
+    shiftStartAt: payload.shiftStartAt ?? null,
+    workedMinutes: payload.workedMinutes ?? null,
+    weeklyWorkedMinutes: payload.weeklyWorkedMinutes ?? null,
+    driverId: payload.driverId ?? null,
     loggedAt: Date.now(),
   });
+  await set(entryRef, record);
 }
