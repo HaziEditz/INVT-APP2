@@ -17,7 +17,6 @@ import { MainPanelTab } from '@/types';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -31,7 +30,6 @@ export default function MainScreen() {
     activeJob,
     hailActive,
     meter,
-    startHail,
     tariffs,
     selectedTariff,
     setSelectedTariff,
@@ -49,7 +47,6 @@ export default function MainScreen() {
 
   const hasCurrent = !!activeJob || hailActive;
   const meterRunning = !!meter?.running;
-  const showHailButton = shiftActive && !hailActive && !meterRunning && !activeJob;
 
   useSafeEffect(() => {
     if (!firebaseUser) return;
@@ -60,27 +57,6 @@ export default function MainScreen() {
     if (hasCurrent) setMainTab('current');
     else if (queuedOffers.length > 0) setMainTab('queue');
   }, [hasCurrent, queuedOffers.length], 'MainScreen-autoTab');
-
-  const onHailPress = () => {
-    if (!shiftActive) {
-      Alert.alert('Off shift', 'Start your shift from Profile or sign in again.');
-      return;
-    }
-    if (activeJob) {
-      Alert.alert('On dispatch job', 'Complete or cancel the active job before hailing.');
-      return;
-    }
-    Alert.alert('Start Hail Trip?', 'Begin a street hail trip with the meter running.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Confirm',
-        onPress: () => {
-          void startHail();
-          setMainTab('current');
-        },
-      },
-    ]);
-  };
 
   const mapShowsRoute = !!activeJob || hailActive;
 
@@ -158,12 +134,6 @@ export default function MainScreen() {
           </View>
         </ErrorBoundary>
 
-        {showHailButton ? (
-          <Pressable style={styles.hailBtn} onPress={onHailPress}>
-            <Text style={styles.hailBtnText}>HAIL PASSENGER</Text>
-          </Pressable>
-        ) : null}
-
         {!shiftActive ? (
           <Text style={styles.offHint}>
             You are off shift. Start a shift from Profile or vehicle selection.
@@ -233,19 +203,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   panelWrap: {
-    flex: 1,
-    minHeight: 160,
     maxHeight: 280,
   },
-  hailBtn: {
-    marginHorizontal: 14,
-    marginVertical: 8,
-    backgroundColor: Colors.accent,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  hailBtnText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.5 },
   offHint: {
     color: Colors.textMuted,
     fontSize: 13,

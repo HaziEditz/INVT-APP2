@@ -3,9 +3,11 @@ import { jobCoords } from '@/lib/geo';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import * as Location from 'expo-location';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { JobMapProps } from './JobMap.types';
+
+const DEFAULT_CENTER = { lat: -41.0, lng: 174.0, zoom: 5 };
 
 export default function LeafletMap({
   pickupLat,
@@ -48,9 +50,9 @@ export default function LeafletMap({
       payload.fitDriver = true;
       payload.fitZoom = 14;
     } else if (!hasJobCoords && !driverCoords) {
-      payload.centerLat = -41.0;
-      payload.centerLng = 174.0;
-      payload.centerZoom = 5;
+      payload.centerLat = DEFAULT_CENTER.lat;
+      payload.centerLng = DEFAULT_CENTER.lng;
+      payload.centerZoom = DEFAULT_CENTER.zoom;
     }
     return payload;
   }, [
@@ -73,6 +75,14 @@ export default function LeafletMap({
     }
     let sub: Location.LocationSubscription | null = null;
     let cancelled = false;
+
+    void Location.getLastKnownPositionAsync().then((last) => {
+      if (cancelled || !last) return;
+      setDriverCoords({
+        lat: last.coords.latitude,
+        lng: last.coords.longitude,
+      });
+    });
 
     void (async () => {
       try {
@@ -115,15 +125,26 @@ export default function LeafletMap({
   const html = useMemo(() => buildLeafletMapHtml(), []);
 
   const handleLoadEnd = () => {
-    setReady(true);
     webRef.current?.injectJavaScript(
       'if(window.map){window.map.invalidateSize();}else if(window.initMap){window.initMap();} true;',
     );
+    pushToMap(mapPayload);
+    setTimeout(() => setReady((was) => was || true), 1200);
+  };
+
+  const handleReady = () => {
+    setReady(true);
     pushToMap(mapPayload);
   };
 
   return (
     <View style={styles.wrap}>
+      {!ready ? (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <ActivityIndicator color="#1565C0" size="large" />
+          <Text style={styles.loadingText}>Loading map…</Text>
+        </View>
+      ) : null}
       <WebView
         ref={webRef}
         originWhitelist={['*']}
@@ -131,6 +152,8 @@ export default function LeafletMap({
         style={styles.webview}
         javaScriptEnabled
         domStorageEnabled
+        cacheEnabled
+        {...(Platform.OS === 'android' ? { cacheMode: 'LOAD_CACHE_ELSE_NETWORK' as const } : {})}
         scrollEnabled={false}
         mixedContentMode="always"
         allowsInlineMediaPlayback
@@ -140,8 +163,7 @@ export default function LeafletMap({
           try {
             const msg = JSON.parse(event.nativeEvent.data) as { type?: string };
             if (msg.type === 'ready') {
-              setReady(true);
-              pushToMap(mapPayload);
+              handleReady();
             }
           } catch {
             // ignore
@@ -156,4 +178,13 @@ export default function LeafletMap({
 const styles = StyleSheet.create({
   wrap: { flex: 1, width: '100%', minHeight: 160, backgroundColor: '#dbeafe' },
   webview: { flex: 1, backgroundColor: '#dbeafe' },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+    backgroundColor: '#dbeafe',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  loadingText: { color: '#475569', fontSize: 14, fontWeight: '600' },
 });

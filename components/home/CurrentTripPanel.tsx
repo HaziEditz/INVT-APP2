@@ -5,7 +5,7 @@ import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
 import { STAGE_LABELS, JobStage } from '@/types';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const STAGES: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
 
@@ -16,6 +16,7 @@ function fmtTime(ts?: number) {
 
 export function CurrentTripPanel() {
   const {
+    shiftActive,
     activeJob,
     hailActive,
     hailPickupAddress,
@@ -25,9 +26,22 @@ export function CurrentTripPanel() {
     noShowActiveJob,
     recallJob,
     endTrip,
+    startHail,
   } = useDriver();
 
   const meterRunning = !!meter?.running;
+  const showHailButton = shiftActive && !hailActive && !meterRunning && !activeJob;
+
+  const onHailPress = () => {
+    if (!shiftActive) {
+      Alert.alert('Off shift', 'Start your shift from Profile or sign in again.');
+      return;
+    }
+    Alert.alert('Start Hail Trip?', 'Begin a street hail trip with the meter running.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Confirm', onPress: () => void startHail() },
+    ]);
+  };
 
   const confirmEndTrip = (onConfirm: () => void) => {
     Alert.alert(
@@ -58,6 +72,11 @@ export function CurrentTripPanel() {
       <View style={styles.empty}>
         <Text style={styles.emptyText}>No active trip.</Text>
         <Text style={styles.emptySub}>Use HAIL for street jobs or take an offer from the Offers tab.</Text>
+        {showHailButton ? (
+          <Pressable style={styles.hailBtn} onPress={onHailPress}>
+            <Text style={styles.hailBtnText}>HAIL PASSENGER</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -169,9 +188,18 @@ const styles = StyleSheet.create({
   },
   title: { color: Colors.text, fontSize: 18, fontWeight: '800' },
   pickupFrom: { color: Colors.text, fontSize: 15, fontWeight: '600', marginTop: 8, lineHeight: 20 },
-  empty: { padding: 20, alignItems: 'center' },
+  empty: { padding: 20, alignItems: 'center', gap: 8 },
   emptyText: { color: Colors.textMuted, fontSize: 15, textAlign: 'center' },
   emptySub: { color: Colors.textMuted, fontSize: 13, marginTop: 8, textAlign: 'center' },
+  hailBtn: {
+    marginTop: 12,
+    alignSelf: 'stretch',
+    backgroundColor: Colors.accent,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  hailBtnText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.5 },
   stageScroll: { marginBottom: 8 },
   stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.border, marginRight: 6 },

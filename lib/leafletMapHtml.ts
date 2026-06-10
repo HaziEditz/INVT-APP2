@@ -4,6 +4,9 @@ export function buildLeafletMapHtml(): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <link rel="preconnect" href="https://unpkg.com" crossorigin />
+  <link rel="preconnect" href="https://tile.openstreetmap.org" crossorigin />
+  <link rel="dns-prefetch" href="https://router.project-osrm.org" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     * { box-sizing: border-box; }
@@ -44,10 +47,14 @@ export function buildLeafletMapHtml(): string {
         if (typeof L === 'undefined') setStatus('Map library failed to load');
         return;
       }
-      map = L.map('map', { zoomControl:true, attributionControl:true }).setView([-41.0, 174.0], 5);
+      map = L.map('map', { zoomControl:true, attributionControl:true, preferCanvas:true }).setView([-41.0, 174.0], 5);
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
-        attribution: '&copy; OpenStreetMap'
+        attribution: '&copy; OpenStreetMap',
+        crossOrigin: true,
+        updateWhenIdle: true,
+        updateWhenZooming: false,
+        keepBuffer: 6
       }).addTo(map);
       map.whenReady(function() {
         mapReady = true;
@@ -146,8 +153,11 @@ export function buildLeafletMapHtml(): string {
     document.addEventListener('message', function(e) { onRNMessage(e.data); });
     window.addEventListener('message', function(e) { onRNMessage(e.data); });
 
-    initMap();
-    notifyReady();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initMap);
+    } else {
+      initMap();
+    }
   </script>
 </body>
 </html>`;
