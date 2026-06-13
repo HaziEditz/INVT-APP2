@@ -1,21 +1,78 @@
+import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
-
-type NotificationsModule = typeof import('expo-notifications');
+import { loadNotifications } from '@/services/notificationService';
 
 export type InAppSoundKind = 'offer' | 'update' | 'cancel' | 'alert' | 'general';
 
-let notificationsModule: NotificationsModule | null | undefined;
+let audioModeReady = false;
+let toneSound: Audio.Sound | null = null;
 
-function loadNotifications(): NotificationsModule | null {
-  if (notificationsModule !== undefined) return notificationsModule;
-  try {
-    notificationsModule = require('expo-notifications') as NotificationsModule;
-    return notificationsModule;
-  } catch {
-    notificationsModule = null;
-    return null;
+const ALERT_TITLES: Record<InAppSoundKind, string> = {
+  offer: 'New job offer',
+  update: 'Job updated',
+  cancel: 'Job cancelled',
+  alert: 'Dispatch alert',
+  general: 'Notification',
+};
+
+async function ensureAudioMode(): Promise<void> {
+  if (audioModeReady) return;
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    playsInSilentModeIOS: true,
+    staysActiveInBackground: false,
+    shouldDuckAndroid: true,
+    playThroughEarpieceAndroid: false,
+  });
+  audioModeReady = true;
+}
+
+async function playToneBurst(): Promise<void> {
+  await ensureAudioMode();
+  if (toneSound) {
+    try {
+      await toneSound.setPositionAsync(0);
+      await toneSound.playAsync();
+      return;
+    } catch {
+      try {
+        await toneSound.unloadAsync();
+      } catch {
+        /* ignore */
+      }
+      toneSound = null;
+    }
   }
+
+  const created = await Audio.Sound.createAsync(require('@/assets/sounds/alert.wav'), {
+    shouldPlay: true,
+    volume: 1.0,
+  });
+  toneSound = created.sound;
+}
+
+async function playNotificationChannelSound(kind: InAppSoundKind): Promise<void> {
+  const Notifications = loadNotifications();
+  if (!Notifications) return;
+
+  const channelId =
+    kind === 'offer'
+      ? 'job-offers'
+      : kind === 'cancel' || kind === 'alert'
+        ? 'compliance'
+        : 'in-app-alerts';
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: ALERT_TITLES[kind],
+      body: ' ',
+      sound: 'default',
+      data: { inAppSoundOnly: true, kind },
+      ...(Platform.OS === 'android' ? { channelId } : {}),
+    },
+    trigger: null,
+  });
 }
 
 /** Play a short alert sound when an in-app notification popup appears. */
@@ -30,23 +87,13 @@ export async function playInAppNotificationSound(kind: InAppSoundKind = 'general
     /* haptics unavailable */
   }
 
-  const Notifications = loadNotifications();
-  if (!Notifications) return;
-
   try {
-    const channelId =
-      kind === 'offer' ? 'job-offers' : kind === 'cancel' || kind === 'alert' ? 'compliance' : undefined;
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '\u200b',
-        body: '\u200b',
-        sound: 'default',
-        data: { inAppSoundOnly: true, kind },
-        ...(Platform.OS === 'android' && channelId ? { channelId } : {}),
-      },
-      trigger: null,
-    });
+    await playToneBurst();
   } catch {
-    /* sound unavailable */
+    try {
+      await playNotificationChannelSound(kind);
+    } catch {
+      /* sound unavailable */
+    }
   }
 }

@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 type NotificationsModule = typeof import('expo-notifications');
 
 let notificationsModule: NotificationsModule | null | undefined;
+let handlerConfigured = false;
 
 function isExpoGo(): boolean {
   return Constants.appOwnership === 'expo';
@@ -13,32 +14,34 @@ function pushNotificationsSupported(): boolean {
   return !isExpoGo();
 }
 
-function loadNotifications(): NotificationsModule | null {
-  if (!pushNotificationsSupported()) {
-    return null;
-  }
-  if (notificationsModule !== undefined) {
-    return notificationsModule;
-  }
-
+export function configureNotificationHandler(): void {
+  if (handlerConfigured || !pushNotificationsSupported()) return;
   try {
-    // Lazy load — push tokens are not supported in Expo Go (SDK 53+).
     const mod = require('expo-notifications') as NotificationsModule;
     mod.setNotificationHandler({
       handleNotification: async () => ({
-        shouldShowAlert: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
         shouldShowBanner: true,
         shouldShowList: true,
       }),
     });
+    handlerConfigured = true;
     notificationsModule = mod;
-    return mod;
   } catch {
     notificationsModule = null;
+  }
+}
+
+export function loadNotifications(): NotificationsModule | null {
+  if (!pushNotificationsSupported()) {
     return null;
   }
+  configureNotificationHandler();
+  if (notificationsModule !== undefined) {
+    return notificationsModule;
+  }
+  return notificationsModule ?? null;
 }
 
 export async function registerForPushNotifications(): Promise<string | null> {
@@ -54,17 +57,28 @@ export async function registerForPushNotifications(): Promise<string | null> {
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#1a73e8',
+        sound: 'default',
+      });
+      await Notifications.setNotificationChannelAsync('in-app-alerts', {
+        name: 'In-App Alerts',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 200, 120, 200],
+        lightColor: '#1a73e8',
+        sound: 'default',
       });
       await Notifications.setNotificationChannelAsync('compliance', {
         name: 'NZTA & Break Reminders',
         importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
       });
     }
 
     const { status: existing } = await Notifications.getPermissionsAsync();
     let finalStatus = existing;
     if (existing !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
+      const { status } = await Notifications.requestPermissionsAsync({
+        ios: { allowAlert: true, allowBadge: true, allowSound: true },
+      });
       finalStatus = status;
     }
     if (finalStatus !== 'granted') {
@@ -89,7 +103,7 @@ export async function notifyJobOffer(title: string, body: string): Promise<void>
       content: {
         title,
         body,
-        sound: true,
+        sound: 'default',
         data: { type: 'job_offer' },
         ...(Platform.OS === 'android' ? { channelId: 'job-offers' } : {}),
       },
@@ -124,7 +138,7 @@ export async function notifyBreakReminder(
       content: {
         title,
         body,
-        sound: true,
+        sound: 'default',
         data: { type: 'break_reminder' },
         ...(Platform.OS === 'android' ? { channelId: 'compliance' } : {}),
       },
@@ -134,3 +148,5 @@ export async function notifyBreakReminder(
     // Optional — ignore when notifications unavailable
   }
 }
+
+configureNotificationHandler();

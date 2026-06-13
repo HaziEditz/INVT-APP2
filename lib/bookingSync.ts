@@ -18,7 +18,7 @@ export type BookingUpdate = {
 export function parseBookingNode(val: unknown): Partial<BookingUpdate> | null {
   if (!val || typeof val !== 'object') return null;
   const b = val as Record<string, unknown>;
-  const status = String(b.Status ?? b.status ?? '').toLowerCase();
+  const status = String(b.Status ?? b.status ?? b.BookingStatus ?? '').toLowerCase();
   const cancelled =
     status.includes('cancel') ||
     status.includes('void') ||
@@ -36,6 +36,12 @@ export function parseBookingNode(val: unknown): Partial<BookingUpdate> | null {
     paymentType: b.paymentType ? String(b.paymentType) : b.PaymentType ? String(b.PaymentType) : undefined,
     raw: b,
   };
+}
+
+/** Job returned to U-A pool — driver should drop it from their UI. */
+export function isReturnedToDispatchPool(status: string): boolean {
+  const s = status.toLowerCase().replace(/\s+/g, ' ');
+  return s === 'pending' || s === 'no one' || s === 'noone' || s === 'unassigned';
 }
 
 export function subscribeBooking(

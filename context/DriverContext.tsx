@@ -37,6 +37,7 @@ import { getCurrentCoords, refreshHailPickupLocation } from '@/services/location
 import * as Location from 'expo-location';
 import {
   diffBookingChanges,
+  isReturnedToDispatchPool,
   stageAllowsMeter,
   subscribeBooking,
 } from '@/lib/bookingSync';
@@ -812,7 +813,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (type === 'job_removed') {
       void playInAppNotificationSound('alert');
       Alert.alert('Job taken back', 'Job has been taken back by dispatcher');
-      if (jobId && activeJobIdRef.current === jobId) {
+      if (jobId && activeJobIdRef.current && jobIdsMatch(activeJobIdRef.current, jobId)) {
         await clearActiveJobInternal();
         await restoreAvailableAfterJobClear();
       }
@@ -940,10 +941,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     bookingRawRef.current = null;
     return subscribeBooking(driver.companyId, activeJob.id, (update) => {
-      if (update.cancelled) {
+      const prevStatus = bookingRawRef.current
+        ? String(bookingRawRef.current.Status ?? bookingRawRef.current.status ?? bookingRawRef.current.BookingStatus ?? '')
+        : '';
+      if (
+        update.cancelled ||
+        (bookingRawRef.current && isReturnedToDispatchPool(update.status) && !isReturnedToDispatchPool(prevStatus))
+      ) {
         void playInAppNotificationSound('cancel');
-        Alert.alert('Job cancelled', 'This booking was cancelled by dispatch.');
+        Alert.alert(
+          update.cancelled ? 'Job cancelled' : 'Job taken back',
+          update.cancelled
+            ? 'This booking was cancelled by dispatch.'
+            : 'This booking was returned to dispatch.',
+        );
         void cancelActiveJobInternal();
+        void restoreAvailableAfterJobClear();
         return;
       }
       const meterStarted = stageAllowsMeter(activeJob?.stage ?? 'pickup');
