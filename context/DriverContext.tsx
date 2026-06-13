@@ -12,9 +12,11 @@ import { loadDriverVehicles } from '@/lib/vehicles';
 import { acceptJobOffer, declineJobOffer, recallJobOnDispatch, reportNoShow } from '@/lib/dispatchApi';
 import {
   clearDriverNotification,
+  jobIdsMatch,
   readNotificationJobId,
   readNotificationType,
 } from '@/lib/driverNotifications';
+import { playInAppNotificationSound } from '@/lib/notificationSound';
 import { subscribeDriverQueue } from '@/lib/driverQueue';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import { tickWorkedMinutes } from '@/services/nztaService';
@@ -279,6 +281,26 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
     stepTimes: { acceptedAt: now, onWayAt: now },
     tariffChanges: [],
   };
+}
+
+function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unknown>): JobOffer {
+  const patch: Partial<JobOffer> = {};
+  if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
+  if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
+  if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
+  if (val.jobname) patch.passengerName = String(val.jobname);
+  if (val.JobphoneNo) patch.passengerPhone = String(val.JobphoneNo);
+  return { ...offer, ...patch };
+}
+
+function patchActiveJobFromNotification(job: ActiveJob, val: Record<string, unknown>): ActiveJob {
+  const patch: Partial<ActiveJob> = {};
+  if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
+  if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
+  if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
+  if (val.jobname) patch.passengerName = String(val.jobname);
+  if (val.JobphoneNo) patch.passengerPhone = String(val.JobphoneNo);
+  return { ...job, ...patch };
 }
 
 export function DriverProvider({ children }: { children: ReactNode }) {
@@ -779,6 +801,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     setPreferredPanelTab('offers');
     setJobOffer(offer);
+    void playInAppNotificationSound('offer');
   };
 
   const handleDriverNotification = async (val: Record<string, unknown>) => {
@@ -787,6 +810,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const jobId = readNotificationJobId(val);
 
     if (type === 'job_removed') {
+      void playInAppNotificationSound('alert');
       Alert.alert('Job taken back', 'Job has been taken back by dispatcher');
       if (jobId && activeJobIdRef.current === jobId) {
         await clearActiveJobInternal();
@@ -812,6 +836,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (type === 'job_cancelled' || val.removed || val.declined) {
+      void playInAppNotificationSound('cancel');
       Alert.alert('Job cancelled', 'Job has been cancelled');
       if (jobId && activeJobIdRef.current === jobId) {
         await clearActiveJobInternal();
@@ -832,19 +857,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (val.dropoff || val.jobdropoff) changes.push(`Dropoff: ${val.dropoff ?? val.jobdropoff}`);
       if (val.notes || val.jobinfo) changes.push(`Notes updated`);
       if (val.Pickingtime || val.pickupTime) changes.push(`Time updated`);
+      void playInAppNotificationSound('update');
       Alert.alert('Job updated', changes.length ? changes.join('\n') : String(val.editNotice ?? 'Details changed'));
 
-      if (jobId && activeJobIdRef.current === jobId) {
-        setActiveJob((prev) => {
-          if (!prev) return prev;
-          const patch: Partial<ActiveJob> = {};
-          if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
-          if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
-          if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
-          const merged = { ...prev, ...patch };
-          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
-          return merged;
+      if (jobId) {
+        if (activeJobIdRef.current && jobIdsMatch(activeJobIdRef.current, jobId)) {
+          setActiveJob((prev) => {
+            if (!prev) return prev;
+            const merged = patchActiveJobFromNotification(prev, val);
+            storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+            return merged;
+          });
+        }
+
+        setJobOffer((prev) =>
+          prev && jobIdsMatch(prev.id, jobId) ? patchJobOfferFromNotification(prev, val) : prev,
+        );
+
+        const broadcastPatch = (offer: JobOffer) =>
+          jobIdsMatch(offer.id, jobId) ? patchJobOfferFromNotification(offer, val) : offer;
+        setBroadcastOffers((prev) => prev.map(broadcastPatch));
+        broadcastOffersRef.current.forEach((offer, id) => {
+          if (jobIdsMatch(id, jobId)) {
+            broadcastOffersRef.current.set(id, patchJobOfferFromNotification(offer, val));
+          }
         });
+        setQueuedOffers((prev) =>
+          prev.map((q) => (jobIdsMatch(q.id, jobId) ? { ...q, ...patchJobOfferFromNotification(q, val) } : q)),
+        );
       }
       await clearDriverNotification(driver.id);
       return;
@@ -901,6 +941,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     bookingRawRef.current = null;
     return subscribeBooking(driver.companyId, activeJob.id, (update) => {
       if (update.cancelled) {
+        void playInAppNotificationSound('cancel');
         Alert.alert('Job cancelled', 'This booking was cancelled by dispatch.');
         void cancelActiveJobInternal();
         return;
@@ -945,6 +986,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       if (changes.length > 0 && blocked.length === 0) {
+        void playInAppNotificationSound('update');
         setJobEditNotice(`Job updated:\n${changes.join('\n')}`);
       } else if (changes.some((c) => c.startsWith('Notes') || c.startsWith('Payment'))) {
         setJobEditNotice(changes.filter((c) => c.startsWith('Notes') || c.startsWith('Payment')).join('\n'));
@@ -952,6 +994,33 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.companyId, activeJob?.id, activeJob?.stage], 'Driver-bookingSync');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !jobOffer?.id) return;
+    return subscribeBooking(driver.companyId, jobOffer.id, (update) => {
+      if (update.cancelled) {
+        void playInAppNotificationSound('cancel');
+        Alert.alert('Offer cancelled', 'This booking was cancelled by dispatch.');
+        setJobOffer(null);
+        removeBroadcastOffer(jobOffer.id);
+        return;
+      }
+      const { allowed, changes } = diffBookingChanges(null, update.raw, false);
+      if (changes.length === 0) return;
+      void playInAppNotificationSound('update');
+      setJobOffer((prev) => {
+        if (!prev || !jobIdsMatch(prev.id, jobOffer.id)) return prev;
+        const patch: Partial<JobOffer> = {};
+        if (allowed.pickup) patch.pickup = allowed.pickup;
+        if (allowed.dropoff) patch.dropoff = allowed.dropoff;
+        if (allowed.passengerName) patch.passengerName = allowed.passengerName;
+        if (allowed.passengerPhone) patch.passengerPhone = allowed.passengerPhone;
+        if (allowed.notes) patch.notes = allowed.notes;
+        return { ...prev, ...patch };
+      });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.companyId, jobOffer?.id], 'Driver-offerBookingSync');
 
   useSafeEffect(() => {
     if (!driver?.companyId || queuedOffers.length === 0) return;

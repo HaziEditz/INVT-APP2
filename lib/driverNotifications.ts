@@ -27,6 +27,13 @@ export function readNotificationJobId(val: Record<string, unknown>): string {
   return s.trim();
 }
 
+export function jobIdsMatch(a: string | undefined | null, b: string | undefined | null): boolean {
+  const na = readNotificationJobId({ bookingId: a });
+  const nb = readNotificationJobId({ bookingId: b });
+  if (!na || !nb) return false;
+  return na === nb;
+}
+
 export async function clearDriverNotification(driverId: string): Promise<void> {
   if (!driverId) return;
   try {
