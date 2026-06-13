@@ -836,7 +836,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (type === 'job_cancelled' || val.removed || val.declined) {
+    if (type === 'job_cancelled') {
       void playInAppNotificationSound('cancel');
       Alert.alert('Job cancelled', 'Job has been cancelled');
       if (jobId && activeJobIdRef.current === jobId) {
