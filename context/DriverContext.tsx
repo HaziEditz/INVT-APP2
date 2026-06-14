@@ -809,6 +809,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!driver?.id) return;
     const type = readNotificationType(val);
     const jobId = readNotificationJobId(val);
+    const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
+
+    if (eventType === 'assigned' || eventType === 'accepted' || eventType === 'queued') {
+      await clearDriverNotification(driver.id);
+      return;
+    }
 
     if (type === 'job_removed') {
       void playInAppNotificationSound('alert');
@@ -891,7 +897,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (type === 'job_offer' || isOfferPayload(val)) {
+    if (type === 'job_offer' || (isOfferPayload(val) && eventType !== 'assigned' && eventType !== 'accepted' && eventType !== 'queued')) {
       await handleIncomingOffer(val);
       return;
     }
@@ -1351,14 +1357,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!jobOffer || !driver) return;
     const offerSnapshot = jobOffer;
     let queued = false;
+    let acceptOk = false;
     try {
       const result = (await acceptJobOffer(offerSnapshot.id, driver.id)) as {
+        ok?: boolean;
         queued?: boolean;
         status?: string;
       };
+      if (result?.ok === false) {
+        throw new Error('Accept rejected by dispatch server');
+      }
+      acceptOk = true;
       queued = !!(result?.queued || result?.status === 'Queued');
     } catch {
       await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offerSnapshot.id } });
+      Alert.alert('Could not accept', 'The server did not confirm this job. It was queued for retry when you are back online.');
+      return;
     }
 
     removeBroadcastOffer(offerSnapshot.id);
@@ -1369,6 +1383,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('Job queued', 'This job is in your Queue until your current trip finishes.');
       return;
     }
+
+    if (!acceptOk) return;
 
     const job = defaultActiveJob(offerSnapshot);
     job.originalStatus = offerSnapshot.originalStatus ?? 'pending';
@@ -1429,7 +1445,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!offer || !driver) return;
 
     try {
-      const result = (await acceptJobOffer(offer.id, driver.id)) as { queued?: boolean; status?: string };
+      const result = (await acceptJobOffer(offer.id, driver.id)) as {
+        ok?: boolean;
+        queued?: boolean;
+        status?: string;
+      };
+      if (result?.ok === false) {
+        throw new Error('Accept rejected by dispatch server');
+      }
       if (result?.queued || result?.status === 'Queued') {
         removeBroadcastOffer(offer.id);
         setPreferredPanelTab('queue');
@@ -1438,6 +1461,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
     } catch {
       await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offer.id } });
+      Alert.alert('Could not accept', 'The server did not confirm this job. It was queued for retry when you are back online.');
+      return;
     }
 
     removeBroadcastOffer(offer.id);
