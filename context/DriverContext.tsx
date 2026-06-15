@@ -1340,7 +1340,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const syncJobStageToDispatch = async (stage: JobStage) => {
+  const syncJobStageToDispatch = async (
+    stage: JobStage,
+    jobOverride?: { id: number; updateSeq?: number },
+  ) => {
     if (!driver || !shiftActive) return;
     const vehicleId = await resolveVehicleId();
     if (!vehicleId) return;
@@ -1357,8 +1360,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
     writeOnlinePresence(driver, vehicleId, statusMap[stage]).catch(() => undefined);
     const bookingStatus = bookingStatusMap[stage];
-    if (activeJob?.id && bookingStatus) {
-      syncJobStageOnDispatch(activeJob.id, bookingStatus, activeJob.updateSeq).catch(() => undefined);
+    const jobRef = jobOverride ?? activeJob;
+    if (jobRef?.id && bookingStatus) {
+      try {
+        await syncJobStageOnDispatch(jobRef.id, bookingStatus, jobRef.updateSeq);
+      } catch (err) {
+        console.warn('[Driver] dispatch stage sync failed:', stage, err);
+      }
     }
   };
 
@@ -1569,15 +1577,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (vehicleId) {
       if (nextStage === 'onboard') {
         writeOnlinePresence(driver, vehicleId, 'Active').catch(() => undefined);
-        syncJobStageToDispatch('onboard');
+        await syncJobStageToDispatch('onboard', { id: updated.id, updateSeq: updated.updateSeq });
       } else if (nextStage === 'arrived') {
         writeOnlinePresence(driver, vehicleId, 'Arrived').catch(() => undefined);
-        syncJobStageToDispatch('arrived');
+        await syncJobStageToDispatch('arrived', { id: updated.id, updateSeq: updated.updateSeq });
       } else if (nextStage === 'complete') {
         writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
       } else {
         writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
-        syncJobStageToDispatch(nextStage);
+        await syncJobStageToDispatch(nextStage, { id: updated.id, updateSeq: updated.updateSeq });
       }
     }
 

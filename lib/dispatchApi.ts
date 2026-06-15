@@ -153,17 +153,43 @@ export async function syncJobStageOnDispatch(
   ifVersion?: number,
 ): Promise<void> {
   const config = await getDispatchConfig();
-  await dispatchPost(
-    '/api/job/command',
-    {
+  const token = await getAuthInstance().currentUser?.getIdToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (config.passforlink) headers['X-User-Key'] = config.passforlink;
+
+  const post = async (ver?: number) => {
+    const body: Record<string, unknown> = {
       bookingId,
       command: 'update',
       by: 'driver',
-      ifVersion,
       payload: { BookingStatus: status, Status: status },
-    },
-    { userKey: config.passforlink },
-  );
+    };
+    if (ver != null && !Number.isNaN(ver)) body.ifVersion = ver;
+    const res = await fetch(`${DISPATCH_API_URL}/api/job/command`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      stale?: boolean;
+      currentVersion?: number;
+      currentSeq?: number;
+      seq?: number;
+      error?: string;
+    };
+    return { ...data, httpOk: res.ok, status: res.status };
+  };
+
+  let result = await post(ifVersion);
+  const retryVer = result.currentVersion ?? result.currentSeq ?? result.seq;
+  if ((!result.ok || !result.httpOk) && result.stale && retryVer != null) {
+    result = await post(retryVer);
+  }
+  if (!result.ok || !result.httpOk) {
+    throw new Error(result.error || `Dispatch stage sync failed for #${bookingId} → ${status}`);
+  }
 }
 
 export async function reportNoShow(jobId: string, driverId: string, companyId: string) {
