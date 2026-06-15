@@ -10,6 +10,7 @@ type BgContext = {
   companyId: string;
   vehicleId: string;
   driverId: string;
+  firebaseStatus?: string;
 };
 
 let memoryCtx: BgContext | null = null;
@@ -65,6 +66,7 @@ if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
         lng: latest.coords.longitude,
         accuracy: latest.coords.accuracy,
         timestamp: latest.timestamp,
+        vehiclestatus: ctx.firebaseStatus ?? 'Available',
       });
     } catch (e) {
       console.warn('[LocationTask] Firebase sync failed', e);
@@ -92,6 +94,7 @@ export async function startBackgroundTracking(
   driverId: string,
   companyId: string,
   vehicleId: string,
+  firebaseStatus = 'Available',
 ): Promise<boolean> {
   const perms = await requestLocationPermissions();
   if (!perms.foregroundGranted) {
@@ -99,7 +102,7 @@ export async function startBackgroundTracking(
     return false;
   }
 
-  await saveCtx({ companyId, vehicleId, driverId });
+  await saveCtx({ companyId, vehicleId, driverId, firebaseStatus });
 
   const started = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
   if (!started) {
@@ -130,12 +133,19 @@ export async function startBackgroundTracking(
       lat: coords.latitude,
       lng: coords.longitude,
       accuracy: coords.accuracy,
+      vehiclestatus: firebaseStatus,
     });
   } catch (e) {
     console.warn('[Location] Initial GPS sync skipped:', e);
   }
 
   return true;
+}
+
+export async function updateBackgroundLocationStatus(firebaseStatus: string) {
+  const ctx = await loadCtx();
+  if (!ctx) return;
+  await saveCtx({ ...ctx, firebaseStatus });
 }
 
 export async function stopBackgroundTracking() {

@@ -1,5 +1,5 @@
 import { DISPATCH_API_URL } from '@/constants/theme';
-import { getAuthInstance, getDatabaseInstance } from '@/lib/firebase';
+import { getAuthInstance, getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { getDispatchConfig } from '@/lib/dispatchConfig';
 import { update, ref } from 'firebase/database';
 
@@ -80,23 +80,49 @@ export interface DriverLocationPayload {
   lng: number;
   accuracy?: number | null;
   timestamp?: number;
+  /** Top-level vehiclestatus for dispatch zone sync (defaults to Available). */
+  vehiclestatus?: string;
 }
 
-/** GPS heartbeat — writes to Firebase (dispatch reads online/{cid}/{vid}/current). */
+/** GPS heartbeat — writes parent + online/{cid}/{vid}/current so dispatch sync sees status + GPS. */
 export async function syncDriverLocation(payload: DriverLocationPayload) {
-  const { companyId, vehicleId, lat, lng } = payload;
+  const { companyId, vehicleId, lat, lng, driverId, vehiclestatus = 'Available' } = payload;
   if (!companyId || !vehicleId) return;
 
-  await update(ref(getDatabaseInstance(), `online/${companyId}/${vehicleId}/current`), {
+  const onlinePath = `online/${companyId}/${vehicleId}`;
+  await ensureAuthUserForRtdbWrite(`syncDriverLocation → ${onlinePath}`);
+  const now = Date.now();
+  const topStatus = vehiclestatus === 'Assigned' ? 'Picking' : vehiclestatus;
+  const parsedDriverId = driverId
+    ? (() => {
+        const numeric = parseInt(driverId, 10);
+        return Number.isNaN(numeric) ? driverId : numeric;
+      })()
+    : undefined;
+
+  await update(ref(getDatabaseInstance(), onlinePath), {
+    vehiclestatus: topStatus,
+    VehicleStatus: topStatus,
+    lastSeen: now,
+    lat,
+    lng,
+    ...(parsedDriverId != null
+      ? { driverid: parsedDriverId, driverId }
+      : {}),
+  });
+
+  await update(ref(getDatabaseInstance(), `${onlinePath}/current`), {
     lat,
     lng,
     Lat: lat,
     Lng: lng,
     hasGps: lat !== 0 || lng !== 0,
     time: new Date().toISOString(),
-    lastSeen: Date.now(),
+    lastSeen: now,
     online: true,
     bgUpdate: true,
+    vehiclestatus: topStatus,
+    VehicleStatus: topStatus,
   });
 }
 

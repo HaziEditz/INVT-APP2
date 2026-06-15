@@ -24,7 +24,12 @@ import {
   clearOnlinePresence,
   isVehicleStatusAvailable,
   moveDriverToEndOfQueue,
+  repairOnlinePresence,
+  startPresenceHeartbeat,
   startShiftOnline,
+  stopPresenceHeartbeat,
+  subscribeFirebaseRtdbConnected,
+  updatePresenceHeartbeatStatus,
   writeOnlinePresence,
   FirebaseDriverStatus,
 } from '@/services/presenceService';
@@ -344,6 +349,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const readyForJobsRef = useRef(false);
   const hailActiveRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
+  const activeJobRef = useRef<ActiveJob | null>(null);
+  const presenceWriteStatusRef = useRef<FirebaseDriverStatus>('Available');
+  const repairPresenceRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
   const meterRef = useRef<MeterState | null>(null);
   const meterStopRef = useRef<(() => void) | null>(null);
@@ -365,6 +373,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     activeJobIdRef.current = activeJob?.id ?? null;
   }, [activeJob?.id], 'Driver-activeJobRef');
+
+  useSafeEffect(() => {
+    activeJobRef.current = activeJob;
+  }, [activeJob], 'Driver-activeJobFullRef');
 
   useSafeEffect(() => {
     paymentJobRef.current = !!paymentJob;
@@ -413,7 +425,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const unsub = subscribeConnectivity(async (connected) => {
         try {
           setIsOffline(!connected);
-          if (connected) await flushOfflineQueue();
+          if (connected) {
+            await flushOfflineQueue();
+            if (shiftActiveRef.current) {
+              void repairPresenceRef.current?.('netinfo-reconnect');
+            }
+          }
         } catch (err) {
           console.error('[Driver] connectivity handler:', err);
         }
@@ -663,7 +680,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return onValue(presenceRef, (snap) => {
         try {
           if (!snap.exists()) {
-            if (!shiftActiveRef.current) {
+            if (shiftActiveRef.current) {
+              console.warn('[Driver] presence node missing during shift — repairing');
+              void repairPresenceRef.current?.('listener-missing-node');
+            } else {
               setPresenceStatus('Offline');
               setReadyForJobs(false);
               readyForJobsRef.current = false;
@@ -1079,6 +1099,70 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return vehicleId;
   };
 
+  const derivePresenceWriteStatus = (): FirebaseDriverStatus => {
+    if (awayIntentRef.current !== 'none') return 'Away';
+    const job = activeJobRef.current;
+    if (job?.stage) {
+      const map: Record<JobStage, FirebaseDriverStatus> = {
+        pickup: 'Assigned',
+        arrived: 'Arrived',
+        onboard: 'Active',
+        complete: 'Available',
+      };
+      return map[job.stage] ?? 'Busy';
+    }
+    if (hailActiveRef.current) return 'Busy';
+    return 'Available';
+  };
+
+  const syncBgLocationFirebaseStatus = async (status: FirebaseDriverStatus) => {
+    presenceWriteStatusRef.current = status;
+    updatePresenceHeartbeatStatus(status);
+    try {
+      const { updateBackgroundLocationStatus } = await import('@/services/locationService');
+      const top = status === 'Assigned' ? 'Picking' : status;
+      await updateBackgroundLocationStatus(top);
+    } catch {
+      // non-fatal
+    }
+  };
+
+  const repairPresenceIfNeeded = async (reason = 'repair') => {
+    if (!driver || !shiftActiveRef.current) return;
+    const vehicleId = await resolveVehicleId();
+    if (!vehicleId) return;
+    const status = derivePresenceWriteStatus();
+    await syncBgLocationFirebaseStatus(status);
+    await repairOnlinePresence(driver, vehicleId, status, reason);
+  };
+  repairPresenceRef.current = repairPresenceIfNeeded;
+
+  useSafeEffect(() => {
+    if (!driver || !shiftActive || !selectedVehicleId) {
+      stopPresenceHeartbeat();
+      return;
+    }
+    const status = derivePresenceWriteStatus();
+    startPresenceHeartbeat(driver, selectedVehicleId, status);
+    void repairOnlinePresence(driver, selectedVehicleId, status, 'shift-active-resume');
+    return () => stopPresenceHeartbeat();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.companyId, driver?.id, shiftActive, selectedVehicleId], 'Driver-presence-heartbeat');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !shiftActive) return;
+    const unsubRtdb = subscribeFirebaseRtdbConnected((connected) => {
+      if (connected) void repairPresenceRef.current?.('rtdb-reconnect');
+    });
+    return unsubRtdb;
+  }, [driver?.companyId, shiftActive], 'Driver-presence-rtdb');
+
+  useSafeEffect(() => {
+    if (!shiftActive || !driver) return;
+    void syncBgLocationFirebaseStatus(derivePresenceWriteStatus());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shiftActive, activeJob?.stage, hailActive, presenceStatus, readyForJobs], 'Driver-bg-location-status');
+
   const startShift = async (vehicleIdOverride?: string) => {
     if (!driver) return;
 
@@ -1127,6 +1211,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setPresenceStatus('Online');
       setReadyForJobs(true);
       readyForJobsRef.current = true;
+      presenceWriteStatusRef.current = 'Available';
+      startPresenceHeartbeat(driver, vehicleId, 'Available');
+      void syncBgLocationFirebaseStatus('Available');
       console.log('[Shift] presence Online, readyForJobs=true');
     } catch (err) {
       console.warn('[Shift] Firebase online status write failed:', err);
@@ -1179,6 +1266,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!vehicleId) return;
     awayIntentRef.current = 'manual';
     await writeOnlinePresence(driver, vehicleId, 'Away');
+    await syncBgLocationFirebaseStatus('Away');
     setPresenceStatus('Away');
     setReadyForJobs(false);
     readyForJobsRef.current = false;
@@ -1191,6 +1279,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const wasMissed = awayIntentRef.current === 'missed';
     awayIntentRef.current = 'none';
     await writeOnlinePresence(driver, vehicleId, 'Available');
+    await syncBgLocationFirebaseStatus('Available');
     if (wasMissed) {
       await moveDriverToEndOfQueue(driver, vehicleId);
     }
@@ -1205,6 +1294,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!vehicleId) return;
     awayIntentRef.current = 'missed';
     await writeOnlinePresence(driver, vehicleId, 'Away');
+    await syncBgLocationFirebaseStatus('Away');
     setPresenceStatus('Away');
     setReadyForJobs(false);
     readyForJobsRef.current = false;
@@ -1219,6 +1309,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const endShiftLocal = () => {
+    stopPresenceHeartbeat();
     setShiftActive(false);
     shiftActiveRef.current = false;
     awayIntentRef.current = 'none';

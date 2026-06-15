@@ -1,9 +1,105 @@
-import { onDisconnect, ref, remove, set, update } from 'firebase/database';
+import { onDisconnect, onValue, ref, remove, set, update, get } from 'firebase/database';
 import { getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { DriverProfile, PresenceDisplayStatus } from '@/types';
 import { getCurrentCoords } from '@/services/locationService';
 
 export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned' | 'Picking' | 'Arrived' | 'Active';
+
+const PRESENCE_HEARTBEAT_MS = 30_000;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let heartbeatCtx: {
+  driver: DriverProfile;
+  vehicleId: string;
+  status: FirebaseDriverStatus;
+} | null = null;
+let lastPresenceWriteAt = 0;
+let lastPresenceWriteError: string | null = null;
+
+export function getPresenceWriteDiagnostics() {
+  return {
+    lastWriteAt: lastPresenceWriteAt || null,
+    lastWriteError: lastPresenceWriteError,
+    heartbeatActive: heartbeatTimer != null,
+    heartbeatStatus: heartbeatCtx?.status ?? null,
+  };
+}
+
+/** Firebase RTDB connection — distinct from device NetInfo (Wi‑Fi can be up while RTDB is disconnected). */
+export function subscribeFirebaseRtdbConnected(onChange: (connected: boolean) => void): () => void {
+  const connectedRef = ref(getDatabaseInstance(), '.info/connected');
+  return onValue(connectedRef, (snap) => {
+    onChange(snap.val() === true);
+  });
+}
+
+export function stopPresenceHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  heartbeatCtx = null;
+}
+
+/** Periodic presence refresh while on shift — heals silent write failures / empty nodes after Metro reload. */
+export function startPresenceHeartbeat(
+  driver: DriverProfile,
+  vehicleId: string,
+  status: FirebaseDriverStatus,
+) {
+  stopPresenceHeartbeat();
+  heartbeatCtx = { driver, vehicleId, status };
+  const tick = () => {
+    const ctx = heartbeatCtx;
+    if (!ctx) return;
+    void repairOnlinePresence(ctx.driver, ctx.vehicleId, ctx.status, 'heartbeat').catch((err) => {
+      console.warn('[Presence] heartbeat repair failed:', err);
+    });
+  };
+  void tick();
+  heartbeatTimer = setInterval(tick, PRESENCE_HEARTBEAT_MS);
+}
+
+export function updatePresenceHeartbeatStatus(status: FirebaseDriverStatus) {
+  if (heartbeatCtx) heartbeatCtx.status = status;
+}
+
+/**
+ * Re-create online/{cid}/{vid} when missing or stale. Uses full set on /current when node was absent.
+ */
+export async function repairOnlinePresence(
+  driver: DriverProfile,
+  vehicleId: string,
+  status: FirebaseDriverStatus,
+  reason = 'repair',
+): Promise<boolean> {
+  if (!driver.companyId || !vehicleId) return false;
+  const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+  const db = getDatabaseInstance();
+  try {
+    const [baseSnap, curSnap] = await Promise.all([
+      get(ref(db, onlinePath)),
+      get(ref(db, `${onlinePath}/current`)),
+    ]);
+    const needsFull = !baseSnap.exists() || !curSnap.exists();
+    const curStatus = curSnap.exists()
+      ? String((curSnap.val() as Record<string, unknown>)?.vehiclestatus ?? '')
+      : '';
+    const stale =
+      curSnap.exists() &&
+      lastPresenceWriteAt > 0 &&
+      Date.now() - lastPresenceWriteAt > PRESENCE_HEARTBEAT_MS * 2;
+    if (!needsFull && !stale && curStatus.toLowerCase() === status.toLowerCase()) {
+      return true;
+    }
+    console.log(`[Presence] repair (${reason}) needsFull=${needsFull} stale=${stale} status=${status}`);
+    await writeOnlinePresence(driver, vehicleId, status, needsFull);
+    return true;
+  } catch (err) {
+    lastPresenceWriteError = err instanceof Error ? err.message : String(err);
+    console.warn(`[Presence] repair (${reason}) failed:`, err);
+    return false;
+  }
+}
 
 export function mapVehicleStatusToDisplay(raw: string | undefined | null): PresenceDisplayStatus {
   const s = String(raw ?? '').trim();
@@ -187,31 +283,48 @@ export async function writeOnlinePresence(
   }
 
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
-  const authUser = await ensureAuthUserForRtdbWrite(`writeOnlinePresence → ${onlinePath}`);
-  console.log('[Presence] writeOnlinePresence auth uid:', authUser.uid, 'status:', status);
-
-  const { lat, lng } = await getGps();
-  const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
-  const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
-
   try {
-    await onDisconnect(presencePath).update({ lastSeen: Date.now() });
+    const authUser = await ensureAuthUserForRtdbWrite(`writeOnlinePresence → ${onlinePath}`);
+    console.log('[Presence] writeOnlinePresence auth uid:', authUser.uid, 'status:', status);
+
+    const { lat, lng } = await getGps();
+    const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
+    const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
+
+    try {
+      await onDisconnect(presencePath).update({ lastSeen: Date.now() });
+    } catch (err) {
+      console.warn('[Presence] onDisconnect failed (non-fatal):', err);
+    }
+
+    if (resetZone) {
+      await set(presencePath, record);
+    } else {
+      await update(presencePath, record);
+    }
+
+    const topStatus = status === 'Assigned' ? 'Picking' : status;
+    await update(ref(getDatabaseInstance(), onlinePath), {
+      vehiclestatus: topStatus,
+      VehicleStatus: topStatus,
+      driverid: parseDriverId(driver.id),
+      driverId: driver.id,
+      companyId: driver.companyId,
+      CompanyId: driver.companyId,
+      vehiclenumber: vehicleId,
+      vehicleId,
+      lastSeen: Date.now(),
+      lat: lat || 0,
+      lng: lng || 0,
+    });
+    lastPresenceWriteAt = Date.now();
+    lastPresenceWriteError = null;
+    updatePresenceHeartbeatStatus(status);
   } catch (err) {
-    console.warn('[Presence] onDisconnect failed (non-fatal):', err);
+    lastPresenceWriteError = err instanceof Error ? err.message : String(err);
+    console.warn('[Presence] writeOnlinePresence failed:', err);
+    throw err;
   }
-
-  if (resetZone) {
-    await set(presencePath, record);
-  } else {
-    await update(presencePath, record);
-  }
-
-  const topStatus = status === 'Assigned' ? 'Picking' : status;
-  await update(ref(getDatabaseInstance(), onlinePath), {
-    vehiclestatus: topStatus,
-    VehicleStatus: topStatus,
-    lastSeen: Date.now(),
-  });
 }
 
 /** After missed offer — driver re-joins zone at end of queue. */
@@ -235,6 +348,7 @@ export async function moveDriverToEndOfQueue(driver: DriverProfile, vehicleId: s
 }
 
 export async function clearOnlinePresence(driver: DriverProfile, vehicleId: string) {
+  stopPresenceHeartbeat();
   if (!driver.companyId || !vehicleId) return;
 
   const presencePath = ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}/current`);
