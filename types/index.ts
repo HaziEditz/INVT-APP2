@@ -141,6 +141,8 @@ export interface ActiveJob extends JobOffer {
   stepTimes: JobStepTimes;
   tariffChanges: TariffChangeRecord[];
   meterSnapshot?: MeterState | null;
+  /** Server updateSeq — used for optimistic stage sync retries. */
+  updateSeq?: number;
 }
 
 export interface CompletedJob extends ActiveJob {

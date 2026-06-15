@@ -1,6 +1,7 @@
 import { get, onValue, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { parsePendingJobNode } from '@/lib/pendingJobs';
+import { isValidBookingId, normalizeBookingId } from '@/lib/bookingId';
 import { JobOffer, Vehicle } from '@/types';
 
 export function parseDriverQueueNode(id: string, val: Record<string, unknown>): JobOffer | null {
@@ -10,9 +11,14 @@ export function parseDriverQueueNode(id: string, val: Record<string, unknown>): 
     BookingId: val.BookingId ?? val.jobId ?? id,
   });
   if (!offer) return null;
+  const bookingId = normalizeBookingId(val.jobId ?? val.BookingId ?? val.bookingId ?? offer.id ?? id);
+  if (!isValidBookingId(bookingId)) {
+    console.warn('[driverQueue] skipping queued node without valid booking id:', id);
+    return null;
+  }
   return {
     ...offer,
-    id: String(val.jobId ?? val.BookingId ?? id),
+    id: bookingId,
     queuedAt: Number(val.queuedAt ?? val.acceptedAt ?? Date.now()),
     originalStatus: String(val.originalStatus ?? 'pending'),
     source: 'queue',

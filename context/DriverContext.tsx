@@ -9,7 +9,8 @@ import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, declineJobOffer, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, declineJobOffer, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { isValidBookingId, normalizeBookingId } from '@/lib/bookingId';
 import {
   clearDriverNotification,
   jobIdsMatch,
@@ -201,11 +202,13 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
   const primaryNote = allNotes.map((n) => n.text).join('\n\n') || undefined;
   const rawFare = val.fare ?? val.jobfare ?? val.jobFare;
   const rawPayment = val.payment ?? val.jobpayment ?? val.paymentType ?? val.PaymentType ?? val.paymentMethod;
-  const rawId = val.id ?? val.jobId ?? val.joboffer ?? val.bookingid ?? val.bookingId ?? Date.now();
-  const idStr = String(rawId);
-  const normalizedId = idStr.includes(',') ? idStr.split(',')[0].trim() : idStr;
+  const rawId = val.id ?? val.jobId ?? val.joboffer ?? val.bookingid ?? val.bookingId ?? val.BookingId ?? '';
+  const idStr = normalizeBookingId(rawId);
+  if (!isValidBookingId(idStr)) {
+    console.warn('[parseJobOffer] missing or invalid booking id — pickup:', val.pickup ?? val.jobpickup);
+  }
   return {
-    id: normalizedId,
+    id: idStr || String(rawId || ''),
     type: (val.type as JobOffer['type']) ?? 'Taxi',
     pickup: String(val.pickup ?? val.from ?? val.jobpickup ?? ''),
     dropoff: String(val.dropoff ?? val.to ?? val.jobdropoff ?? ''),
@@ -400,11 +403,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (v) setSelectedVehicleIdState(v);
         const j = await getData<ActiveJob>(STORAGE_KEYS.activeJob);
         if (j) {
-          setActiveJob({
-            ...j,
-            stepTimes: j.stepTimes ?? EMPTY_STEP_TIMES,
-            tariffChanges: j.tariffChanges ?? [],
-          });
+          if (isValidBookingId(j.id)) {
+            setActiveJob({
+              ...j,
+              stepTimes: j.stepTimes ?? EMPTY_STEP_TIMES,
+              tariffChanges: j.tariffChanges ?? [],
+            });
+          } else {
+            console.warn('[Driver] cleared stored active job with invalid booking id:', j.id);
+            await storeData(STORAGE_KEYS.activeJob, null);
+          }
         }
         // Do not restore shift as "online" on launch — driver must confirm vehicle each session.
         await storeData(STORAGE_KEYS.shiftActive, false);
@@ -771,14 +779,47 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const releaseQueuedOffersAfterTrip = () => {
     setTimeout(() => {
-      if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
-      setQueuedOffers((q) => {
-        if (q.length === 0) return q;
-        const [next, ...rest] = q;
-        setJobOffer({ ...next, silent: false, fromQueue: true });
+      void promoteNextQueuedJobAfterTrip();
+    }, 600);
+  };
+
+  const promoteNextQueuedJobAfterTrip = async () => {
+    if (!driver || !shiftActiveRef.current) return;
+    if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
+
+    const q = queuedOffers[0];
+    if (!q) return;
+
+    if (!isValidBookingId(q.id)) {
+      console.warn('[Driver] dropping queued job with invalid booking id:', q.id);
+      setQueuedOffers((prev) => prev.filter((o) => o.id !== q.id));
+      return;
+    }
+
+    try {
+      const result = await promoteQueuedJob(q.id, driver.id);
+      const job = defaultActiveJob(q);
+      job.originalStatus = q.originalStatus ?? 'pending';
+      job.updateSeq = result.version;
+      setActiveJob(job);
+      activeJobIdRef.current = job.id;
+      await storeData(STORAGE_KEYS.activeJob, job);
+      setQueuedOffers((prev) => prev.filter((o) => o.id !== q.id));
+      setPreferredPanelTab('current');
+      const vehicleId = await resolveVehicleId();
+      if (vehicleId) {
+        writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+      }
+      console.log('[Driver] promoted queued job → active', q.id);
+    } catch (err) {
+      console.warn('[Driver] promote queued failed — showing offer modal:', err);
+      setQueuedOffers((prev) => {
+        if (prev.length === 0 || prev[0]?.id !== q.id) return prev;
+        const [, ...rest] = prev;
+        setJobOffer({ ...q, silent: false, fromQueue: true });
         return rest;
       });
-    }, 600);
+    }
   };
 
   const restoreAvailableAfterJobClear = async () => {
@@ -810,6 +851,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!shiftActiveRef.current || paymentJobRef.current) return;
 
     const offer = parseJobOffer(val);
+    if (!isValidBookingId(offer.id)) {
+      console.warn('[Driver] ignored offer without valid booking id:', offer.pickup);
+      return;
+    }
     const seen = lastOfferSeenRef.current;
     if (seen?.id === offer.id && Date.now() - seen.at < 2500) return;
     lastOfferSeenRef.current = { id: offer.id, at: Date.now() };
@@ -1433,7 +1478,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const syncJobStageToDispatch = async (
     stage: JobStage,
-    jobOverride?: { id: number; updateSeq?: number },
+    jobOverride?: { id: string; updateSeq?: number },
   ) => {
     if (!driver || !shiftActive) return;
     const vehicleId = await resolveVehicleId();
@@ -1450,28 +1495,85 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       onboard: 'Active',
     };
     writeOnlinePresence(driver, vehicleId, statusMap[stage]).catch(() => undefined);
+    void syncBgLocationFirebaseStatus(statusMap[stage]);
     const bookingStatus = bookingStatusMap[stage];
     const jobRef = jobOverride ?? activeJob;
-    if (jobRef?.id && bookingStatus) {
-      try {
-        await syncJobStageOnDispatch(jobRef.id, bookingStatus, jobRef.updateSeq);
-      } catch (err) {
-        console.warn('[Driver] dispatch stage sync failed:', stage, err);
+    if (!jobRef?.id || !bookingStatus || !isValidBookingId(jobRef.id)) {
+      if (jobRef?.id && !isValidBookingId(jobRef.id)) {
+        console.warn('[Driver] stage sync skipped — invalid booking id:', jobRef.id);
       }
+      return;
+    }
+    try {
+      const { version } = await syncJobStageOnDispatch(
+        jobRef.id,
+        bookingStatus,
+        driver.id,
+        jobRef.updateSeq,
+      );
+      if (version != null && activeJob?.id === jobRef.id) {
+        setActiveJob((prev) => {
+          if (!prev || prev.id !== jobRef.id) return prev;
+          const merged = { ...prev, updateSeq: version };
+          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+          return merged;
+        });
+      }
+    } catch (err) {
+      console.warn('[Driver] dispatch stage sync failed:', stage, err);
+      Alert.alert(
+        'Dispatch sync issue',
+        `Could not update dispatch for ${bookingStatus}. Check connection and try again.`,
+      );
     }
   };
 
   const acceptOffer = async () => {
     if (!jobOffer || !driver) return;
     const offerSnapshot = jobOffer;
+    if (!isValidBookingId(offerSnapshot.id)) {
+      Alert.alert('Invalid job', 'This offer has no valid booking ID. Ask dispatch to re-send the job.');
+      setJobOffer(null);
+      return;
+    }
+
+    if (offerSnapshot.fromQueue) {
+      try {
+        const result = await promoteQueuedJob(offerSnapshot.id, driver.id);
+        removeBroadcastOffer(offerSnapshot.id);
+        setJobOffer(null);
+        const job = defaultActiveJob(offerSnapshot);
+        job.originalStatus = offerSnapshot.originalStatus ?? 'pending';
+        job.updateSeq = result.version;
+        setActiveJob(job);
+        activeJobIdRef.current = job.id;
+        await storeData(STORAGE_KEYS.activeJob, job);
+        setQueuedOffers((prev) => prev.filter((o) => o.id !== offerSnapshot.id));
+        setPreferredPanelTab('current');
+        const vehicleId = await resolveVehicleId();
+        if (vehicleId) {
+          writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+        }
+        await clearDriverNotification(driver.id);
+        return;
+      } catch {
+        Alert.alert('Could not start queued job', 'Dispatch did not confirm this queued job. Try again or recall it.');
+        return;
+      }
+    }
+
     let queued = false;
     let acceptOk = false;
+    let acceptResult: { version?: number; booking?: { version?: number } } | null = null;
     try {
       const result = (await acceptJobOffer(offerSnapshot.id, driver.id)) as {
         ok?: boolean;
         queued?: boolean;
         status?: string;
+        version?: number;
+        booking?: { version?: number };
       };
+      acceptResult = result;
       if (result?.ok === false) {
         throw new Error('Accept rejected by dispatch server');
       }
@@ -1496,6 +1598,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const job = defaultActiveJob(offerSnapshot);
     job.originalStatus = offerSnapshot.originalStatus ?? 'pending';
+    job.updateSeq = acceptResult?.version ?? acceptResult?.booking?.version;
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);

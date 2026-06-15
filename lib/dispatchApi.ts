@@ -174,48 +174,69 @@ export async function completeJobPayment(payload: Record<string, unknown>) {
 }
 
 export async function syncJobStageOnDispatch(
-  bookingId: number,
+  bookingId: string | number,
   status: string,
+  driverId: string,
   ifVersion?: number,
-): Promise<void> {
-  const config = await getDispatchConfig();
-  const token = await getAuthInstance().currentUser?.getIdToken();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  if (config.passforlink) headers['X-User-Key'] = config.passforlink;
+): Promise<{ version?: number }> {
+  const bid = parseInt(String(bookingId), 10);
+  if (!bid || !driverId) {
+    throw new Error('syncJobStageOnDispatch: bookingId and driverId required');
+  }
 
   const post = async (ver?: number) => {
     const body: Record<string, unknown> = {
-      bookingId,
-      command: 'update',
-      by: 'driver',
-      payload: { BookingStatus: status, Status: status },
+      bookingId: bid,
+      driverId,
+      status,
     };
     if (ver != null && !Number.isNaN(ver)) body.ifVersion = ver;
-    const res = await fetch(`${DISPATCH_API_URL}/api/job/command`, {
+    const res = await fetch(`${DISPATCH_API_URL}/api/job/stage`, {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const data = (await res.json().catch(() => ({}))) as {
       ok?: boolean;
       stale?: boolean;
+      version?: number;
       currentVersion?: number;
       currentSeq?: number;
-      seq?: number;
       error?: string;
+      error_code?: string;
     };
     return { ...data, httpOk: res.ok, status: res.status };
   };
 
   let result = await post(ifVersion);
-  const retryVer = result.currentVersion ?? result.currentSeq ?? result.seq;
-  if ((!result.ok || !result.httpOk) && result.stale && retryVer != null) {
+  const retryVer = result.version ?? result.currentVersion ?? result.currentSeq;
+  if ((!result.ok || !result.httpOk) && retryVer != null && ifVersion != null) {
     result = await post(retryVer);
   }
   if (!result.ok || !result.httpOk) {
-    throw new Error(result.error || `Dispatch stage sync failed for #${bookingId} → ${status}`);
+    throw new Error(result.error || `Dispatch stage sync failed for #${bid} → ${status}`);
   }
+  return { version: result.version ?? retryVer };
+}
+
+export async function promoteQueuedJob(bookingId: string, driverId: string) {
+  const bid = parseInt(bookingId, 10);
+  if (!bid) throw new Error('promoteQueuedJob: invalid bookingId');
+  const res = await fetch(`${DISPATCH_API_URL}/api/job/promote-queued`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bookingId: bid, driverId }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    version?: number;
+    alreadyStatus?: string;
+    error?: string;
+  };
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || `Promote queued failed for #${bookingId}`);
+  }
+  return data;
 }
 
 export async function reportNoShow(jobId: string, driverId: string, companyId: string) {

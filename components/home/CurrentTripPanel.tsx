@@ -124,6 +124,7 @@ export function CurrentTripPanel() {
       </Text>
 
       <JobTypeBadge type={activeJob.type} />
+      <Text style={styles.jobId}>Job #{activeJob.id}</Text>
       <Text style={styles.addr} numberOfLines={2}>
         ↑ {activeJob.pickup}
       </Text>
@@ -207,6 +208,7 @@ const styles = StyleSheet.create({
   stageText: { color: Colors.textMuted, fontSize: 13 },
   stageOn: { color: Colors.text, fontWeight: '700' },
   times: { color: Colors.textMuted, fontSize: 11, marginBottom: 8 },
+  jobId: { color: Colors.textMuted, fontSize: 12, marginBottom: 6, fontWeight: '700' },
   addr: { color: Colors.text, fontSize: 16, marginBottom: 6 },
   meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
   actions: { gap: 8, marginTop: 10 },

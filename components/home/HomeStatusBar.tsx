@@ -1,6 +1,7 @@
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { formatQueueDisplay } from '@/lib/zoneQueue';
+import { STAGE_LABELS } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +17,7 @@ function formatZoneElapsed(ms: number): string {
 /** Top bar: Available/Away | ZQ | Zone | Time — single compact row */
 export function HomeStatusBar() {
   const insets = useSafeAreaInsets();
-  const { presenceStatus, shiftActive, togglePresence, zone, readyForJobs, hasTripInProgress } =
+  const { presenceStatus, shiftActive, togglePresence, zone, readyForJobs, hasTripInProgress, activeJob } =
     useDriver();
   const [zoneEnteredAt, setZoneEnteredAt] = useState<number | null>(null);
   const [, setTick] = useState(0);
@@ -55,7 +56,15 @@ export function HomeStatusBar() {
   const timeInZone =
     shiftActive && zoneEnteredAt ? formatZoneElapsed(Date.now() - zoneEnteredAt) : '—';
 
-  const toggleLabel = !shiftActive ? 'Off' : isAvailable ? 'Avail' : isAway ? 'Away' : 'Avail';
+  const toggleLabel = !shiftActive
+    ? 'Off'
+    : activeJob && activeJob.stage !== 'complete'
+      ? STAGE_LABELS[activeJob.stage]
+      : isAvailable
+        ? 'Avail'
+        : isAway
+          ? 'Away'
+          : 'Avail';
 
   return (
     <View style={[styles.bar, { paddingTop: insets.top + 4 }]}>
