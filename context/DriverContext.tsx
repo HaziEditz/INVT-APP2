@@ -9,7 +9,7 @@ import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, declineJobOffer, recallJobOnDispatch, reportNoShow } from '@/lib/dispatchApi';
+import { acceptJobOffer, declineJobOffer, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
 import {
   clearDriverNotification,
   jobIdsMatch,
@@ -1350,7 +1350,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       onboard: 'Active',
       complete: 'Available',
     };
+    const bookingStatusMap: Partial<Record<JobStage, string>> = {
+      pickup: 'Assigned',
+      arrived: 'Arrived',
+      onboard: 'Active',
+    };
     writeOnlinePresence(driver, vehicleId, statusMap[stage]).catch(() => undefined);
+    const bookingStatus = bookingStatusMap[stage];
+    if (activeJob?.id && bookingStatus) {
+      syncJobStageOnDispatch(activeJob.id, bookingStatus, activeJob.updateSeq).catch(() => undefined);
+    }
   };
 
   const acceptOffer = async () => {

@@ -147,6 +147,25 @@ export async function completeJobPayment(payload: Record<string, unknown>) {
   return dispatchPost('/api/job/complete', payload, { userKey: config.passforlink });
 }
 
+export async function syncJobStageOnDispatch(
+  bookingId: number,
+  status: string,
+  ifVersion?: number,
+): Promise<void> {
+  const config = await getDispatchConfig();
+  await dispatchPost(
+    '/api/job/command',
+    {
+      bookingId,
+      command: 'update',
+      by: 'driver',
+      ifVersion,
+      payload: { BookingStatus: status, Status: status },
+    },
+    { userKey: config.passforlink },
+  );
+}
+
 export async function reportNoShow(jobId: string, driverId: string, companyId: string) {
   return dispatchPost('/api/cancel', {
     bookingId: jobId,
