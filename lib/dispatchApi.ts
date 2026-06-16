@@ -1,6 +1,7 @@
 import { DISPATCH_API_URL } from '@/constants/theme';
 import { getAuthInstance, getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { getDispatchConfig } from '@/lib/dispatchConfig';
+import { isPresenceSessionEnded } from '@/lib/presenceGuards';
 import { update, ref } from 'firebase/database';
 
 export async function dispatchGet<T>(path: string): Promise<T> {
@@ -88,6 +89,7 @@ export interface DriverLocationPayload {
 export async function syncDriverLocation(payload: DriverLocationPayload) {
   const { companyId, vehicleId, lat, lng, driverId, vehiclestatus = 'Available' } = payload;
   if (!companyId || !vehicleId) return;
+  if (isPresenceSessionEnded(companyId, vehicleId)) return;
 
   const onlinePath = `online/${companyId}/${vehicleId}`;
   await ensureAuthUserForRtdbWrite(`syncDriverLocation → ${onlinePath}`);

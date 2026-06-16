@@ -1410,16 +1410,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       summary = await captureEndShiftSummary();
     }
 
+    // Stop heartbeat + GPS before Firebase delete — otherwise a final location
+    // tick can recreate online/{cid}/{vid} as Available after sign-out.
+    stopPresenceHeartbeat();
+    const { stopBackgroundTracking } = await import('@/services/locationService');
+    await stopBackgroundTracking();
+
     if (driverSnapshot && vehicleId) {
       try {
-        await writeOnlinePresence(driverSnapshot, vehicleId, 'Offline');
-      } catch {
-        // non-fatal
-      }
-      try {
         await clearOnlinePresence(driverSnapshot, vehicleId);
-      } catch {
-        // non-fatal
+      } catch (err) {
+        console.warn('[Driver] clearOnlinePresence failed:', err);
       }
     }
 
@@ -1427,8 +1428,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const { endShiftClock } = await import('@/services/nztaService');
       await endShiftClock(driverSnapshot.companyId, driverSnapshot.uid, driverSnapshot.id);
     }
-    const { stopBackgroundTracking } = await import('@/services/locationService');
-    await stopBackgroundTracking();
     const { stopShiftRuntime } = await import('@/services/shiftRuntimeService');
     stopShiftRuntime();
     return summary;

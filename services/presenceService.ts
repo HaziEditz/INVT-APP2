@@ -2,6 +2,11 @@ import { onDisconnect, onValue, ref, remove, set, update, get } from 'firebase/d
 import { getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { DriverProfile, PresenceDisplayStatus } from '@/types';
 import { getCurrentCoords } from '@/services/locationService';
+import {
+  clearPresenceSessionEnded,
+  isPresenceSessionEnded,
+  markPresenceSessionEnded,
+} from '@/lib/presenceGuards';
 
 export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned' | 'Picking' | 'Arrived' | 'Active';
 
@@ -186,8 +191,11 @@ async function enrichShiftPresenceInBackground(
   vehicleId: string,
   startedAt: Date,
 ): Promise<void> {
+  if (isPresenceSessionEnded(driver.companyId, vehicleId)) return;
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
   await ensureAuthUserForRtdbWrite(`enrichShiftPresence → ${onlinePath}`);
+
+  if (isPresenceSessionEnded(driver.companyId, vehicleId)) return;
 
   const { lat, lng } = await getGps();
   const record = buildPresenceRecord(driver, vehicleId, 'Available', lat, lng);
@@ -227,6 +235,7 @@ async function enrichShiftPresenceInBackground(
 
 /** Start shift: minimal RTDB write first, then enrich when base writes succeed. */
 export async function startShiftOnline(driver: DriverProfile, vehicleId: string): Promise<void> {
+  clearPresenceSessionEnded(driver.companyId, vehicleId);
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
   const authUser = await ensureAuthUserForRtdbWrite(`startShiftOnline → ${onlinePath}`);
   console.log('[Presence] startShiftOnline auth uid:', authUser.uid, 'driver profile uid:', driver.uid);
@@ -279,6 +288,10 @@ export async function writeOnlinePresence(
 ) {
   if (!driver.companyId || !vehicleId) {
     console.warn('[Presence] skipped — missing companyId or vehicleId');
+    return;
+  }
+  if (isPresenceSessionEnded(driver.companyId, vehicleId)) {
+    console.warn('[Presence] skipped — session ended for', vehicleId);
     return;
   }
 
@@ -351,19 +364,39 @@ export async function clearOnlinePresence(driver: DriverProfile, vehicleId: stri
   stopPresenceHeartbeat();
   if (!driver.companyId || !vehicleId) return;
 
-  const presencePath = ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}/current`);
+  markPresenceSessionEnded(driver.companyId, vehicleId);
+  const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+
+  try {
+    await ensureAuthUserForRtdbWrite(`clearOnlinePresence → ${onlinePath}`);
+  } catch (err) {
+    console.warn('[Presence] clearOnlinePresence auth failed:', err);
+  }
+
+  const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
   try {
     await onDisconnect(presencePath).cancel();
-    await update(presencePath, { online: false, vehiclestatus: 'Offline', lastSeen: Date.now() });
-    await update(ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}`), {
+    await update(presencePath, {
+      online: false,
       vehiclestatus: 'Offline',
+      VehicleStatus: 'Offline',
+      shiftStarted: false,
+      lastSeen: Date.now(),
+    });
+    await update(ref(getDatabaseInstance(), onlinePath), {
+      vehiclestatus: 'Offline',
+      VehicleStatus: 'Offline',
+      online: false,
+      shiftStarted: false,
+      lastSeen: Date.now(),
     });
   } catch (err) {
     console.warn('[Presence] clear partial write failed:', err);
   }
 
   try {
-    await remove(ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}`));
+    await remove(ref(getDatabaseInstance(), onlinePath));
+    console.log('[Presence] removed', onlinePath);
   } catch (err) {
     console.warn('[Presence] remove node failed:', err);
   }
