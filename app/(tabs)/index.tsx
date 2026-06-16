@@ -42,6 +42,7 @@ export default function MainScreen() {
     clearPreferredPanelTab,
     pauseMeter,
     companyZones,
+    paymentJob,
   } = useDriver();
 
   const [mainTab, setMainTab] = useState<MainPanelTab>('current');
@@ -112,7 +113,7 @@ export default function MainScreen() {
             dropoffLat={activeJob?.dropoffLat}
             dropoffLng={activeJob?.dropoffLng}
             showRoute={mapShowsRoute}
-            showsUserLocation={shiftActive}
+            showsUserLocation={shiftActive && !paymentJob}
             zones={companyZones.map((z) => ({
               name: z.name,
               active: z.active,
@@ -177,7 +178,7 @@ export default function MainScreen() {
         meter={meter}
         showMeter={meterRunning && mapExpanded}
         showRoute={mapShowsRoute}
-        showsUserLocation={shiftActive}
+        showsUserLocation={shiftActive && !paymentJob}
         zones={companyZones.map((z) => ({
           name: z.name,
           active: z.active,

@@ -6,6 +6,7 @@ type Props = {
   name: string;
   children: ReactNode;
   fallback?: ReactNode;
+  renderFallback?: (error: Error, reset: () => void) => ReactNode;
   onReset?: () => void;
 };
 
@@ -29,6 +30,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      if (this.props.renderFallback) {
+        return this.props.renderFallback(this.state.error, this.reset);
+      }
       if (this.props.fallback) return this.props.fallback;
       return (
         <View style={styles.box}>

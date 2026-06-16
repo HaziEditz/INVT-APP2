@@ -51,6 +51,11 @@ import { initializeNztaOnLogin } from '@/services/nztaService';
 import type { EndShiftSummary } from '@/services/nztaService';
 import { createInitialMeter, watchMeter } from '@/services/meterEngine';
 import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
+import {
+  completionErrorMessage,
+  persistActiveJobAsync,
+  persistMeterAsync,
+} from '@/lib/tripCompletionHelpers';
 import { JobStepTimes, PaymentExtras, TariffChangeRecord } from '@/types';
 import {
   ActiveJob,
@@ -128,6 +133,9 @@ interface DriverContextValue {
     tmDetails?: TmPaymentDetails,
   ) => Promise<void>;
   dismissPayment: () => void;
+  completionBusy: boolean;
+  completionError: string | null;
+  clearCompletionError: () => void;
   cancelActiveJob: () => Promise<void>;
   noShowActiveJob: () => Promise<void>;
   recallJob: () => Promise<void>;
@@ -325,6 +333,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const companyZonesRef = useRef<CompanyZone[]>([]);
   const [jobOffer, setJobOffer] = useState<JobOffer | null>(null);
   const [paymentJob, setPaymentJob] = useState<ActiveJob | null>(null);
+  const [completionBusy, setCompletionBusy] = useState(false);
+  const [completionError, setCompletionError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const [completedJobs, setCompletedJobs] = useState<CompletedJob[]>([]);
   const [jobHistory, setJobHistory] = useState<HistoryJob[]>([]);
@@ -1745,56 +1755,73 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const advanceStage = async () => {
-    if (!activeJob || !driver) return;
-    const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
-    const idx = order.indexOf(activeJob.stage);
-    const nextStage = order[Math.min(idx + 1, order.length - 1)];
-    const now = Date.now();
-    const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
-    if (nextStage === 'arrived') stepTimes.arrivedAt = now;
-    if (nextStage === 'onboard') {
-      stepTimes.onboardAt = now;
-      startMeterForJob();
-    }
-    if (nextStage === 'complete') {
-      stepTimes.completeAt = now;
-      stopMeterForJob();
-    }
-
-    let meterSnapshot = meterRef.current;
-    if (nextStage === 'complete' && meterSnapshot) {
-      meterSnapshot = { ...meterSnapshot, running: false, finishedAt: now };
-    }
-
-    const updated: ActiveJob = {
-      ...activeJob,
-      stage: nextStage,
-      stepTimes,
-      meterSnapshot: meterSnapshot ?? activeJob.meterSnapshot,
-      fare: meterSnapshot?.fare ?? activeJob.fare,
-      distanceKm: meterSnapshot?.distanceKm ?? activeJob.distanceKm,
-    };
-    setActiveJob(updated);
-    await storeData(STORAGE_KEYS.activeJob, updated);
-
-    const vehicleId = await resolveVehicleId();
-    if (vehicleId) {
+    if (!activeJob || !driver || completionBusy) return;
+    setCompletionBusy(true);
+    setCompletionError(null);
+    try {
+      const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
+      const idx = order.indexOf(activeJob.stage);
+      const nextStage = order[Math.min(idx + 1, order.length - 1)];
+      const now = Date.now();
+      const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
+      if (nextStage === 'arrived') stepTimes.arrivedAt = now;
       if (nextStage === 'onboard') {
-        writeOnlinePresence(driver, vehicleId, 'Active').catch(() => undefined);
-        await syncJobStageToDispatch('onboard', { id: updated.id, updateSeq: updated.updateSeq });
-      } else if (nextStage === 'arrived') {
-        writeOnlinePresence(driver, vehicleId, 'Arrived').catch(() => undefined);
-        await syncJobStageToDispatch('arrived', { id: updated.id, updateSeq: updated.updateSeq });
-      } else if (nextStage === 'complete') {
-        writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
-      } else {
-        writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
-        await syncJobStageToDispatch(nextStage, { id: updated.id, updateSeq: updated.updateSeq });
+        stepTimes.onboardAt = now;
+        startMeterForJob();
       }
-    }
+      if (nextStage === 'complete') {
+        stepTimes.completeAt = now;
+        stopMeterForJob();
+      }
 
-    if (nextStage === 'complete') {
-      setPaymentJob(updated);
+      let meterSnapshot = meterRef.current;
+      if (nextStage === 'complete' && meterSnapshot) {
+        meterSnapshot = { ...meterSnapshot, running: false, finishedAt: now };
+      }
+
+      const updated: ActiveJob = {
+        ...activeJob,
+        stage: nextStage,
+        stepTimes,
+        meterSnapshot: meterSnapshot ?? activeJob.meterSnapshot,
+        fare: meterSnapshot?.fare ?? activeJob.fare,
+        distanceKm: meterSnapshot?.distanceKm ?? activeJob.distanceKm,
+      };
+      setActiveJob(updated);
+
+      // Open payment immediately — do not await AsyncStorage first (large route polylines
+      // can block the JS thread for seconds and look like a freeze with no payment UI).
+      if (nextStage === 'complete') {
+        setPaymentJob(updated);
+        persistActiveJobAsync(updated);
+        const vehicleId = await resolveVehicleId();
+        if (vehicleId) {
+          writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+        }
+        return;
+      }
+
+      persistActiveJobAsync(updated);
+      const vehicleId = await resolveVehicleId();
+      if (vehicleId) {
+        if (nextStage === 'onboard') {
+          writeOnlinePresence(driver, vehicleId, 'Active').catch(() => undefined);
+          await syncJobStageToDispatch('onboard', { id: updated.id, updateSeq: updated.updateSeq });
+        } else if (nextStage === 'arrived') {
+          writeOnlinePresence(driver, vehicleId, 'Arrived').catch(() => undefined);
+          await syncJobStageToDispatch('arrived', { id: updated.id, updateSeq: updated.updateSeq });
+        } else {
+          writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+          await syncJobStageToDispatch(nextStage, { id: updated.id, updateSeq: updated.updateSeq });
+        }
+      }
+    } catch (err) {
+      console.error('[Driver] advanceStage failed:', err);
+      const msg = completionErrorMessage(err);
+      setCompletionError(msg);
+      Alert.alert('Could not update trip', msg);
+    } finally {
+      setCompletionBusy(false);
     }
   };
 
@@ -1806,27 +1833,39 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const completeJob = async () => {
-    if (!activeJob) return;
-    stopMeterForJob();
-    const now = Date.now();
-    const stepTimes = { ...activeJob.stepTimes, completeAt: now };
-    const meterSnapshot = meterRef.current
-      ? { ...meterRef.current, running: false, finishedAt: now }
-      : activeJob.meterSnapshot;
-    const closed: ActiveJob = {
-      ...activeJob,
-      stage: 'complete',
-      stepTimes,
-      meterSnapshot,
-      fare: meterSnapshot?.fare ?? activeJob.fare,
-    };
-    setActiveJob(closed);
-    setPaymentJob(closed);
-    await storeData(STORAGE_KEYS.activeJob, closed);
+    if (!activeJob || completionBusy) return;
+    setCompletionBusy(true);
+    setCompletionError(null);
+    try {
+      stopMeterForJob();
+      const now = Date.now();
+      const stepTimes = { ...activeJob.stepTimes, completeAt: now };
+      const meterSnapshot = meterRef.current
+        ? { ...meterRef.current, running: false, finishedAt: now }
+        : activeJob.meterSnapshot;
+      const closed: ActiveJob = {
+        ...activeJob,
+        stage: 'complete',
+        stepTimes,
+        meterSnapshot,
+        fare: meterSnapshot?.fare ?? activeJob.fare,
+      };
+      setActiveJob(closed);
+      setPaymentJob(closed);
+      persistActiveJobAsync(closed);
+    } catch (err) {
+      console.error('[Driver] completeJob failed:', err);
+      const msg = completionErrorMessage(err);
+      setCompletionError(msg);
+      Alert.alert('Could not open payment', msg);
+    } finally {
+      setCompletionBusy(false);
+    }
   };
 
   const dismissPayment = () => {
     setPaymentJob(null);
+    setCompletionError(null);
   };
 
   const finalizePayment = async (
@@ -1836,7 +1875,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     tmDetails?: TmPaymentDetails,
   ) => {
     const job = paymentJob ?? activeJob;
-    if (!job || !driver?.companyId) return;
+    if (!job || !driver?.companyId) {
+      throw new Error('No active job to complete.');
+    }
 
     const closed: ActiveJob = {
       ...job,
@@ -1853,6 +1894,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
 
     const completedAt = Date.now();
+    setCompletionError(null);
 
     try {
       await writeClosedJob(
@@ -1905,12 +1947,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           extras,
         },
       });
-    } catch {
+    } catch (err) {
+      console.error('[Driver] completeJobPayment failed:', err);
       await enqueueOfflineItem({
         type: 'job_update',
         payload: { action: 'complete', jobId: job.id, paymentType, fare: totalFare, extras },
       });
+      const msg =
+        `Dispatch server did not confirm completion (${completionErrorMessage(err)}). ` +
+        'Job saved locally — tap Retry when back online.';
+      setCompletionError(msg);
+      throw new Error(msg);
     }
+
+    void playInAppNotificationSound('general');
 
     const done: CompletedJob = { ...closed, completedAt };
     setCompletedJobs((prev) => [done, ...prev]);
@@ -2141,39 +2191,51 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const endTrip = async () => {
+    if (completionBusy) return;
     if (hailActiveRef.current || hailActive) {
       await endHail();
       return;
     }
     if (!meterRef.current?.running && !activeJob) return;
 
-    const snapshot = buildMeterSnapshot();
-    const now = Date.now();
+    setCompletionBusy(true);
+    setCompletionError(null);
+    try {
+      const snapshot = buildMeterSnapshot();
+      const now = Date.now();
 
-    if (meterStopRef.current) {
-      meterStopRef.current();
-      meterStopRef.current = null;
-    }
+      if (meterStopRef.current) {
+        meterStopRef.current();
+        meterStopRef.current = null;
+      }
 
-    if (activeJob) {
-      const stepTimes: JobStepTimes = { ...activeJob.stepTimes, completeAt: now };
-      const updated: ActiveJob = {
-        ...activeJob,
-        stage: 'complete',
-        stepTimes,
-        meterSnapshot: snapshot ?? activeJob.meterSnapshot,
-        fare: snapshot?.fare ?? activeJob.fare,
-        distanceKm: snapshot?.distanceKm ?? activeJob.distanceKm,
-        durationMin: snapshot?.startedAt
-          ? Math.round((now - snapshot.startedAt) / 60000)
-          : activeJob.durationMin,
-      };
-      setActiveJob(updated);
-      setPaymentJob(updated);
-      setMeter(null);
-      meterRef.current = null;
-      await storeData(STORAGE_KEYS.activeJob, updated);
-      await storeData(STORAGE_KEYS.meterState, snapshot);
+      if (activeJob) {
+        const stepTimes: JobStepTimes = { ...activeJob.stepTimes, completeAt: now };
+        const updated: ActiveJob = {
+          ...activeJob,
+          stage: 'complete',
+          stepTimes,
+          meterSnapshot: snapshot ?? activeJob.meterSnapshot,
+          fare: snapshot?.fare ?? activeJob.fare,
+          distanceKm: snapshot?.distanceKm ?? activeJob.distanceKm,
+          durationMin: snapshot?.startedAt
+            ? Math.round((now - snapshot.startedAt) / 60000)
+            : activeJob.durationMin,
+        };
+        setActiveJob(updated);
+        setPaymentJob(updated);
+        setMeter(null);
+        meterRef.current = null;
+        persistActiveJobAsync(updated);
+        if (snapshot) persistMeterAsync(snapshot);
+      }
+    } catch (err) {
+      console.error('[Driver] endTrip failed:', err);
+      const msg = completionErrorMessage(err);
+      setCompletionError(msg);
+      Alert.alert('Could not end trip', msg);
+    } finally {
+      setCompletionBusy(false);
     }
   };
 
@@ -2290,6 +2352,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         completeJob,
         finalizePayment,
         dismissPayment,
+        completionBusy,
+        completionError,
+        clearCompletionError: () => setCompletionError(null),
         cancelActiveJob,
         noShowActiveJob,
         recallJob,

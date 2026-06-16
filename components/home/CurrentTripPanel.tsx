@@ -27,6 +27,9 @@ export function CurrentTripPanel() {
     recallJob,
     endTrip,
     startHail,
+    completionBusy,
+    completionError,
+    clearCompletionError,
   } = useDriver();
 
   const meterRunning = !!meter?.running;
@@ -61,7 +64,18 @@ export function CurrentTripPanel() {
         </Text>
         <Text style={styles.meta}>Started {fmtTime(meter?.startedAt)}</Text>
         {meterRunning ? (
-          <Button title="End Trip" variant="danger" onPress={() => confirmEndTrip(() => void endTrip())} />
+          <Button
+            title={completionBusy ? 'Ending…' : 'End Trip'}
+            variant="danger"
+            disabled={completionBusy}
+            onPress={() => confirmEndTrip(() => void endTrip())}
+          />
+        ) : null}
+        {completionError ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{completionError}</Text>
+            <Button title="Dismiss" variant="secondary" onPress={clearCompletionError} />
+          </View>
         ) : null}
       </View>
     );
@@ -152,10 +166,25 @@ export function CurrentTripPanel() {
           />
         ) : null}
         {meterRunning ? (
-          <Button title="End Trip" variant="danger" onPress={() => confirmEndTrip(() => void endTrip())} />
+          <Button
+            title={completionBusy ? 'Ending…' : 'End Trip'}
+            variant="danger"
+            disabled={completionBusy}
+            onPress={() => confirmEndTrip(() => void endTrip())}
+          />
         ) : (
-          <Button title={nextLabel} onPress={onAdvance} />
+          <Button
+            title={completionBusy ? 'Please wait…' : nextLabel}
+            onPress={onAdvance}
+            disabled={completionBusy}
+          />
         )}
+        {completionError ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{completionError}</Text>
+            <Button title="Dismiss" variant="secondary" onPress={clearCompletionError} />
+          </View>
+        ) : null}
         {!meterRunning && (activeJob.stage === 'pickup' || activeJob.stage === 'arrived') ? (
           <>
             <Button title="No Show" variant="secondary" onPress={noShowActiveJob} />
@@ -212,4 +241,13 @@ const styles = StyleSheet.create({
   addr: { color: Colors.text, fontSize: 16, marginBottom: 6 },
   meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
   actions: { gap: 8, marginTop: 10 },
+  errorBox: {
+    backgroundColor: Colors.warning + '22',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: Colors.warning,
+    gap: 8,
+  },
+  errorText: { color: Colors.warning, fontSize: 13, lineHeight: 18 },
 });

@@ -3,6 +3,7 @@ import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { calcTmSplit, loadTmConfig, TmConfig } from '@/lib/tmConfig';
+import { computePaymentFareSummary, completionErrorMessage } from '@/lib/tripCompletionHelpers';
 import {
   DRIVER_PAYMENT_TYPES,
   DriverPaymentType,
@@ -91,7 +92,7 @@ function Dropdown<T extends string>({
 export function PaymentModal() {
   const insets = useSafeAreaInsets();
   const { driver } = useAuth();
-  const { paymentJob, finalizePayment, activeVehicle, selectedTariff } = useDriver();
+  const { paymentJob, finalizePayment, activeVehicle, selectedTariff, dismissPayment } = useDriver();
 
   const [paymentType, setPaymentType] = useState<DriverPaymentType>('Cash');
   const [tmPassengerPaymentType, setTmPassengerPaymentType] =
@@ -187,33 +188,12 @@ export function PaymentModal() {
         tripTotal: 0,
       };
     }
-
-    const meter = paymentJob.meterSnapshot;
-    const breakdown = meter?.breakdown;
-    const flagFall = breakdown?.flagFall ?? selectedTariff.flagFall ?? 0;
-    const distanceKm = breakdown?.distanceKm ?? meter?.distanceKm ?? paymentJob.distanceKm ?? 0;
-    const waitingMin =
-      breakdown?.waitingMinutes ?? (meter?.waitingMs != null ? meter.waitingMs / 60000 : 0);
-    const distanceCharge = breakdown?.distanceCharge ?? distanceKm * selectedTariff.ratePerKm;
-    const waitingCharge = breakdown?.waitingCharge ?? waitingMin * selectedTariff.waitingPerMin;
-    const tripTotal =
-      breakdown?.total ?? meter?.fare ?? paymentJob.fare ?? paymentJob.fixedFare ?? flagFall + distanceCharge + waitingCharge;
-
-    const started = meter?.startedAt ?? paymentJob.startedAt;
-    const finished = meter?.finishedAt ?? Date.now();
-    const tripMs = started ? Math.max(0, finished - started) : paymentJob.durationMin * 60000;
-
-    return {
-      tripMs,
-      distanceKm,
-      waitingMin,
-      flagFall,
-      distanceCharge,
-      waitingCharge,
-      ratePerKm: selectedTariff.ratePerKm,
-      waitingPerMin: selectedTariff.waitingPerMin,
-      tripTotal,
-    };
+    try {
+      return computePaymentFareSummary(paymentJob, selectedTariff);
+    } catch (err) {
+      console.error('[PaymentModal] fare summary failed:', err);
+      return computePaymentFareSummary(paymentJob, null);
+    }
   }, [paymentJob, selectedTariff]);
 
   if (!paymentJob) return null;
@@ -277,6 +257,17 @@ export function PaymentModal() {
 
       const finalPaymentType = isTmPayment ? tmPassengerPaymentType : paymentType;
       await finalizePayment(finalPaymentType, builtExtras, subtotal, tmDetails);
+    } catch (err) {
+      console.error('[PaymentModal] finalizePayment failed:', err);
+      const msg = completionErrorMessage(err);
+      Alert.alert(
+        'Could not complete job',
+        msg,
+        [
+          { text: 'Back to payment', style: 'cancel' },
+          { text: 'Retry', onPress: () => void onConfirm() },
+        ],
+      );
     } finally {
       setSubmitting(false);
     }
@@ -460,6 +451,9 @@ export function PaymentModal() {
           <Text style={styles.pickup} numberOfLines={2}>
             {paymentJob.pickup}
           </Text>
+          <Pressable onPress={dismissPayment} style={styles.backLink}>
+            <Text style={styles.backLinkText}>← Back to trip</Text>
+          </Pressable>
 
           <View style={styles.card}>
             <Text style={styles.stepLabel}>Fare summary</Text>
@@ -598,8 +592,10 @@ const styles = StyleSheet.create({
   pickup: {
     color: Colors.textMuted,
     fontSize: 14,
-    marginBottom: 16,
+    marginBottom: 8,
   },
+  backLink: { marginBottom: 12 },
+  backLinkText: { color: Colors.accent, fontSize: 14, fontWeight: '700' },
   stepLabel: {
     color: Colors.text,
     fontSize: 16,
