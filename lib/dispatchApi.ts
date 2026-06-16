@@ -2,6 +2,7 @@ import { DISPATCH_API_URL } from '@/constants/theme';
 import { getAuthInstance, getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { getDispatchConfig } from '@/lib/dispatchConfig';
 import { isPresenceSessionEnded } from '@/lib/presenceGuards';
+import { loadLiveMeterPresenceFields } from '@/lib/liveMeterPresence';
 import { update, ref } from 'firebase/database';
 
 export async function dispatchGet<T>(path: string): Promise<T> {
@@ -107,6 +108,8 @@ export async function syncDriverLocation(payload: DriverLocationPayload) {
       })()
     : undefined;
 
+  const meterFields = await loadLiveMeterPresenceFields();
+
   await update(ref(getDatabaseInstance(), onlinePath), {
     vehiclestatus: topStatus,
     VehicleStatus: topStatus,
@@ -130,6 +133,7 @@ export async function syncDriverLocation(payload: DriverLocationPayload) {
     bgUpdate: true,
     vehiclestatus: topStatus,
     VehicleStatus: topStatus,
+    ...meterFields,
   });
 }
 
