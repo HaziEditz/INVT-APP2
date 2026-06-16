@@ -11,6 +11,12 @@ import {
 
 export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned' | 'Picking' | 'Arrived' | 'Active';
 
+export {
+  clearPresenceSessionEnded,
+  isPresenceSessionEnded,
+  markPresenceSessionEnded,
+} from '@/lib/presenceGuards';
+
 const PRESENCE_HEARTBEAT_MS = 30_000;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatCtx: {
