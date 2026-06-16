@@ -45,6 +45,7 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
         "WAKE_LOCK",
+        "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE"
       ]
@@ -68,7 +69,8 @@
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
-          "color": "#1a73e8"
+          "color": "#1a73e8",
+          "sounds": ["./assets/sounds/alert.wav"]
         }
       ]
     ],

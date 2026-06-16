@@ -1,18 +1,20 @@
+import { useKeepAwake } from 'expo-keep-awake';
 import { useDriver } from '@/context/DriverContext';
-import { enableWakeLock, disableWakeLock } from '@/services/wakeLock';
-import { useSafeEffect } from '@/hooks/useSafeEffect';
 
-/** Keeps screen on while shift is active or on a trip. */
-export function ShiftKeepAwake() {
-  const { shiftActive, activeJob, hailActive } = useDriver();
+const KEEP_AWAKE_TAG = 'bookawaka-driver-shift';
 
-  useSafeEffect(() => {
-    if (shiftActive || activeJob || hailActive) {
-      enableWakeLock().catch((err) => console.error('[ShiftKeepAwake]', err));
-      return () => disableWakeLock();
-    }
-    disableWakeLock();
-  }, [shiftActive, activeJob, hailActive], 'ShiftKeepAwake');
-
+/** Inner component so useKeepAwake only runs while shift / pending offer is active. */
+function KeepAwakeGate() {
+  useKeepAwake(KEEP_AWAKE_TAG, { suppressDeactivateWarnings: true });
   return null;
+}
+
+/**
+ * Prevents screen sleep for the whole shift (and while a job offer is pending).
+ * Uses the hook API — more reliable on Android than imperative activate/deactivate alone.
+ */
+export function ShiftKeepAwake() {
+  const { shiftActive, jobOffer } = useDriver();
+  if (!shiftActive && !jobOffer) return null;
+  return <KeepAwakeGate />;
 }

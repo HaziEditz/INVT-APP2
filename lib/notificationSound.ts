@@ -1,12 +1,15 @@
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as Haptics from 'expo-haptics';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { loadNotifications } from '@/services/notificationService';
+import { notifyJobOffer } from '@/services/notificationService';
+import type { JobOffer } from '@/types';
 
 export type InAppSoundKind = 'offer' | 'update' | 'cancel' | 'alert' | 'general';
 
 let audioModeReady = false;
 let toneSound: Audio.Sound | null = null;
+let preloadPromise: Promise<void> | null = null;
 
 const ALERT_TITLES: Record<InAppSoundKind, string> = {
   offer: 'New job offer',
@@ -16,43 +19,70 @@ const ALERT_TITLES: Record<InAppSoundKind, string> = {
   general: 'Notification',
 };
 
-async function ensureAudioMode(): Promise<void> {
+export async function ensureAudioMode(): Promise<void> {
   if (audioModeReady) return;
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
-    staysActiveInBackground: false,
-    shouldDuckAndroid: true,
+    staysActiveInBackground: true,
+    shouldDuckAndroid: false,
     playThroughEarpieceAndroid: false,
+    interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+    interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
   });
   audioModeReady = true;
 }
 
-async function playToneBurst(): Promise<void> {
-  await ensureAudioMode();
-  if (toneSound) {
+export async function preloadOfferAlertSound(): Promise<void> {
+  if (preloadPromise) return preloadPromise;
+  preloadPromise = (async () => {
     try {
-      await toneSound.setPositionAsync(0);
-      await toneSound.playAsync();
-      return;
-    } catch {
-      try {
-        await toneSound.unloadAsync();
-      } catch {
-        /* ignore */
-      }
-      toneSound = null;
+      await ensureAudioMode();
+      if (toneSound) return;
+      const created = await Audio.Sound.createAsync(require('@/assets/sounds/alert.wav'), {
+        shouldPlay: false,
+        volume: 1.0,
+        isLooping: false,
+      });
+      toneSound = created.sound;
+    } catch (err) {
+      console.warn('[NotificationSound] preload failed:', err);
     }
-  }
-
-  const created = await Audio.Sound.createAsync(require('@/assets/sounds/alert.wav'), {
-    shouldPlay: true,
-    volume: 1.0,
-  });
-  toneSound = created.sound;
+  })();
+  return preloadPromise;
 }
 
-async function playNotificationChannelSound(kind: InAppSoundKind): Promise<void> {
+export async function unloadOfferAlertSound(): Promise<void> {
+  preloadPromise = null;
+  if (!toneSound) return;
+  try {
+    await toneSound.unloadAsync();
+  } catch {
+    /* ignore */
+  }
+  toneSound = null;
+}
+
+async function playToneBurst(): Promise<void> {
+  await preloadOfferAlertSound();
+  if (!toneSound) {
+    const created = await Audio.Sound.createAsync(require('@/assets/sounds/alert.wav'), {
+      shouldPlay: true,
+      volume: 1.0,
+    });
+    toneSound = created.sound;
+    return;
+  }
+  try {
+    await toneSound.setPositionAsync(0);
+    await toneSound.playAsync();
+  } catch {
+    await unloadOfferAlertSound();
+    await playToneBurst();
+  }
+}
+
+async function playNotificationChannelSound(kind: InAppSoundKind, title: string, body: string): Promise<void> {
   const Notifications = loadNotifications();
   if (!Notifications) return;
 
@@ -63,11 +93,14 @@ async function playNotificationChannelSound(kind: InAppSoundKind): Promise<void>
         ? 'compliance'
         : 'in-app-alerts';
 
+  const soundName = Platform.OS === 'android' ? 'alert' : 'alert.wav';
+
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: ALERT_TITLES[kind],
-      body: ' ',
-      sound: 'default',
+      title,
+      body,
+      sound: soundName,
+      priority: Notifications.AndroidNotificationPriority?.MAX,
       data: { inAppSoundOnly: true, kind },
       ...(Platform.OS === 'android' ? { channelId } : {}),
     },
@@ -75,8 +108,7 @@ async function playNotificationChannelSound(kind: InAppSoundKind): Promise<void>
   });
 }
 
-/** Play a short alert sound when an in-app notification popup appears. */
-export async function playInAppNotificationSound(kind: InAppSoundKind = 'general'): Promise<void> {
+async function playHaptic(kind: InAppSoundKind): Promise<void> {
   try {
     await Haptics.notificationAsync(
       kind === 'cancel' || kind === 'alert'
@@ -86,14 +118,49 @@ export async function playInAppNotificationSound(kind: InAppSoundKind = 'general
   } catch {
     /* haptics unavailable */
   }
+}
 
-  try {
-    await playToneBurst();
-  } catch {
-    try {
-      await playNotificationChannelSound(kind);
-    } catch {
-      /* sound unavailable */
-    }
+/** Job offer — local wav + OS notification (notification carries sound when backgrounded/locked). */
+export async function alertDriverToOffer(offer: JobOffer): Promise<void> {
+  const title = 'New job offer';
+  const body = `#${offer.id} · ${offer.pickup || 'Tap to respond'} · 30s`;
+  const inBackground = AppState.currentState !== 'active';
+
+  await playHaptic('offer');
+
+  const tasks: Promise<unknown>[] = [
+    playToneBurst().catch((err) => console.warn('[NotificationSound] tone failed:', err)),
+  ];
+
+  if (inBackground) {
+    tasks.push(notifyJobOffer(title, body).catch((err) => console.warn('[NotificationSound] notify failed:', err)));
+  } else {
+    tasks.push(
+      playNotificationChannelSound('offer', title, body).catch((err) =>
+        console.warn('[NotificationSound] channel sound failed:', err),
+      ),
+    );
   }
+
+  await Promise.allSettled(tasks);
+}
+
+/** Play a short alert sound when an in-app notification popup appears. */
+export async function playInAppNotificationSound(kind: InAppSoundKind = 'general'): Promise<void> {
+  const title = ALERT_TITLES[kind];
+  await playHaptic(kind);
+
+  const tasks: Promise<unknown>[] = [
+    playToneBurst().catch(() =>
+      playNotificationChannelSound(kind, title, ' ').catch(() => undefined),
+    ),
+  ];
+
+  if (kind !== 'offer') {
+    tasks.push(
+      playNotificationChannelSound(kind, title, ' ').catch(() => undefined),
+    );
+  }
+
+  await Promise.allSettled(tasks);
 }

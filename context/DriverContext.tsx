@@ -17,7 +17,7 @@ import {
   readNotificationJobId,
   readNotificationType,
 } from '@/lib/driverNotifications';
-import { playInAppNotificationSound } from '@/lib/notificationSound';
+import { playInAppNotificationSound, alertDriverToOffer } from '@/lib/notificationSound';
 import { subscribeDriverQueue } from '@/lib/driverQueue';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import { tickWorkedMinutes } from '@/services/nztaService';
@@ -867,7 +867,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     setPreferredPanelTab('offers');
     setJobOffer(offer);
-    void playInAppNotificationSound('offer');
+    void alertDriverToOffer(offer);
   };
 
   const handleDriverNotification = async (val: Record<string, unknown>) => {
@@ -1271,6 +1271,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     console.log('[Shift] scheduling NZTA clock + location (background)');
 
+    void import('@/services/shiftRuntimeService').then(({ startShiftRuntime }) =>
+      startShiftRuntime({
+        onForegroundResume: () => {
+          void repairPresenceRef.current?.('app-foreground');
+        },
+      }).catch((err) => console.warn('[Shift] shiftRuntime start failed:', err)),
+    );
+
     void import('@/services/nztaService').then(({ startShiftClock }) =>
       startShiftClock(driver.companyId, driver.uid)
         .then(() => console.log('[Shift] NZTA clock started'))
@@ -1411,6 +1419,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     const { stopBackgroundTracking } = await import('@/services/locationService');
     await stopBackgroundTracking();
+    const { stopShiftRuntime } = await import('@/services/shiftRuntimeService');
+    stopShiftRuntime();
     return summary;
   };
 

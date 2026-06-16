@@ -5,6 +5,9 @@ type NotificationsModule = typeof import('expo-notifications');
 
 let notificationsModule: NotificationsModule | null | undefined;
 let handlerConfigured = false;
+let channelsReady = false;
+
+const OFFER_SOUND = Platform.OS === 'android' ? 'alert' : 'alert.wav';
 
 function isExpoGo(): boolean {
   return Constants.appOwnership === 'expo';
@@ -19,12 +22,16 @@ export function configureNotificationHandler(): void {
   try {
     const mod = require('expo-notifications') as NotificationsModule;
     mod.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
+      handleNotification: async (notification) => {
+        const data = notification.request.content.data as Record<string, unknown> | undefined;
+        const inAppOnly = data?.inAppSoundOnly === true;
+        return {
+          shouldPlaySound: true,
+          shouldSetBadge: !inAppOnly,
+          shouldShowBanner: !inAppOnly,
+          shouldShowList: !inAppOnly,
+        };
+      },
     });
     handlerConfigured = true;
     notificationsModule = mod;
@@ -44,6 +51,41 @@ export function loadNotifications(): NotificationsModule | null {
   return notificationsModule ?? null;
 }
 
+/** Idempotent — safe to call on app launch and shift start. */
+export async function ensureNotificationChannels(): Promise<void> {
+  const Notifications = loadNotifications();
+  if (!Notifications || Platform.OS !== 'android') {
+    channelsReady = true;
+    return;
+  }
+  if (channelsReady) return;
+
+  await Notifications.setNotificationChannelAsync('job-offers', {
+    name: 'Job Offers',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 400, 200, 400, 200, 400],
+    lightColor: '#1a73e8',
+    sound: OFFER_SOUND,
+    bypassDnd: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    enableVibrate: true,
+  });
+  await Notifications.setNotificationChannelAsync('in-app-alerts', {
+    name: 'In-App Alerts',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 200, 120, 200],
+    lightColor: '#1a73e8',
+    sound: OFFER_SOUND,
+    enableVibrate: true,
+  });
+  await Notifications.setNotificationChannelAsync('compliance', {
+    name: 'NZTA & Break Reminders',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
+  });
+  channelsReady = true;
+}
+
 export async function registerForPushNotifications(): Promise<string | null> {
   const Notifications = loadNotifications();
   if (!Notifications) {
@@ -51,27 +93,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 
   try {
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('job-offers', {
-        name: 'Job Offers',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#1a73e8',
-        sound: 'default',
-      });
-      await Notifications.setNotificationChannelAsync('in-app-alerts', {
-        name: 'In-App Alerts',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 200, 120, 200],
-        lightColor: '#1a73e8',
-        sound: 'default',
-      });
-      await Notifications.setNotificationChannelAsync('compliance', {
-        name: 'NZTA & Break Reminders',
-        importance: Notifications.AndroidImportance.HIGH,
-        sound: 'default',
-      });
-    }
+    await ensureNotificationChannels();
 
     const { status: existing } = await Notifications.getPermissionsAsync();
     let finalStatus = existing;
@@ -99,18 +121,20 @@ export async function notifyJobOffer(title: string, body: string): Promise<void>
   }
 
   try {
+    await ensureNotificationChannels();
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
         body,
-        sound: 'default',
+        sound: OFFER_SOUND,
+        priority: Notifications.AndroidNotificationPriority?.MAX,
         data: { type: 'job_offer' },
         ...(Platform.OS === 'android' ? { channelId: 'job-offers' } : {}),
       },
       trigger: null,
     });
-  } catch {
-    // Optional — ignore when notifications unavailable
+  } catch (err) {
+    console.warn('[Notifications] notifyJobOffer failed:', err);
   }
 }
 

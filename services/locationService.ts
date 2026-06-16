@@ -114,8 +114,8 @@ export async function startBackgroundTracking(
         showsBackgroundLocationIndicator: true,
         pausesUpdatesAutomatically: false,
         foregroundService: {
-          notificationTitle: 'BookaWaka Driver',
-          notificationBody: 'Tracking location for dispatch',
+          notificationTitle: 'BookaWaka — On shift',
+          notificationBody: 'Listening for jobs · GPS active for dispatch',
         },
       });
     } catch (err) {

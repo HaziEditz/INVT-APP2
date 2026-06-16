@@ -11,11 +11,14 @@ import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
-import { registerForPushNotifications } from '@/services/notificationService';
+import { registerForPushNotifications, ensureNotificationChannels } from '@/services/notificationService';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function RootLayout() {
   useSafeEffect(() => {
+    ensureNotificationChannels().catch((err) => {
+      console.error('[RootLayout] notification channels failed:', err);
+    });
     registerForPushNotifications().catch((err) => {
       console.error('[RootLayout] push registration failed:', err);
     });
