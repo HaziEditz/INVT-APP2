@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { syncDriverLocation } from '@/lib/dispatchApi';
+import { isPresenceSessionEnded } from '@/lib/presenceGuards';
 
 export const BACKGROUND_LOCATION_TASK = 'BW_BACKGROUND_LOCATION';
 const CTX_KEY = 'bw.bgLocationCtx.v1';
@@ -54,6 +55,7 @@ if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
     }
     const ctx = await loadCtx();
     if (!ctx) return;
+    if (isPresenceSessionEnded(ctx.companyId, ctx.vehicleId)) return;
     const locations = (data as { locations?: Location.LocationObject[] })?.locations;
     const latest = locations?.[locations.length - 1];
     if (!latest) return;

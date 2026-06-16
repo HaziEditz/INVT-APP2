@@ -24,6 +24,7 @@ import { tickWorkedMinutes } from '@/services/nztaService';
 import {
   clearOnlinePresence,
   isVehicleStatusAvailable,
+  markPresenceSessionEnded,
   moveDriverToEndOfQueue,
   repairOnlinePresence,
   startPresenceHeartbeat,
@@ -1403,6 +1404,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     driverSnapshot: typeof driver,
     vehicleId: string | null,
   ): Promise<EndShiftSummary | null> => {
+    // Synchronous lock before any await — blocks in-flight GPS/status-only writes.
+    if (driverSnapshot?.companyId && vehicleId) {
+      markPresenceSessionEnded(driverSnapshot.companyId, vehicleId);
+    }
+
     let summary: EndShiftSummary | null = null;
 
     if (driverSnapshot?.companyId && driverSnapshot.uid) {

@@ -6,6 +6,7 @@ import {
   clearPresenceSessionEnded,
   isPresenceSessionEnded,
   markPresenceSessionEnded,
+  assertOnlinePresenceWriteAllowed,
 } from '@/lib/presenceGuards';
 
 export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned' | 'Picking' | 'Arrived' | 'Active';
@@ -78,6 +79,7 @@ export async function repairOnlinePresence(
   reason = 'repair',
 ): Promise<boolean> {
   if (!driver.companyId || !vehicleId) return false;
+  if (isPresenceSessionEnded(driver.companyId, vehicleId)) return false;
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
   const db = getDatabaseInstance();
   try {
@@ -294,6 +296,11 @@ export async function writeOnlinePresence(
     console.warn('[Presence] skipped — session ended for', vehicleId);
     return;
   }
+  try {
+    assertOnlinePresenceWriteAllowed(driver.companyId, vehicleId, 'writeOnlinePresence');
+  } catch {
+    return;
+  }
 
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
   try {
@@ -366,38 +373,36 @@ export async function clearOnlinePresence(driver: DriverProfile, vehicleId: stri
 
   markPresenceSessionEnded(driver.companyId, vehicleId);
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+  const baseRef = ref(getDatabaseInstance(), onlinePath);
+  const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
 
   try {
     await ensureAuthUserForRtdbWrite(`clearOnlinePresence → ${onlinePath}`);
   } catch (err) {
     console.warn('[Presence] clearOnlinePresence auth failed:', err);
+    return;
   }
 
-  const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
   try {
     await onDisconnect(presencePath).cancel();
-    await update(presencePath, {
-      online: false,
-      vehiclestatus: 'Offline',
-      VehicleStatus: 'Offline',
-      shiftStarted: false,
-      lastSeen: Date.now(),
-    });
-    await update(ref(getDatabaseInstance(), onlinePath), {
-      vehiclestatus: 'Offline',
-      VehicleStatus: 'Offline',
-      online: false,
-      shiftStarted: false,
-      lastSeen: Date.now(),
-    });
   } catch (err) {
-    console.warn('[Presence] clear partial write failed:', err);
+    console.warn('[Presence] onDisconnect cancel failed (non-fatal):', err);
   }
 
   try {
-    await remove(ref(getDatabaseInstance(), onlinePath));
+    await remove(baseRef);
     console.log('[Presence] removed', onlinePath);
   } catch (err) {
     console.warn('[Presence] remove node failed:', err);
+  }
+
+  try {
+    const snap = await get(baseRef);
+    if (snap.exists()) {
+      await remove(baseRef);
+      console.log('[Presence] removed lingering', onlinePath);
+    }
+  } catch (err) {
+    console.warn('[Presence] verify-remove failed:', err);
   }
 }

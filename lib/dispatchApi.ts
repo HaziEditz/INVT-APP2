@@ -90,9 +90,14 @@ export async function syncDriverLocation(payload: DriverLocationPayload) {
   const { companyId, vehicleId, lat, lng, driverId, vehiclestatus = 'Available' } = payload;
   if (!companyId || !vehicleId) return;
   if (isPresenceSessionEnded(companyId, vehicleId)) return;
+  if (!String(driverId ?? '').trim()) {
+    console.warn('[syncDriverLocation] skipped — missing driverId (would create identity-less ghost node)');
+    return;
+  }
 
   const onlinePath = `online/${companyId}/${vehicleId}`;
   await ensureAuthUserForRtdbWrite(`syncDriverLocation → ${onlinePath}`);
+  if (isPresenceSessionEnded(companyId, vehicleId)) return;
   const now = Date.now();
   const topStatus = vehiclestatus === 'Assigned' ? 'Picking' : vehiclestatus;
   const parsedDriverId = driverId
