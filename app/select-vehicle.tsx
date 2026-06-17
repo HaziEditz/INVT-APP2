@@ -23,19 +23,30 @@ export default function SelectVehicleScreen() {
   }, [firebaseUser?.uid]);
 
   useEffect(() => {
-    if (selectedVehicleId) setPickerVehicle(selectedVehicleId);
-    else if (vehicles[0]?.id) setPickerVehicle(vehicles[0].id);
+    const available =
+      vehicles.find((v) => v.id === selectedVehicleId && !v.inUseByOther) ??
+      vehicles.find((v) => !v.inUseByOther);
+    if (available) {
+      setPickerVehicle(available.id);
+    } else if (selectedVehicleId && !vehicles.find((v) => v.id === selectedVehicleId)?.inUseByOther) {
+      setPickerVehicle(selectedVehicleId);
+    } else {
+      setPickerVehicle('');
+    }
   }, [selectedVehicleId, vehicles]);
 
   const onConfirm = async () => {
     if (!pickerVehicle) return;
+    const picked = vehicles.find((v) => v.id === pickerVehicle);
+    if (picked?.inUseByOther) return;
     setStarting(true);
     try {
       console.log('[SelectVehicle] setSelectedVehicleId', pickerVehicle);
       await setSelectedVehicleId(pickerVehicle);
-      await storeData(STORAGE_KEYS.vehicleSessionReady, true);
       console.log('[SelectVehicle] startShift');
-      await startShift(pickerVehicle);
+      const started = await startShift(pickerVehicle);
+      if (!started) return;
+      await storeData(STORAGE_KEYS.vehicleSessionReady, true);
       console.log('[SelectVehicle] shift started — AuthNavigator will open tabs');
     } catch (err) {
       console.error('[SelectVehicle] onConfirm failed:', err);

@@ -1,4 +1,5 @@
 import { Button } from '@/components/Button';
+import { JobDispatchMetaSection } from '@/components/JobDispatchMetaSection';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
@@ -34,6 +35,7 @@ export function QueuePanel() {
           <Text style={styles.addr} numberOfLines={1}>
             → {o.dropoff}
           </Text>
+          <JobDispatchMetaSection job={o} compact />
           {o.passengerName ? (
             <Text style={styles.meta}>{o.passengerName}{o.passengerPhone ? ` · ${o.passengerPhone}` : ''}</Text>
           ) : null}

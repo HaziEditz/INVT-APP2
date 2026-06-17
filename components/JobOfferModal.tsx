@@ -1,4 +1,5 @@
 import { Button } from '@/components/Button';
+import { JobDispatchMetaSection } from '@/components/JobDispatchMetaSection';
 import { JobNotesSection } from '@/components/JobNotesSection';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
@@ -69,7 +70,7 @@ export function JobOfferModal() {
             ) : null}
 
             <Text style={styles.section}>Job details</Text>
-            {jobOffer.source ? <Text style={styles.detail}>Source: {jobOffer.source}</Text> : null}
+            <JobDispatchMetaSection job={jobOffer} compact />
             <Text style={styles.detail}>Service type: {jobOffer.serviceTypeRaw ?? jobOffer.type}</Text>
             {jobOffer.vehicleTypeRequired ? (
               <Text style={styles.detail}>Vehicle required: {jobOffer.vehicleTypeRequired}</Text>

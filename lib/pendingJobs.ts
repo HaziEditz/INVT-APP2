@@ -1,6 +1,7 @@
 import { get, onValue, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { collectJobNotes } from '@/lib/jobNotes';
+import { parseSchedulingMetaFromRecord } from '@/lib/jobDisplayMeta';
 import { isDispatchWindowOpen } from '@/lib/dispatchWindow';
 import { jobMatchesDriverVehicle, serviceTypeToJobType } from '@/lib/jobMatching';
 import { JobOffer, Vehicle } from '@/types';
@@ -29,6 +30,7 @@ export function parsePendingJobNode(id: string, val: Record<string, unknown>): J
   const dropLl = parseLatLng(String(val.DropLatLng ?? val.dropLatLng ?? ''));
   const allNotes = collectJobNotes(val);
   const primaryNote = allNotes.map((n) => n.text).join('\n\n') || undefined;
+  const scheduling = parseSchedulingMetaFromRecord(val);
 
   return {
     id: String(val.BookingId ?? val.bookingRef ?? val.bookingId ?? id),
@@ -49,7 +51,7 @@ export function parsePendingJobNode(id: string, val: Record<string, unknown>): J
       const n = typeof raw === 'number' ? raw : Date.parse(String(raw));
       return Number.isFinite(n) ? n : Date.now();
     })(),
-    source: String(val.BookingSource ?? val.CreatedBy ?? 'dispatch'),
+    source: String(val.BookingSource ?? val.CreatedBy ?? val.source ?? 'dispatch'),
     notes: primaryNote,
     allNotes: allNotes.length ? allNotes : undefined,
     pickupLat: pickLl.lat,
@@ -57,6 +59,7 @@ export function parsePendingJobNode(id: string, val: Record<string, unknown>): J
     dropoffLat: dropLl.lat,
     dropoffLng: dropLl.lng,
     silent: true,
+    ...scheduling,
   };
 }
 

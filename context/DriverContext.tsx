@@ -5,11 +5,19 @@ import { getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { collectJobNotes } from '@/lib/jobNotes';
+import { parseSchedulingMetaFromRecord } from '@/lib/jobDisplayMeta';
 import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, declineJobOffer, DispatchApiError, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import {
+  assertVehicleAvailableForShift,
+  fetchVehicleShiftLocks,
+  mergeVehicleShiftLocks,
+  subscribeVehicleShiftLocks,
+  VehicleShiftLock,
+} from '@/lib/vehicleShiftLock';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -121,7 +129,7 @@ interface DriverContextValue {
   setSelectedVehicleId: (id: string) => void;
   refreshVehicles: () => Promise<void>;
   refreshJobHistory: () => Promise<void>;
-  startShift: (vehicleId?: string) => Promise<void>;
+  startShift: (vehicleId?: string) => Promise<boolean>;
   endShift: () => Promise<void>;
   endShiftAndSignOut: () => Promise<void>;
   endShiftInProgress: boolean;
@@ -149,6 +157,8 @@ interface DriverContextValue {
   recallQueuedOffer: (offerId: string) => Promise<void>;
   startHail: () => Promise<void>;
   endHail: () => Promise<void>;
+  /** Stop a running meter left open with no active job or hail (idle Current tab). */
+  clearOrphanedIdleMeter: () => Promise<void>;
   endTrip: () => Promise<void>;
   pauseMeter: () => void;
   toggleWaitMeter: () => void;
@@ -226,6 +236,7 @@ function extractOfferPayloads(val: unknown): Record<string, unknown>[] {
 }
 
 function parseJobOffer(val: Record<string, unknown>): JobOffer {
+  const scheduling = parseSchedulingMetaFromRecord(val);
   const allNotes = collectJobNotes(val);
   const primaryNote = allNotes.map((n) => n.text).join('\n\n') || undefined;
   const rawFare = val.fare ?? val.jobfare ?? val.jobFare;
@@ -298,6 +309,7 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
       val.originalStatus === 'manual' || val.manualOffer === true || val.manualOffer === 'true'
         ? 'manual'
         : 'pending',
+    ...scheduling,
   };
 }
 
@@ -321,7 +333,7 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
 }
 
 function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unknown>): JobOffer {
-  const patch: Partial<JobOffer> = {};
+  const patch: Partial<JobOffer> = { ...parseSchedulingMetaFromRecord(val) };
   if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
   if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
   if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
@@ -331,7 +343,7 @@ function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unkn
 }
 
 function patchActiveJobFromNotification(job: ActiveJob, val: Record<string, unknown>): ActiveJob {
-  const patch: Partial<ActiveJob> = {};
+  const patch: Partial<ActiveJob> = { ...parseSchedulingMetaFromRecord(val) };
   if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
   if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
   if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
@@ -346,7 +358,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [readyForJobs, setReadyForJobs] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
   const [selectedVehicleId, setSelectedVehicleIdState] = useState('');
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [rawVehicles, setRawVehicles] = useState<Vehicle[]>([]);
+  const [vehicleShiftLocks, setVehicleShiftLocks] = useState<Map<string, VehicleShiftLock>>(new Map());
   const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const [zone, setZone] = useState<ZoneInfo>(EMPTY_ZONE);
   const [companyZones, setCompanyZones] = useState<CompanyZone[]>([]);
@@ -532,7 +545,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const refreshVehicles = async () => {
     if (!driver?.companyId || !driver.uid) {
-      setVehicles([]);
+      setRawVehicles([]);
+      setVehicleShiftLocks(new Map());
       return;
     }
     setVehiclesLoading(true);
@@ -543,16 +557,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         driver.id,
         driver.vehicleId || selectedVehicleId,
       );
-      setVehicles(list);
-      // Pre-select a default for the picker only; shift still requires explicit confirmation.
+      setRawVehicles(list);
+      const locks = await fetchVehicleShiftLocks(
+        driver.companyId,
+        list.map((v) => v.id),
+        driver.id,
+        driver.uid,
+      );
+      setVehicleShiftLocks(locks);
+      // Pre-select first available vehicle for the picker; shift still requires explicit confirm.
       if (!selectedVehicleId) {
+        const merged = mergeVehicleShiftLocks(list, locks);
         const preferred =
-          list.find((v) => v.id === driver.vehicleId?.toUpperCase()) ?? list[0];
+          merged.find((v) => v.id === driver.vehicleId?.toUpperCase() && !v.inUseByOther) ??
+          merged.find((v) => !v.inUseByOther) ??
+          merged[0];
         if (preferred) await setSelectedVehicleId(preferred.id);
       }
     } catch (err) {
       console.warn('[Driver] refreshVehicles failed:', err);
-      setVehicles([]);
+      setRawVehicles([]);
+      setVehicleShiftLocks(new Map());
     } finally {
       setVehiclesLoading(false);
     }
@@ -562,6 +587,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     refreshVehicles().catch((err) => console.error('[Driver] refreshVehicles', err));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.uid, driver?.companyId, driver?.id, driver?.vehicleId], 'Driver-vehicles');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !driver?.id || rawVehicles.length === 0 || shiftActive) return;
+    const ids = rawVehicles.map((v) => v.id);
+    return subscribeVehicleShiftLocks(
+      driver.companyId,
+      ids,
+      driver.id,
+      driver.uid,
+      setVehicleShiftLocks,
+    );
+  }, [driver?.companyId, driver?.id, driver?.uid, shiftActive, rawVehicles], 'Driver-vehicleShiftLocks');
 
   useSafeEffect(() => {
     if (!driver?.companyId) {
@@ -630,6 +667,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const sessionEarnings = sumBreakdown(completedJobs);
   const historyEarnings = sumBreakdown(
     jobHistory.filter((j) => j.status === 'completed').map((j) => ({ fare: j.fare, paymentType: j.paymentType })),
+  );
+  const vehicles = useMemo(
+    () => mergeVehicleShiftLocks(rawVehicles, vehicleShiftLocks),
+    [rawVehicles, vehicleShiftLocks],
   );
   const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
   const activeVehicleBodyType = activeVehicle?.displayType ?? activeVehicle?.bodyType ?? '—';
@@ -1408,13 +1449,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shiftActive, activeJob?.stage, hailActive, presenceStatus, readyForJobs], 'Driver-bg-location-status');
 
-  const startShift = async (vehicleIdOverride?: string) => {
-    if (!driver) return;
+  const startShift = async (vehicleIdOverride?: string): Promise<boolean> => {
+    if (!driver) return false;
 
     const vehicleId = (vehicleIdOverride ?? '').trim().toUpperCase();
     if (!vehicleId) {
       Alert.alert('Vehicle required', 'Select a vehicle and confirm before starting your shift.');
-      return;
+      return false;
     }
 
     if (vehicleId !== selectedVehicleId) {
@@ -1422,22 +1463,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (driver.companyId) {
-      try {
-        const snap = await get(ref(getDatabaseInstance(), `online/${driver.companyId}/${vehicleId}/current`));
-        if (snap.exists()) {
-          const data = snap.val() as Record<string, unknown>;
-          const existingDriverId = String(data.driverid ?? '');
-          const myDriverId = String(driver.id ?? '');
-          if (existingDriverId && existingDriverId !== myDriverId && existingDriverId !== driver.uid) {
-            Alert.alert(
-              'Vehicle in use',
-              `${vehicleId} is on shift with another driver. Contact dispatch if this is wrong.`,
-            );
-            return;
-          }
-        }
-      } catch {
-        // non-blocking
+      const availability = await assertVehicleAvailableForShift(
+        driver.companyId,
+        vehicleId,
+        driver.id,
+        driver.uid,
+      );
+      if (!availability.ok) {
+        Alert.alert('Vehicle in use', availability.message);
+        return false;
       }
     }
 
@@ -1466,7 +1500,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setShiftActive(false);
       shiftActiveRef.current = false;
       await storeData(STORAGE_KEYS.shiftActive, false);
-      return;
+      return false;
     }
 
     console.log('[Shift] scheduling NZTA clock + location (background)');
@@ -1514,6 +1548,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (activeJobRef.current?.id && isValidBookingId(activeJobRef.current.id)) {
       void refreshActiveJobFromServer('shift-start');
     }
+    return true;
   };
 
   const goAway = async () => {
@@ -1620,6 +1655,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         await clearOnlinePresence(driverSnapshot, vehicleId);
       } catch (err) {
         console.warn('[Driver] clearOnlinePresence failed:', err);
+      }
+      if (driverSnapshot.companyId) {
+        update(ref(getDatabaseInstance(), `vehicles/${driverSnapshot.companyId}/${vehicleId}`), {
+          currentDriverId: null,
+        }).catch(() => undefined);
       }
     }
 
@@ -2362,6 +2402,28 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const clearOrphanedIdleMeter = async () => {
+    if (activeJobRef.current || hailActiveRef.current) return;
+    if (!meterRef.current?.running) {
+      if (meterRef.current) {
+        setMeter(null);
+        meterRef.current = null;
+        await storeData(STORAGE_KEYS.meterState, null);
+      }
+      return;
+    }
+    stopMeterTimers();
+    setMeter(null);
+    meterRef.current = null;
+    await storeData(STORAGE_KEYS.meterState, null);
+  };
+
+  useSafeEffect(() => {
+    if (activeJob || hailActive) return;
+    if (!meter?.running) return;
+    void clearOrphanedIdleMeter();
+  }, [activeJob, hailActive, meter?.running], 'Driver-clearOrphanedIdleMeter');
+
   const buildMeterSnapshot = (): MeterState | null => {
     const raw = meterRef.current;
     if (!raw) return null;
@@ -2377,7 +2439,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  const startHail = () => {
+  const startHail = async () => {
     if (!shiftActive) {
       Alert.alert('Start shift', 'Start your shift before hailing a passenger.');
       return;
@@ -2386,33 +2448,90 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('No tariff configured', 'Ask dispatch to set up tariffs for your company in Firebase.');
       return;
     }
+    if (!driver?.companyId) {
+      Alert.alert('Not signed in', 'Sign in again before starting a hail trip.');
+      return;
+    }
 
     setHailPickupAddress('Locating…');
     setHailActive(true);
     hailActiveRef.current = true;
 
-    const m = createInitialMeter(selectedTariff);
-    setMeter(m);
-    meterRef.current = m;
-    storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
-    startMeterWatch();
-
-    if (driver) {
-      void resolveVehicleId().then((vehicleId) => {
-        if (vehicleId && hailActiveRef.current) {
-          writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
-        }
+    let pickup = { address: 'Current location', lat: 0, lng: 0 };
+    await new Promise<void>((resolve) => {
+      void refreshHailPickupLocation((p) => {
+        pickup = p;
+        setHailPickupAddress(p.address);
+        if (p.lat != null) setHailPickupLat(p.lat);
+        if (p.lng != null) setHailPickupLng(p.lng);
+        resolve();
       });
-    }
-
-    void refreshHailPickupLocation((pickup) => {
-      if (!hailActiveRef.current) return;
-      setHailPickupAddress(pickup.address);
-      if (pickup.lat != null && pickup.lng != null) {
-        setHailPickupLat(pickup.lat);
-        setHailPickupLng(pickup.lng);
-      }
     });
+
+    try {
+      const vehicleId = await resolveVehicleId();
+      if (!vehicleId) {
+        throw new Error('No vehicle assigned — select a vehicle before hailing.');
+      }
+
+      const { jobId, updateSeq } = await createHailJobOnDispatch({
+        companyId: driver.companyId,
+        driverId: driver.id,
+        vehicleId,
+        tariffId: selectedTariff.id,
+        pickup,
+        dropoff: pickup,
+      });
+
+      const now = Date.now();
+      const hailJob: ActiveJob = {
+        id: jobId,
+        type: 'Taxi',
+        pickup: pickup.address,
+        dropoff: pickup.address,
+        pickupLat: pickup.lat,
+        pickupLng: pickup.lng,
+        stage: 'onboard',
+        startedAt: now,
+        distanceKm: 0,
+        durationMin: 0,
+        fare: 0,
+        stepTimes: { hailStartedAt: now, onboardAt: now },
+        tariffChanges: [],
+        source: 'hail',
+        createdBy: 'driver',
+        pickupType: 'ASAP',
+        bookedAtMs: now,
+        expiresAt: now + 86400000,
+        updateSeq,
+      };
+
+      setHailActive(true);
+      hailActiveRef.current = true;
+      setActiveJob(hailJob);
+      activeJobIdRef.current = jobId;
+      activeJobRef.current = hailJob;
+      persistActiveJobAsync(hailJob);
+
+      const m = createInitialMeter(selectedTariff);
+      setMeter(m);
+      meterRef.current = m;
+      storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
+      startMeterWatch();
+
+      writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+    } catch (err) {
+      setHailPickupAddress(null);
+      setHailPickupLat(undefined);
+      setHailPickupLng(undefined);
+      setHailActive(false);
+      hailActiveRef.current = false;
+      setActiveJob(null);
+      activeJobIdRef.current = null;
+      activeJobRef.current = null;
+      const msg = err instanceof Error ? err.message : 'Could not register hail trip with dispatch.';
+      Alert.alert('Could not start hail', msg);
+    }
   };
 
   const endHail = async () => {
@@ -2420,43 +2539,77 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const snapshot = buildMeterSnapshot();
     const now = Date.now();
+    const liveJob = activeJobRef.current;
+    const bookingId = liveJob?.id && /^\d+$/.test(String(liveJob.id)) ? liveJob.id : null;
 
     if (meterStopRef.current) {
       meterStopRef.current();
       meterStopRef.current = null;
     }
 
-    const hailJob: ActiveJob = {
-      id: `hail_${snapshot?.startedAt ?? now}`,
-      type: 'Taxi',
-      pickup: hailPickupAddress || 'Street hail',
-      dropoff: hailPickupAddress || 'Street hail',
-      pickupLat: hailPickupLat,
-      pickupLng: hailPickupLng,
-      stage: 'complete',
-      startedAt: snapshot?.startedAt ?? now,
-      distanceKm: snapshot?.distanceKm ?? 0,
-      durationMin: snapshot?.startedAt
-        ? Math.round((now - snapshot.startedAt) / 60000)
-        : 0,
-      fare: snapshot?.fare ?? 0,
-      stepTimes: {
-        hailStartedAt: snapshot?.startedAt ?? now,
-        hailEndedAt: now,
-        completeAt: now,
-      },
-      tariffChanges: snapshot?.tariffChanges ?? [],
-      meterSnapshot: snapshot,
-      source: 'hail',
-      expiresAt: now,
-    };
+    const hailJob: ActiveJob = liveJob
+      ? {
+          ...liveJob,
+          stage: 'complete',
+          pickup: hailPickupAddress || liveJob.pickup,
+          dropoff: hailPickupAddress || liveJob.dropoff,
+          pickupLat: hailPickupLat ?? liveJob.pickupLat,
+          pickupLng: hailPickupLng ?? liveJob.pickupLng,
+          startedAt: snapshot?.startedAt ?? liveJob.startedAt,
+          distanceKm: snapshot?.distanceKm ?? liveJob.distanceKm,
+          durationMin: snapshot?.startedAt
+            ? Math.round((now - snapshot.startedAt) / 60000)
+            : liveJob.durationMin,
+          fare: snapshot?.fare ?? liveJob.fare,
+          stepTimes: {
+            ...liveJob.stepTimes,
+            hailStartedAt: liveJob.stepTimes.hailStartedAt ?? snapshot?.startedAt ?? now,
+            hailEndedAt: now,
+            completeAt: now,
+          },
+          tariffChanges: snapshot?.tariffChanges ?? liveJob.tariffChanges,
+          meterSnapshot: snapshot,
+          expiresAt: now,
+        }
+      : {
+          id: `hail_${snapshot?.startedAt ?? now}`,
+          type: 'Taxi',
+          pickup: hailPickupAddress || 'Street hail',
+          dropoff: hailPickupAddress || 'Street hail',
+          pickupLat: hailPickupLat,
+          pickupLng: hailPickupLng,
+          stage: 'complete',
+          startedAt: snapshot?.startedAt ?? now,
+          distanceKm: snapshot?.distanceKm ?? 0,
+          durationMin: snapshot?.startedAt
+            ? Math.round((now - snapshot.startedAt) / 60000)
+            : 0,
+          fare: snapshot?.fare ?? 0,
+          stepTimes: {
+            hailStartedAt: snapshot?.startedAt ?? now,
+            hailEndedAt: now,
+            completeAt: now,
+          },
+          tariffChanges: snapshot?.tariffChanges ?? [],
+          meterSnapshot: snapshot,
+          source: 'hail',
+          expiresAt: now,
+        };
+
+    if (!bookingId) {
+      console.warn('[Driver] endHail without dispatch booking ID — payment will stay local only');
+    }
 
     setPaymentJob(hailJob);
+    setActiveJob(null);
+    activeJobIdRef.current = null;
+    activeJobRef.current = null;
     setHailActive(false);
     hailActiveRef.current = false;
     setMeter(null);
     meterRef.current = null;
     await storeData(STORAGE_KEYS.meterState, null);
+    await storeData(STORAGE_KEYS.activeJob, null);
   };
 
   const endTrip = async () => {
@@ -2671,6 +2824,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         recallQueuedOffer,
         startHail,
         endHail,
+        clearOrphanedIdleMeter,
         endTrip,
         pauseMeter,
         toggleWaitMeter,

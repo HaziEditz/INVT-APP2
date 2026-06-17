@@ -259,6 +259,55 @@ export async function createPreBooking(payload: Record<string, unknown>) {
   return dispatchPost('/api/pre-booking', payload);
 }
 
+export async function createHailJobOnDispatch(params: {
+  companyId: string;
+  driverId: string;
+  vehicleId: string;
+  tariffId: string;
+  pickup: { address: string; lat?: number; lng?: number };
+  dropoff?: { address: string; lat?: number; lng?: number };
+}): Promise<{ jobId: string; bookingId: number; updateSeq: number }> {
+  const body: Record<string, unknown> = {
+    companyId: params.companyId,
+    source: 'hail',
+    driverId: params.driverId,
+    vehicleId: params.vehicleId,
+    tariffId: params.tariffId,
+    pickup: {
+      address: params.pickup.address,
+      lat: params.pickup.lat ?? 0,
+      lng: params.pickup.lng ?? 0,
+    },
+    dropoff: {
+      address: (params.dropoff ?? params.pickup).address,
+      lat: (params.dropoff ?? params.pickup).lat ?? 0,
+      lng: (params.dropoff ?? params.pickup).lng ?? 0,
+    },
+    passengers: 1,
+  };
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const data = await dispatchPost<{ ok?: boolean; jobId?: string | number; bookingId?: number }>(
+        '/api/job/create',
+        body,
+      );
+      const jobId = String(data.jobId ?? data.bookingId ?? '').trim();
+      if (!jobId || !/^\d+$/.test(jobId)) {
+        throw new Error('Dispatch server did not return a valid booking ID');
+      }
+      return { jobId, bookingId: parseInt(jobId, 10), updateSeq: 1 };
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('Could not create hail job on dispatch');
+}
+
 export async function completeJobPayment(payload: Record<string, unknown>) {
   return driverApiPost('/api/job/complete', payload);
 }

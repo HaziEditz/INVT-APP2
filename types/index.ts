@@ -31,6 +31,9 @@ export interface Vehicle {
   hasFoodService: boolean;
   hasFreightService: boolean;
   isWav: boolean;
+  /** Another driver is currently on shift with this vehicle. */
+  inUseByOther?: boolean;
+  inUseDriverLabel?: string;
 }
 
 export type MainPanelTab = 'offers' | 'current' | 'queue';
@@ -75,6 +78,17 @@ export interface JobOffer {
   postedAt?: number;
   /** Set when promoted from Queue tab after trip ends. */
   fromQueue?: boolean;
+  /** Customer-requested pickup time (unix ms). */
+  pickupTimeMs?: number;
+  /** When the booking entered the system (unix ms). */
+  bookedAtMs?: number;
+  /** ASAP vs pre-booked LATER pickup. */
+  pickupType?: 'ASAP' | 'LATER';
+  /** Who created the booking (CreatedBy / BookingSource detail). */
+  createdBy?: string;
+  dispatchBeforeMinutes?: number;
+  notifyDispatchAt?: string;
+  bookingType?: string;
 }
 
 export interface QueuedOffer extends JobOffer {

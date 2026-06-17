@@ -32,6 +32,10 @@ export function VehiclePickerModal({
   onClose,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const selectable = vehicles.filter((v) => !v.inUseByOther);
+  const selectedVehicle = vehicles.find((v) => v.id === selectedId);
+  const confirmDisabled =
+    !selectedId || loading || !!selectedVehicle?.inUseByOther || selectable.length === 0;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -41,25 +45,52 @@ export function VehiclePickerModal({
           <Text style={styles.subtitle}>You will go online on dispatch as soon as you confirm.</Text>
 
           <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-            {vehicles.map((v) => (
-              <Pressable
-                key={v.id}
-                onPress={() => onSelect(v.id)}
-                style={[styles.row, selectedId === v.id && styles.rowSelected]}
-              >
-                <View>
-                  <Text style={styles.number}>{v.number}</Text>
-                  <Text style={styles.type}>{v.bodyType} · {v.vehicleType}</Text>
-                </View>
-                <Text style={styles.idHint}>{v.id}</Text>
-              </Pressable>
-            ))}
+            {vehicles.length === 0 ? (
+              <Text style={styles.empty}>No vehicles assigned to your account.</Text>
+            ) : null}
+            {vehicles.map((v) => {
+              const locked = !!v.inUseByOther;
+              return (
+                <Pressable
+                  key={v.id}
+                  onPress={() => {
+                    if (!locked) onSelect(v.id);
+                  }}
+                  disabled={locked}
+                  style={[
+                    styles.row,
+                    selectedId === v.id && !locked && styles.rowSelected,
+                    locked && styles.rowLocked,
+                  ]}
+                >
+                  <View style={styles.rowMain}>
+                    <Text style={[styles.number, locked && styles.textMuted]}>{v.number}</Text>
+                    <Text style={[styles.type, locked && styles.typeMuted]}>
+                      {v.bodyType} · {v.vehicleType}
+                    </Text>
+                    {locked ? (
+                      <Text style={styles.inUseLabel}>
+                        In use{v.inUseDriverLabel ? ` · ${v.inUseDriverLabel}` : ''}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <Text style={[styles.idHint, locked && styles.textMuted]}>{v.id}</Text>
+                </Pressable>
+              );
+            })}
           </ScrollView>
+
+          {selectable.length === 0 && vehicles.length > 0 ? (
+            <Text style={styles.allBusy}>
+              All assigned vehicles are currently on shift with another driver. End the other shift
+              or contact dispatch.
+            </Text>
+          ) : null}
 
           <Button
             title={loading ? 'Starting…' : 'Start Shift & Go Online'}
             onPress={onConfirm}
-            disabled={!selectedId || loading}
+            disabled={confirmDisabled}
           />
           <Pressable onPress={onClose} style={styles.cancelBtn} disabled={loading}>
             <Text style={styles.cancelText}>Cancel</Text>
@@ -89,6 +120,7 @@ const styles = StyleSheet.create({
   title: { color: Colors.text, fontSize: 20, fontWeight: '700' },
   subtitle: { color: Colors.textMuted, fontSize: 14, marginTop: 6, marginBottom: 16 },
   list: { maxHeight: 320, marginBottom: 16 },
+  empty: { color: Colors.textMuted, fontSize: 15, textAlign: 'center', paddingVertical: 24 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -100,9 +132,21 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   rowSelected: { borderColor: Colors.accent, backgroundColor: Colors.accent + '18' },
+  rowLocked: { opacity: 0.72, backgroundColor: Colors.surfaceElevated },
+  rowMain: { flex: 1, paddingRight: 8 },
   number: { color: Colors.text, fontSize: 22, fontWeight: '800' },
   type: { color: Colors.accent, fontSize: 15, fontWeight: '600', marginTop: 2 },
+  typeMuted: { color: Colors.textMuted },
+  inUseLabel: { color: Colors.warning, fontSize: 13, fontWeight: '600', marginTop: 6 },
   idHint: { color: Colors.textMuted, fontSize: 12 },
+  textMuted: { color: Colors.textMuted },
+  allBusy: {
+    color: Colors.warning,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
   cancelBtn: { alignItems: 'center', paddingVertical: 14 },
   cancelText: { color: Colors.textMuted, fontSize: 15 },
 });

@@ -1,11 +1,12 @@
 import { Button } from '@/components/Button';
+import { JobDispatchMetaSection } from '@/components/JobDispatchMetaSection';
 import { JobNotesSection } from '@/components/JobNotesSection';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
 import { STAGE_LABELS, JobStage } from '@/types';
-import { Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useRef } from 'react';
 
 const STAGES: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
@@ -17,7 +18,6 @@ function fmtTime(ts?: number) {
 
 export function CurrentTripPanel() {
   const {
-    shiftActive,
     activeJob,
     hailActive,
     hailPickupAddress,
@@ -27,7 +27,6 @@ export function CurrentTripPanel() {
     noShowActiveJob,
     recallJob,
     endTrip,
-    startHail,
     completionBusy,
     completionError,
     clearCompletionError,
@@ -36,18 +35,23 @@ export function CurrentTripPanel() {
   } = useDriver();
 
   const meterRunning = !!meter?.running;
-  const showHailButton = shiftActive && !hailActive && !meterRunning && !activeJob;
+  const highlightArrived = activeJob?.stage === 'pickup' && nearPickup;
+  const pulse = useRef(new Animated.Value(1)).current;
 
-  const onHailPress = () => {
-    if (!shiftActive) {
-      Alert.alert('Off shift', 'Start your shift from Profile or sign in again.');
+  useEffect(() => {
+    if (!highlightArrived) {
+      pulse.setValue(1);
       return;
     }
-    Alert.alert('Start Hail Trip?', 'Begin a street hail trip with the meter running.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Confirm', onPress: () => void startHail() },
-    ]);
-  };
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.55, duration: 700, useNativeDriver: false }),
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: false }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [highlightArrived, pulse]);
 
   const confirmEndTrip = (onConfirm: () => void) => {
     Alert.alert(
@@ -58,50 +62,38 @@ export function CurrentTripPanel() {
     );
   };
 
-  if (hailActive) {
+  /** Hail is registering with dispatch — no activeJob yet. */
+  if (hailActive && !activeJob) {
     return (
-      <View style={styles.panel}>
-        <Text style={styles.title}>Street hail</Text>
-        <Text style={styles.pickupFrom} numberOfLines={3}>
-          Picked up from: {hailPickupAddress || 'Locating address…'}
-        </Text>
-        <Text style={styles.meta}>Started {fmtTime(meter?.startedAt)}</Text>
-        {meterRunning ? (
-          <Button
-            title={completionBusy ? 'Ending…' : 'End Trip'}
-            variant="danger"
-            disabled={completionBusy}
-            onPress={() => confirmEndTrip(() => void endTrip())}
-          />
-        ) : null}
-        {completionError ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{completionError}</Text>
-            <Button title="Dismiss" variant="secondary" onPress={clearCompletionError} />
-          </View>
-        ) : null}
+      <View style={styles.panelActive}>
+        <ScrollView
+          style={styles.detailsScroll}
+          contentContainerStyle={styles.detailsContent}
+          showsVerticalScrollIndicator
+          nestedScrollEnabled
+        >
+          <Text style={styles.title}>Street hail</Text>
+          <Text style={styles.metaLine}>Setting up trip on dispatch…</Text>
+          <Text style={styles.pickupFrom} numberOfLines={3}>
+            Picked up from: {hailPickupAddress || 'Locating address…'}
+          </Text>
+        </ScrollView>
       </View>
     );
   }
 
   if (!activeJob) {
-    return (
-      <View style={styles.empty}>
-        <Text style={styles.emptyText}>No active trip.</Text>
-        <Text style={styles.emptySub}>Use HAIL for street jobs or take an offer from the Offers tab.</Text>
-        {showHailButton ? (
-          <Pressable style={styles.hailBtn} onPress={onHailPress}>
-            <Text style={styles.hailBtnText}>HAIL PASSENGER</Text>
-          </Pressable>
-        ) : null}
-      </View>
-    );
+    // Idle Current UI is IdleCurrentSection in index.tsx — not rendered here when !hasCurrent.
+    return null;
   }
 
+  const isHailTrip = hailActive || activeJob.source === 'hail';
   const idx = STAGES.indexOf(activeJob.stage);
   const nextStage = STAGES[Math.min(idx + 1, STAGES.length - 1)];
   const nextLabel = STAGE_LABELS[nextStage];
   const st = activeJob.stepTimes;
+  const showEndTrip =
+    meterRunning || (isHailTrip && (activeJob.stage === 'onboard' || !!st.onboardAt || !!st.hailStartedAt));
   const preArrival =
     activeJob.stage === 'pickup' ||
     (!st.arrivedAt && !st.onboardAt && activeJob.stage !== 'onboard' && activeJob.stage !== 'complete');
@@ -122,6 +114,7 @@ export function CurrentTripPanel() {
         };
   const canNavigate = canOpenNavigation(navTarget);
   const navTitle = activeJob.stage === 'onboard' ? 'Navigate to drop-off' : 'Navigate to pickup';
+  const estFare = activeJob.fixedFare ?? activeJob.estimatedFare ?? (activeJob.fare > 0 ? activeJob.fare : undefined);
 
   const onAdvance = async () => {
     if (nextStage === 'complete') {
@@ -130,24 +123,6 @@ export function CurrentTripPanel() {
     }
     await advanceStage();
   };
-
-  const highlightArrived = activeJob.stage === 'pickup' && nearPickup;
-  const pulse = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (!highlightArrived) {
-      pulse.setValue(1);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 0.55, duration: 700, useNativeDriver: false }),
-        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: false }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [highlightArrived, pulse]);
 
   const stageLabel = (s: JobStage) => {
     if (s === 'pickup') return tripOnTheWay ? 'On the way' : 'Accepted';
@@ -159,7 +134,7 @@ export function CurrentTripPanel() {
       <ScrollView
         style={styles.detailsScroll}
         contentContainerStyle={styles.detailsContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
         nestedScrollEnabled
       >
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
@@ -175,22 +150,66 @@ export function CurrentTripPanel() {
           <JobTypeBadge type={activeJob.type} />
           <Text style={styles.jobId}>Job #{activeJob.id}</Text>
         </View>
-        <Text style={styles.addr} numberOfLines={2}>
-          ↑ {activeJob.pickup}
-        </Text>
-        <Text style={styles.addr} numberOfLines={2}>
-          ↓ {activeJob.dropoff}
-        </Text>
+
+        {isHailTrip ? (
+          <>
+            <Text style={styles.hailTitle}>Street hail</Text>
+            <Text style={styles.pickupFrom} numberOfLines={3}>
+              Picked up from: {hailPickupAddress || activeJob.pickup || 'Current location'}
+            </Text>
+            {meter?.startedAt ? (
+              <Text style={styles.metaLine}>Started {fmtTime(meter.startedAt)}</Text>
+            ) : null}
+          </>
+        ) : null}
+
+        {estFare != null ? (
+          <Text style={styles.fareEst}>Est. fare ${estFare.toFixed(2)}</Text>
+        ) : null}
+        {activeJob.estimatedDistanceKm != null ? (
+          <Text style={styles.metaLine}>Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km</Text>
+        ) : null}
+        {activeJob.paymentType ? (
+          <Text style={styles.metaLine}>Payment: {activeJob.paymentType}</Text>
+        ) : null}
+
+        <View style={styles.addrBlock}>
+          <Text style={styles.addrLabel}>Pickup</Text>
+          <Text style={styles.addr} numberOfLines={3}>
+            {activeJob.pickup}
+          </Text>
+        </View>
+        <View style={styles.addrBlock}>
+          <Text style={styles.addrLabel}>Dropoff</Text>
+          <Text style={styles.addr} numberOfLines={3}>
+            {activeJob.dropoff}
+          </Text>
+        </View>
+
         {activeJob.passengerName ? (
-          <Text style={styles.meta} numberOfLines={1}>
-            {activeJob.passengerName} · {activeJob.passengerPhone ?? '—'}
+          <Text style={styles.metaLine} numberOfLines={2}>
+            Passenger: {activeJob.passengerName}
+            {activeJob.passengerPhone ? ` · ${activeJob.passengerPhone}` : ''}
           </Text>
         ) : null}
+        {activeJob.passengerEmail ? (
+          <Text style={styles.metaLine} numberOfLines={1}>
+            Email: {activeJob.passengerEmail}
+          </Text>
+        ) : null}
+        {activeJob.passengers != null ? (
+          <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
+        ) : null}
+        {activeJob.dispatcherName ? (
+          <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
+        ) : null}
+
+        <JobDispatchMetaSection job={activeJob} compact />
         <JobNotesSection job={activeJob} compact />
       </ScrollView>
 
       <View style={styles.actionBar}>
-        {meterRunning ? (
+        {showEndTrip ? (
           <Button
             title={completionBusy ? 'Ending…' : 'End Trip'}
             variant="danger"
@@ -219,7 +238,7 @@ export function CurrentTripPanel() {
               onPress={() => showNavigationPicker(navTarget, navTitle)}
             />
           ) : null}
-          {!meterRunning && preArrival ? (
+          {!showEndTrip && !isHailTrip && preArrival ? (
             <Button
               title="Recall"
               variant="secondary"
@@ -233,7 +252,7 @@ export function CurrentTripPanel() {
               }}
             />
           ) : null}
-          {!meterRunning && postArrival ? (
+          {!showEndTrip && !isHailTrip && postArrival ? (
             <>
               <Button
                 title="No Show"
@@ -271,6 +290,7 @@ export function CurrentTripPanel() {
 
 const styles = StyleSheet.create({
   panel: {
+    flex: 1,
     backgroundColor: Colors.surface,
     padding: 12,
   },
@@ -282,11 +302,13 @@ const styles = StyleSheet.create({
   detailsScroll: {
     flex: 1,
     minHeight: 0,
+    backgroundColor: Colors.surface,
   },
   detailsContent: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 12,
+    gap: 4,
   },
   actionBar: {
     flexShrink: 0,
@@ -308,20 +330,9 @@ const styles = StyleSheet.create({
     minWidth: 96,
   },
   title: { color: Colors.text, fontSize: 18, fontWeight: '800' },
+  hailTitle: { color: Colors.accent, fontSize: 16, fontWeight: '800', marginTop: 4 },
   pickupFrom: { color: Colors.text, fontSize: 15, fontWeight: '600', marginTop: 8, lineHeight: 20 },
-  empty: { padding: 20, alignItems: 'center', gap: 8 },
-  emptyText: { color: Colors.textMuted, fontSize: 15, textAlign: 'center' },
-  emptySub: { color: Colors.textMuted, fontSize: 13, marginTop: 8, textAlign: 'center' },
-  hailBtn: {
-    marginTop: 12,
-    alignSelf: 'stretch',
-    backgroundColor: Colors.accent,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  hailBtnText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.5 },
-  stageScroll: { marginBottom: 6, flexGrow: 0 },
+  stageScroll: { marginBottom: 8, flexGrow: 0 },
   stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 10 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.border, marginRight: 5 },
   dotOn: { backgroundColor: Colors.accent },
@@ -334,7 +345,22 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   jobId: { color: Colors.textMuted, fontSize: 12, fontWeight: '700' },
-  addr: { color: Colors.text, fontSize: 14, lineHeight: 19, marginBottom: 2 },
+  fareEst: {
+    color: Colors.success,
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  metaLine: { color: Colors.textMuted, fontSize: 13, lineHeight: 18, marginBottom: 2 },
+  addrBlock: { marginTop: 6, marginBottom: 2 },
+  addrLabel: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  addr: { color: Colors.text, fontSize: 15, lineHeight: 21, fontWeight: '600' },
   meta: { color: Colors.textMuted, fontSize: 12, marginTop: 2, marginBottom: 4 },
   errorBox: {
     backgroundColor: Colors.warning + '22',

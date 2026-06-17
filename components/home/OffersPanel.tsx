@@ -1,4 +1,5 @@
 import { Button } from '@/components/Button';
+import { JobDispatchMetaSection } from '@/components/JobDispatchMetaSection';
 import { JobNotesSection } from '@/components/JobNotesSection';
 import { hasJobNotes } from '@/lib/jobNotes';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
@@ -60,6 +61,7 @@ export function OffersPanel() {
                 {o.passengerPhone ? ` · ${o.passengerPhone}` : ''}
               </Text>
             ) : null}
+            <JobDispatchMetaSection job={o} compact />
             {o.vehicleTypeRequired ? <Text style={styles.meta}>Vehicle: {o.vehicleTypeRequired}</Text> : null}
             {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
             {fare != null ? <Text style={styles.fare}>Est. fare ${fare.toFixed(2)}</Text> : null}

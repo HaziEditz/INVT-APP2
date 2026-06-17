@@ -2,10 +2,11 @@ import { CurrentTripPanel } from '@/components/home/CurrentTripPanel';
 import { FullScreenMapModal } from '@/components/home/FullScreenMapModal';
 import { HomeMainTabs } from '@/components/home/HomeMainTabs';
 import { HomeStatusBar } from '@/components/home/HomeStatusBar';
-import { MeterOverlay } from '@/components/home/MeterOverlay';
+import { IdleCurrentSection } from '@/components/home/IdleCurrentSection';
 import { OffersPanel } from '@/components/home/OffersPanel';
 import { QueuePanel } from '@/components/home/QueuePanel';
 import { TariffPicker } from '@/components/home/TariffPicker';
+import { TripToolsBar } from '@/components/home/TripToolsBar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MapErrorFallback } from '@/components/MapErrorFallback';
 import JobMap from '@/components/JobMap';
@@ -34,7 +35,6 @@ export default function MainScreen() {
     selectedTariff,
     setSelectedTariff,
     tariffLocked,
-    broadcastOffers,
     pendingOffers,
     queuedOffers,
     offersBadgeCount,
@@ -54,7 +54,7 @@ export default function MainScreen() {
 
   const hasCurrent = !!activeJob || hailActive;
   const meterRunning = !!meter?.running;
-  const compactMap = hasCurrent;
+  const mapShowsRoute = !!activeJob || hailActive;
 
   useSafeEffect(() => {
     if (!firebaseUser) return;
@@ -89,8 +89,6 @@ export default function MainScreen() {
     prevQueueLenRef.current = queuedOffers.length;
   }, [hasCurrent, queuedOffers.length], 'MainScreen-autoTab');
 
-  const mapShowsRoute = !!activeJob || hailActive;
-
   if (profileLoading && !driver) {
     return (
       <View style={styles.loadingRoot}>
@@ -100,102 +98,99 @@ export default function MainScreen() {
     );
   }
 
+  const mapZones = companyZones.map((z) => ({
+    name: z.name,
+    active: z.active,
+    boundary: z.boundary,
+  }));
+
   return (
     <View style={styles.root}>
       <ErrorBoundary name="HomeTopBar">
         <HomeStatusBar />
       </ErrorBoundary>
 
-      <View style={[styles.mapFlex, compactMap && styles.mapCompact]}>
-        <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
-          <JobMap
-            compact={compactMap}
-            pickupLat={activeJob?.pickupLat}
-            pickupLng={activeJob?.pickupLng}
-            dropoffLat={activeJob?.dropoffLat}
-            dropoffLng={activeJob?.dropoffLng}
-            showRoute={mapShowsRoute}
-            showsUserLocation={shiftActive && !paymentJob}
-            zones={companyZones.map((z) => ({
-              name: z.name,
-              active: z.active,
-              boundary: z.boundary,
-            }))}
+      <View style={[styles.body, hasCurrent && styles.bodyTrip]}>
+        <View style={[styles.mapSection, hasCurrent && styles.mapSectionTrip]}>
+          <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
+            <JobMap
+              compact={hasCurrent}
+              pickupLat={activeJob?.pickupLat}
+              pickupLng={activeJob?.pickupLng}
+              dropoffLat={activeJob?.dropoffLat}
+              dropoffLng={activeJob?.dropoffLng}
+              showRoute={mapShowsRoute}
+              showsUserLocation={shiftActive && !paymentJob}
+              zones={mapZones}
+            />
+          </ErrorBoundary>
+
+          <Pressable
+            style={styles.expandBtn}
+            onPress={() => setMapExpanded(true)}
+            accessibilityLabel="Expand map"
+          >
+            <Text style={styles.expandIcon}>⛶</Text>
+          </Pressable>
+        </View>
+
+        <View style={[styles.workSection, hasCurrent ? styles.workSectionTrip : styles.workSectionIdle]}>
+          {hasCurrent ? (
+            <TripToolsBar
+              meter={meterRunning && meter ? meter : null}
+              onPause={pauseMeter}
+              tariffs={tariffs}
+              selected={selectedTariff}
+              tariffOpen={tariffOpen}
+              tariffLocked={tariffLocked}
+              onTariffOpen={() => !tariffLocked && setTariffOpen(true)}
+              onTariffClose={() => setTariffOpen(false)}
+              onTariffSelect={setSelectedTariff}
+            />
+          ) : (
+            <TariffPicker
+              tariffs={tariffs}
+              selected={selectedTariff}
+              open={tariffOpen}
+              locked={tariffLocked}
+              onOpen={() => !tariffLocked && setTariffOpen(true)}
+              onClose={() => setTariffOpen(false)}
+              onSelect={setSelectedTariff}
+            />
+          )}
+
+          <HomeMainTabs
+            active={mainTab}
+            offersCount={offersBadgeCount || pendingOffers.length}
+            hasCurrent={hasCurrent}
+            queueCount={queuedOffers.length}
+            onChange={setMainTab}
           />
-        </ErrorBoundary>
 
-        <Pressable
-          style={styles.expandBtn}
-          onPress={() => setMapExpanded(true)}
-          accessibilityLabel="Expand map"
-        >
-          <Text style={styles.expandIcon}>⛶</Text>
-        </Pressable>
+          {/*
+            IDLE HAIL REGRESSION GUARD — IdleCurrentSection (text + Pressable) must stay
+            OUTSIDE panelHostIdle. Do not move back into CurrentTripPanel flex:1 empty
+            state: flex centering + panelHost flex:1 left the button off-screen/invisible
+            while only the helper text showed (black gap = Colors.background below panel).
+          */}
+          {!hasCurrent && mainTab === 'current' ? <IdleCurrentSection /> : null}
 
-        {meterRunning && meter && !compactMap ? (
-          <View style={styles.meterOverlayWrap} pointerEvents="box-none">
-            <MeterOverlay meter={meter} onPause={pauseMeter} />
-          </View>
-        ) : null}
-      </View>
-
-      <View
-        style={[
-          styles.bottomChrome,
-          compactMap ? styles.bottomChromeTrip : styles.bottomChromeIdle,
-        ]}
-      >
-        {compactMap ? (
-          <View style={styles.tripChromeStrip}>
-            {meterRunning && meter ? (
-              <MeterOverlay meter={meter} onPause={pauseMeter} layout="strip" />
-            ) : (
-              <TariffPicker
-                tariffs={tariffs}
-                selected={selectedTariff}
-                open={tariffOpen}
-                locked={tariffLocked}
-                compact
-                strip
-                onOpen={() => !tariffLocked && setTariffOpen(true)}
-                onClose={() => setTariffOpen(false)}
-                onSelect={setSelectedTariff}
-              />
+          <ErrorBoundary name="MainPanel">
+            {!hasCurrent && mainTab === 'current' ? null : (
+              <View style={hasCurrent ? styles.panelHostTrip : styles.panelHostIdle}>
+                {mainTab === 'offers' ? <OffersPanel /> : null}
+                {mainTab === 'current' && hasCurrent ? <CurrentTripPanel /> : null}
+                {mainTab === 'queue' ? <QueuePanel /> : null}
+              </View>
             )}
-          </View>
-        ) : (
-          <TariffPicker
-            tariffs={tariffs}
-            selected={selectedTariff}
-            open={tariffOpen}
-            locked={tariffLocked}
-            onOpen={() => !tariffLocked && setTariffOpen(true)}
-            onClose={() => setTariffOpen(false)}
-            onSelect={setSelectedTariff}
-          />
-        )}
+          </ErrorBoundary>
 
-        <HomeMainTabs
-          active={mainTab}
-          offersCount={offersBadgeCount || pendingOffers.length}
-          hasCurrent={hasCurrent}
-          queueCount={queuedOffers.length}
-          onChange={setMainTab}
-        />
-
-        <ErrorBoundary name="MainPanel">
-          <View style={compactMap ? styles.panelWrapTrip : styles.panelWrapIdle}>
-            {mainTab === 'offers' ? <OffersPanel /> : null}
-            {mainTab === 'current' ? <CurrentTripPanel /> : null}
-            {mainTab === 'queue' ? <QueuePanel /> : null}
-          </View>
-        </ErrorBoundary>
-
-        {!shiftActive ? (
-          <Text style={styles.offHint}>
-            You are off shift. Start a shift from Profile or vehicle selection.
-          </Text>
-        ) : null}
+          {!shiftActive ? (
+            <Text style={styles.offHint}>
+              You are off shift. Start a shift from Profile or vehicle selection.
+            </Text>
+          ) : null}
+        </View>
       </View>
 
       <FullScreenMapModal
@@ -206,11 +201,7 @@ export default function MainScreen() {
         showMeter={meterRunning && mapExpanded}
         showRoute={mapShowsRoute}
         showsUserLocation={shiftActive && !paymentJob}
-        zones={companyZones.map((z) => ({
-          name: z.name,
-          active: z.active,
-          boundary: z.boundary,
-        }))}
+        zones={mapZones}
         onPause={pauseMeter}
       />
     </View>
@@ -227,14 +218,23 @@ const styles = StyleSheet.create({
   },
   loadingText: { color: Colors.textMuted, fontSize: 16 },
   root: { flex: 1, backgroundColor: Colors.background },
-  mapFlex: { flex: 1, position: 'relative', minHeight: 120 },
-  mapCompact: {
-    flex: 0,
-    flexGrow: 0,
-    height: 120,
+  body: {
+    flex: 1,
+    minHeight: 0,
+  },
+  bodyTrip: {
+    flexDirection: 'column',
+  },
+  mapSection: {
+    flex: 1,
     minHeight: 120,
-    maxHeight: 120,
+    position: 'relative',
     overflow: 'hidden',
+  },
+  mapSectionTrip: {
+    flex: 4,
+    minHeight: '28%',
+    maxHeight: '42%',
   },
   expandBtn: {
     position: 'absolute',
@@ -251,42 +251,35 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   expandIcon: { color: Colors.accent, fontSize: 22, fontWeight: '700' },
-  meterOverlayWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 10,
-    maxHeight: '20%',
-    justifyContent: 'flex-end',
-  },
-  bottomChrome: {
+  workSection: {
     flexShrink: 0,
+    flexDirection: 'column',
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.background,
   },
-  bottomChromeIdle: {
-    maxHeight: '46%',
-  },
-  bottomChromeTrip: {
+  /** Idle (no trip): bounded height so map keeps room. */
+  workSectionIdle: {
     flex: 1,
+    minHeight: '32%',
+    maxHeight: '52%',
+  },
+  workSectionTrip: {
+    flex: 6,
     flexShrink: 1,
     minHeight: 0,
+    maxHeight: '100%',
   },
-  tripChromeStrip: {
-    flexShrink: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    backgroundColor: Colors.surface,
-  },
-  panelWrapIdle: {
-    maxHeight: 280,
-    minHeight: 200,
-  },
-  panelWrapTrip: {
+  /** Offers/Queue when idle — Current idle UI is IdleCurrentSection above, not here. */
+  panelHostIdle: {
     flex: 1,
     minHeight: 0,
+    backgroundColor: Colors.surface,
+  },
+  panelHostTrip: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: Colors.surface,
   },
   offHint: {
     color: Colors.textMuted,

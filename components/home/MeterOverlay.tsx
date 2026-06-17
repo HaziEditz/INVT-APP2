@@ -6,8 +6,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 type Props = {
   meter: MeterState;
   onPause: () => void;
-  /** overlay = bottom of full map; strip = inline under compact map during trip */
-  layout?: 'overlay' | 'strip';
+  /** overlay = full map modal; strip = legacy inline; trip = prominent bar during active trip */
+  layout?: 'overlay' | 'strip' | 'trip';
 };
 
 function formatClock(ms: number) {
@@ -29,7 +29,43 @@ export function MeterOverlay({ meter, onPause, layout = 'overlay' }: Props) {
   const breakdown = meter.breakdown;
   const waitMin = breakdown.waitingMinutes;
   const modeLabel = meter.mode === 'moving' ? 'Moving' : 'Waiting';
+  const trip = layout === 'trip';
   const strip = layout === 'strip';
+
+  if (trip) {
+    return (
+      <View style={styles.tripBox}>
+        <View style={styles.tripTop}>
+          <View style={styles.tripFareCol}>
+            <Text style={styles.tripFare}>${meter.fare.toFixed(2)}</Text>
+            <Text style={[styles.tripMode, meter.mode === 'moving' ? styles.modeMoving : styles.modeWaiting]}>
+              {modeLabel}
+            </Text>
+          </View>
+          <Pressable
+            style={[styles.tripPauseBtn, meter.paused && styles.pauseBtnActive]}
+            onPress={onPause}
+          >
+            <Text style={styles.tripPauseText}>{meter.paused ? 'RESUME' : 'PAUSE'}</Text>
+          </Pressable>
+        </View>
+        <View style={styles.tripStatsRow}>
+          <Text style={styles.tripStat}>{meter.distanceKm.toFixed(2)} km</Text>
+          <Text style={styles.tripSep}>·</Text>
+          <Text style={styles.tripStat}>wait {waitMin.toFixed(1)}m</Text>
+          <Text style={styles.tripSep}>·</Text>
+          <Text style={styles.tripStat}>trip {formatClock(tripMs)}</Text>
+        </View>
+        <View style={styles.tripStatsRow}>
+          <Text style={styles.tripBreakdown}>Flag ${breakdown.flagFall.toFixed(2)}</Text>
+          <Text style={styles.tripSep}>·</Text>
+          <Text style={styles.tripBreakdown}>Dist ${breakdown.distanceCharge.toFixed(2)}</Text>
+          <Text style={styles.tripSep}>·</Text>
+          <Text style={styles.tripBreakdown}>Wait ${breakdown.waitingCharge.toFixed(2)}</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.box, strip && styles.boxStrip]}>
@@ -70,6 +106,71 @@ export function MeterOverlay({ meter, onPause, layout = 'overlay' }: Props) {
 }
 
 const styles = StyleSheet.create({
+  tripBox: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 6,
+  },
+  tripTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  tripFareCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  tripFare: {
+    color: Colors.success,
+    fontSize: 36,
+    fontWeight: '900',
+    lineHeight: 40,
+    letterSpacing: -0.5,
+  },
+  tripMode: {
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  tripPauseBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    flexShrink: 0,
+  },
+  tripPauseText: {
+    color: Colors.text,
+    fontWeight: '800',
+    fontSize: 13,
+    letterSpacing: 0.5,
+  },
+  tripStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tripStat: {
+    color: Colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  tripBreakdown: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  tripSep: {
+    color: Colors.border,
+    fontSize: 12,
+  },
   box: {
     backgroundColor: Colors.surface + 'F0',
     borderRadius: 10,
