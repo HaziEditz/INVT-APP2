@@ -54,6 +54,7 @@ export default function MainScreen() {
 
   const hasCurrent = !!activeJob || hailActive;
   const meterRunning = !!meter?.running;
+  const compactMap = hasCurrent;
 
   useSafeEffect(() => {
     if (!firebaseUser) return;
@@ -105,7 +106,7 @@ export default function MainScreen() {
         <HomeStatusBar />
       </ErrorBoundary>
 
-      <View style={styles.mapFlex}>
+      <View style={[styles.mapFlex, compactMap && styles.mapCompact]}>
         <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
           <JobMap
             pickupLat={activeJob?.pickupLat}
@@ -137,12 +138,13 @@ export default function MainScreen() {
         ) : null}
       </View>
 
-      <View style={styles.bottomChrome}>
+      <View style={[styles.bottomChrome, compactMap && styles.bottomChromeTrip]}>
         <TariffPicker
           tariffs={tariffs}
           selected={selectedTariff}
           open={tariffOpen}
           locked={tariffLocked}
+          compact={compactMap}
           onOpen={() => !tariffLocked && setTariffOpen(true)}
           onClose={() => setTariffOpen(false)}
           onSelect={setSelectedTariff}
@@ -201,6 +203,13 @@ const styles = StyleSheet.create({
   loadingText: { color: Colors.textMuted, fontSize: 16 },
   root: { flex: 1, backgroundColor: Colors.background },
   mapFlex: { flex: 1, position: 'relative', minHeight: 120 },
+  mapCompact: {
+    flex: 0,
+    flexGrow: 0,
+    height: 120,
+    minHeight: 120,
+    maxHeight: 120,
+  },
   expandBtn: {
     position: 'absolute',
     top: 10,
@@ -227,13 +236,18 @@ const styles = StyleSheet.create({
   },
   bottomChrome: {
     flexShrink: 0,
-    maxHeight: '46%',
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.background,
   },
+  bottomChromeTrip: {
+    flex: 1,
+    flexShrink: 1,
+    minHeight: 0,
+  },
   panelWrap: {
-    maxHeight: 280,
+    flex: 1,
+    minHeight: 0,
   },
   offHint: {
     color: Colors.textMuted,

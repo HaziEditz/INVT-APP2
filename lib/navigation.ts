@@ -39,9 +39,17 @@ export function showNavigationPicker(target: NavTarget, title = 'Navigate') {
     Alert.alert('Navigate', 'No destination available for this job.');
     return;
   }
-  Alert.alert(title, 'Open turn-by-turn directions in:', [
-    { text: 'Google Maps', onPress: () => openGoogleMapsNavigation(target) },
-    { text: 'Waze', onPress: () => openWazeNavigation(target) },
+  const returnHint =
+    'Turn-by-turn opens in Google Maps or Waze. Your job stays active here — use the app switcher to return and tap Arrived / On Board when ready.';
+  Alert.alert(title, returnHint, [
+    {
+      text: 'Google Maps',
+      onPress: () => openGoogleMapsNavigation(target),
+    },
+    {
+      text: 'Waze',
+      onPress: () => openWazeNavigation(target),
+    },
     { text: 'Cancel', style: 'cancel' },
   ]);
 }

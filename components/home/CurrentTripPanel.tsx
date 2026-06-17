@@ -118,6 +118,7 @@ export function CurrentTripPanel() {
           label: activeJob.pickup,
         };
   const canNavigate = canOpenNavigation(navTarget);
+  const navTitle = activeJob.stage === 'onboard' ? 'Navigate to drop-off' : 'Navigate to pickup';
 
   const onAdvance = async () => {
     if (nextStage === 'complete') {
@@ -128,22 +129,74 @@ export function CurrentTripPanel() {
   };
 
   return (
-    <ScrollView style={styles.panel} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
-        {STAGES.map((s, i) => (
-          <View key={s} style={styles.stageChip}>
-            <View style={[styles.dot, i <= idx && styles.dotOn]} />
-            <Text style={[styles.stageText, i <= idx && styles.stageOn]}>{STAGE_LABELS[s]}</Text>
-          </View>
-        ))}
+    <View style={styles.panelActive}>
+      <ScrollView
+        style={styles.detailsScroll}
+        contentContainerStyle={styles.detailsContent}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
+      >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
+          {STAGES.map((s, i) => (
+            <View key={s} style={styles.stageChip}>
+              <View style={[styles.dot, i <= idx && styles.dotOn]} />
+              <Text style={[styles.stageText, i <= idx && styles.stageOn]}>{STAGE_LABELS[s]}</Text>
+            </View>
+          ))}
+        </ScrollView>
+
+        <View style={styles.summaryRow}>
+          <JobTypeBadge type={activeJob.type} />
+          <Text style={styles.jobId}>Job #{activeJob.id}</Text>
+        </View>
+        <Text style={styles.addr} numberOfLines={2}>
+          ↑ {activeJob.pickup}
+        </Text>
+        <Text style={styles.addr} numberOfLines={2}>
+          ↓ {activeJob.dropoff}
+        </Text>
+        {activeJob.passengerName ? (
+          <Text style={styles.meta} numberOfLines={1}>
+            {activeJob.passengerName} · {activeJob.passengerPhone ?? '—'}
+          </Text>
+        ) : null}
+        <JobNotesSection job={activeJob} compact />
       </ScrollView>
 
-      {!meterRunning && (preArrival || postArrival) ? (
-        <View style={styles.lifecycleRow}>
-          {preArrival ? (
+      <View style={styles.actionBar}>
+        {meterRunning ? (
+          <Button
+            title={completionBusy ? 'Ending…' : 'End Trip'}
+            variant="danger"
+            disabled={completionBusy}
+            compact
+            onPress={() => confirmEndTrip(() => void endTrip())}
+          />
+        ) : (
+          <Button
+            title={completionBusy ? 'Please wait…' : nextLabel}
+            onPress={onAdvance}
+            disabled={completionBusy}
+            compact
+          />
+        )}
+
+        <View style={styles.secondaryRow}>
+          {canNavigate ? (
+            <Button
+              title="Navigate"
+              variant="secondary"
+              compact
+              style={styles.secondaryBtn}
+              onPress={() => showNavigationPicker(navTarget, navTitle)}
+            />
+          ) : null}
+          {!meterRunning && preArrival ? (
             <Button
               title="Recall"
               variant="secondary"
+              compact
+              style={styles.secondaryBtn}
               onPress={() => {
                 Alert.alert('Recall job?', 'Return this job to dispatch (before pickup arrival).', [
                   { text: 'Back', style: 'cancel' },
@@ -152,12 +205,20 @@ export function CurrentTripPanel() {
               }}
             />
           ) : null}
-          {postArrival ? (
+          {!meterRunning && postArrival ? (
             <>
-              <Button title="No Show" variant="secondary" onPress={noShowActiveJob} />
+              <Button
+                title="No Show"
+                variant="secondary"
+                compact
+                style={styles.secondaryBtn}
+                onPress={noShowActiveJob}
+              />
               <Button
                 title="Cancel"
                 variant="danger"
+                compact
+                style={styles.secondaryBtn}
                 onPress={() => {
                   Alert.alert('Cancel job?', 'This permanently closes the job.', [
                     { text: 'Back', style: 'cancel' },
@@ -168,75 +229,56 @@ export function CurrentTripPanel() {
             </>
           ) : null}
         </View>
-      ) : null}
 
-      <Text style={styles.times}>
-        Accepted {fmtTime(st.acceptedAt)} · Arrived {fmtTime(st.arrivedAt)} · On board {fmtTime(st.onboardAt)} · Done{' '}
-        {fmtTime(st.completeAt)}
-      </Text>
-
-      <JobTypeBadge type={activeJob.type} />
-      <Text style={styles.jobId}>Job #{activeJob.id}</Text>
-      <Text style={styles.addr} numberOfLines={2}>
-        ↑ {activeJob.pickup}
-      </Text>
-      <Text style={styles.addr} numberOfLines={2}>
-        ↓ {activeJob.dropoff}
-      </Text>
-      {activeJob.passengerName ? (
-        <Text style={styles.meta}>
-          {activeJob.passengerName} · {activeJob.passengerPhone ?? '—'}
-        </Text>
-      ) : null}
-      <JobNotesSection job={activeJob} compact />
-
-      <View style={styles.actions}>
-        {canNavigate ? (
-          <Button
-            title="Navigate"
-            variant="secondary"
-            onPress={() =>
-              showNavigationPicker(
-                navTarget,
-                activeJob.stage === 'onboard' ? 'Navigate to drop-off' : 'Navigate to pickup',
-              )
-            }
-          />
-        ) : null}
-        {meterRunning ? (
-          <Button
-            title={completionBusy ? 'Ending…' : 'End Trip'}
-            variant="danger"
-            disabled={completionBusy}
-            onPress={() => confirmEndTrip(() => void endTrip())}
-          />
-        ) : (
-          <Button
-            title={completionBusy ? 'Please wait…' : nextLabel}
-            onPress={onAdvance}
-            disabled={completionBusy}
-          />
-        )}
         {completionError ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{completionError}</Text>
-            <Button title="Dismiss" variant="secondary" onPress={clearCompletionError} />
+            <Button title="Dismiss" variant="secondary" compact onPress={clearCompletionError} />
           </View>
         ) : null}
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   panel: {
     backgroundColor: Colors.surface,
+    padding: 12,
+  },
+  panelActive: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    minHeight: 0,
+  },
+  detailsScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  detailsContent: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  actionBar: {
+    flexShrink: 0,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 10,
+    gap: 8,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
-    padding: 12,
-    maxHeight: 420,
+    backgroundColor: Colors.surface,
   },
-  lifecycleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  secondaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  secondaryBtn: {
+    flex: 1,
+    minWidth: 96,
+  },
   title: { color: Colors.text, fontSize: 18, fontWeight: '800' },
   pickupFrom: { color: Colors.text, fontSize: 15, fontWeight: '600', marginTop: 8, lineHeight: 20 },
   empty: { padding: 20, alignItems: 'center', gap: 8 },
@@ -251,17 +293,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   hailBtnText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.5 },
-  stageScroll: { marginBottom: 8 },
-  stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.border, marginRight: 6 },
+  stageScroll: { marginBottom: 6, flexGrow: 0 },
+  stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 10 },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.border, marginRight: 5 },
   dotOn: { backgroundColor: Colors.accent },
-  stageText: { color: Colors.textMuted, fontSize: 13 },
+  stageText: { color: Colors.textMuted, fontSize: 12 },
   stageOn: { color: Colors.text, fontWeight: '700' },
-  times: { color: Colors.textMuted, fontSize: 11, marginBottom: 8 },
-  jobId: { color: Colors.textMuted, fontSize: 12, marginBottom: 6, fontWeight: '700' },
-  addr: { color: Colors.text, fontSize: 16, marginBottom: 6 },
-  meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
-  actions: { gap: 8, marginTop: 10 },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  jobId: { color: Colors.textMuted, fontSize: 12, fontWeight: '700' },
+  addr: { color: Colors.text, fontSize: 14, lineHeight: 19, marginBottom: 2 },
+  meta: { color: Colors.textMuted, fontSize: 12, marginTop: 2, marginBottom: 4 },
   errorBox: {
     backgroundColor: Colors.warning + '22',
     borderRadius: 10,

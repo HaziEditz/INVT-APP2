@@ -7,27 +7,34 @@ type Props = {
   selected: Tariff;
   open: boolean;
   locked?: boolean;
+  compact?: boolean;
   onOpen: () => void;
   onClose: () => void;
   onSelect: (t: Tariff) => void;
 };
 
-export function TariffPicker({ tariffs, selected, open, locked, onOpen, onClose, onSelect }: Props) {
+export function TariffPicker({ tariffs, selected, open, locked, compact, onOpen, onClose, onSelect }: Props) {
   const hasTariffs = tariffs.length > 0;
   const canOpen = hasTariffs && !locked;
 
   return (
     <>
-      <Pressable style={styles.dropdown} onPress={canOpen ? onOpen : undefined} disabled={!canOpen}>
-        <Text style={styles.name}>{selected.name}</Text>
-        {hasTariffs ? (
-          <Text style={styles.rates}>
-            ${selected.flagFall.toFixed(2)} flag · ${selected.ratePerKm.toFixed(2)}/km · $
-            {selected.waitingPerMin.toFixed(2)}/min wait
+      <Pressable style={[styles.dropdown, compact && styles.dropdownCompact]} onPress={canOpen ? onOpen : undefined} disabled={!canOpen}>
+        <Text style={[styles.name, compact && styles.nameCompact]}>{selected.name}</Text>
+        {!compact ? (
+          hasTariffs ? (
+            <Text style={styles.rates}>
+              ${selected.flagFall.toFixed(2)} flag · ${selected.ratePerKm.toFixed(2)}/km · $
+              {selected.waitingPerMin.toFixed(2)}/min wait
+            </Text>
+          ) : (
+            <Text style={styles.rates}>Configure tariffs in Firebase for your company</Text>
+          )
+        ) : hasTariffs ? (
+          <Text style={styles.ratesCompact}>
+            ${selected.flagFall.toFixed(2)} + ${selected.ratePerKm.toFixed(2)}/km
           </Text>
-        ) : (
-          <Text style={styles.rates}>Configure tariffs in Firebase for your company</Text>
-        )}
+        ) : null}
         {locked ? <Text style={styles.locked}>Locked</Text> : null}
         {canOpen ? <Text style={styles.chevron}>▼</Text> : null}
       </Pressable>
@@ -77,8 +84,15 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     gap: 4,
   },
+  dropdownCompact: {
+    marginVertical: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
   name: { color: Colors.text, fontWeight: '700', fontSize: 15, flex: 1 },
+  nameCompact: { fontSize: 13 },
   rates: { color: Colors.textMuted, fontSize: 12, flexBasis: '100%' },
+  ratesCompact: { color: Colors.textMuted, fontSize: 11, flex: 1 },
   chevron: { color: Colors.accent, fontSize: 12, marginLeft: 8 },
   locked: { color: Colors.textMuted, fontSize: 11, marginLeft: 8 },
   overlay: {
