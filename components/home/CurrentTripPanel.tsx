@@ -99,6 +99,12 @@ export function CurrentTripPanel() {
   const nextStage = STAGES[Math.min(idx + 1, STAGES.length - 1)];
   const nextLabel = STAGE_LABELS[nextStage];
   const st = activeJob.stepTimes;
+  const preArrival =
+    activeJob.stage === 'pickup' ||
+    (!st.arrivedAt && !st.onboardAt && activeJob.stage !== 'onboard' && activeJob.stage !== 'complete');
+  const postArrival =
+    activeJob.stage === 'arrived' ||
+    (!!st.arrivedAt && activeJob.stage !== 'onboard' && activeJob.stage !== 'complete');
   const navTarget =
     activeJob.stage === 'onboard' || activeJob.stage === 'complete'
       ? {
@@ -131,6 +137,38 @@ export function CurrentTripPanel() {
           </View>
         ))}
       </ScrollView>
+
+      {!meterRunning && (preArrival || postArrival) ? (
+        <View style={styles.lifecycleRow}>
+          {preArrival ? (
+            <Button
+              title="Recall"
+              variant="secondary"
+              onPress={() => {
+                Alert.alert('Recall job?', 'Return this job to dispatch (before pickup arrival).', [
+                  { text: 'Back', style: 'cancel' },
+                  { text: 'Recall', onPress: recallJob },
+                ]);
+              }}
+            />
+          ) : null}
+          {postArrival ? (
+            <>
+              <Button title="No Show" variant="secondary" onPress={noShowActiveJob} />
+              <Button
+                title="Cancel"
+                variant="danger"
+                onPress={() => {
+                  Alert.alert('Cancel job?', 'This permanently closes the job.', [
+                    { text: 'Back', style: 'cancel' },
+                    { text: 'Cancel job', style: 'destructive', onPress: cancelActiveJob },
+                  ]);
+                }}
+              />
+            </>
+          ) : null}
+        </View>
+      ) : null}
 
       <Text style={styles.times}>
         Accepted {fmtTime(st.acceptedAt)} · Arrived {fmtTime(st.arrivedAt)} · On board {fmtTime(st.onboardAt)} · Done{' '}
@@ -185,33 +223,6 @@ export function CurrentTripPanel() {
             <Button title="Dismiss" variant="secondary" onPress={clearCompletionError} />
           </View>
         ) : null}
-        {!meterRunning && activeJob.stage === 'pickup' ? (
-          <Button
-            title="Recall"
-            variant="secondary"
-            onPress={() => {
-              Alert.alert('Recall job?', 'Return this job to dispatch (before pickup arrival).', [
-                { text: 'Back', style: 'cancel' },
-                { text: 'Recall', onPress: recallJob },
-              ]);
-            }}
-          />
-        ) : null}
-        {!meterRunning && activeJob.stage === 'arrived' ? (
-          <>
-            <Button title="No Show" variant="secondary" onPress={noShowActiveJob} />
-            <Button
-              title="Cancel"
-              variant="danger"
-              onPress={() => {
-                Alert.alert('Cancel job?', 'This permanently closes the job.', [
-                  { text: 'Back', style: 'cancel' },
-                  { text: 'Cancel job', style: 'destructive', onPress: cancelActiveJob },
-                ]);
-              }}
-            />
-          </>
-        ) : null}
       </View>
     </ScrollView>
   );
@@ -223,8 +234,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     padding: 12,
-    maxHeight: 320,
+    maxHeight: 420,
   },
+  lifecycleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   title: { color: Colors.text, fontSize: 18, fontWeight: '800' },
   pickupFrom: { color: Colors.text, fontSize: 15, fontWeight: '600', marginTop: 8, lineHeight: 20 },
   empty: { padding: 20, alignItems: 'center', gap: 8 },

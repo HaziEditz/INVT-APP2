@@ -378,6 +378,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const meterStopRef = useRef<(() => void) | null>(null);
   const paymentJobRef = useRef(false);
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
+  /** Suppress false "taken back" alerts when we initiated completion (allbookings node deleted). */
+  const localCompletionRef = useRef(false);
 
   useSafeEffect(() => {
     shiftActiveRef.current = shiftActive;
@@ -1062,6 +1064,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         ) ||
         (bookingRawRef.current && isReturnedToDispatchPool(update.status) && !isReturnedToDispatchPool(prevStatus))
       ) {
+        const expectedLocalComplete =
+          localCompletionRef.current ||
+          update.status === 'removed' ||
+          String(update.raw.BookingStatus ?? update.raw.Status ?? '').toLowerCase().includes('complete');
+        if (expectedLocalComplete) {
+          localCompletionRef.current = false;
+          void clearStaleActiveJobLocal('Trip completed.', { silent: true });
+          return;
+        }
         if (update.terminal && !update.status.includes('cancel') && update.status !== 'removed') {
           void playInAppNotificationSound('general');
           void clearStaleActiveJobLocal(
@@ -2024,6 +2035,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const completedAt = Date.now();
     setCompletionError(null);
+    localCompletionRef.current = true;
 
     try {
       await writeClosedJob(
@@ -2124,6 +2136,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         `Dispatch server did not confirm completion (${completionErrorMessage(err)}). ` +
         'Job saved locally — tap Retry when back online.';
       setCompletionError(msg);
+      localCompletionRef.current = false;
       throw new Error(msg);
     }
 
@@ -2141,6 +2154,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setMeter(null);
     meterRef.current = null;
     activeJobIdRef.current = null;
+    bookingRawRef.current = null;
+    localCompletionRef.current = false;
     await storeData(STORAGE_KEYS.activeJob, null);
     await storeData(STORAGE_KEYS.meterState, null);
     refreshJobHistory().catch(() => undefined);
@@ -2228,7 +2243,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (job.stage !== 'pickup') {
+    const arrived =
+      job.stage === 'arrived' ||
+      job.stage === 'onboard' ||
+      job.stage === 'complete' ||
+      !!job.stepTimes?.arrivedAt;
+    if (arrived) {
       Alert.alert('Cannot recall', 'Recall is only available before arriving at pickup.');
       return;
     }
