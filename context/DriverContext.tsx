@@ -9,7 +9,7 @@ import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, declineJobOffer, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, declineJobOffer, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
 import { isValidBookingId, normalizeBookingId } from '@/lib/bookingId';
 import {
   clearDriverNotification,
@@ -1995,13 +1995,44 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     releaseQueuedOffersAfterTrip();
   };
 
+  const clearJobLocallyAfterTerminal = async () => {
+    stopMeterForJob();
+    setMeter(null);
+    meterRef.current = null;
+    setActiveJob(null);
+    activeJobIdRef.current = null;
+    bookingRawRef.current = null;
+    await storeData(STORAGE_KEYS.activeJob, null);
+    await storeData(STORAGE_KEYS.meterState, null);
+    if (shiftActive) {
+      const vehicleId = await resolveVehicleId();
+      if (vehicleId) {
+        writeOnlinePresence(driver!, vehicleId, 'Available').catch(() => undefined);
+        setPresenceStatus('Online');
+        setReadyForJobs(true);
+        readyForJobsRef.current = true;
+      }
+    }
+    releaseQueuedOffersAfterTrip();
+  };
+
   const cancelActiveJobInternal = async () => {
-    await clearActiveJobInternal();
-    await restoreAvailableAfterJobClear();
+    if (!activeJob || !driver) return;
+    try {
+      await cancelJobAsDriver(activeJob.id, driver.id, driver.companyId);
+    } catch {
+      await enqueueOfflineItem({
+        type: 'job_update',
+        payload: { action: 'cancel', jobId: activeJob.id },
+      });
+    }
+    await clearJobLocallyAfterTerminal();
   };
 
   const cancelActiveJob = async () => {
+    if (!activeJob || !driver) return;
     await cancelActiveJobInternal();
+    Alert.alert('Job cancelled', 'Job closed. You are available for new jobs.');
   };
 
   const noShowActiveJob = async () => {
@@ -2014,24 +2045,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         payload: { action: 'no_show', jobId: activeJob.id },
       });
     }
-    stopMeterForJob();
-    setMeter(null);
-    meterRef.current = null;
-    setActiveJob(null);
-    activeJobIdRef.current = null;
-    bookingRawRef.current = null;
-    await storeData(STORAGE_KEYS.activeJob, null);
-    await storeData(STORAGE_KEYS.meterState, null);
-    if (shiftActive) {
-      const vehicleId = await resolveVehicleId();
-      if (vehicleId) {
-        writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
-        setPresenceStatus('Online');
-        setReadyForJobs(true);
-        readyForJobsRef.current = true;
-      }
-    }
-    releaseQueuedOffersAfterTrip();
+    await clearJobLocallyAfterTerminal();
     Alert.alert('No show', 'Job marked as no show. You are available for new jobs.');
   };
 
@@ -2049,6 +2063,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
       setQueuedOffers((prev) => prev.filter((o) => o.id !== q.id));
       Alert.alert('Job recalled', 'Job returned to dispatch.');
+      return;
+    }
+
+    if (job.stage !== 'pickup') {
+      Alert.alert('Cannot recall', 'Recall is only available before arriving at pickup.');
       return;
     }
 

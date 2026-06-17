@@ -256,6 +256,26 @@ export async function reportNoShow(jobId: string, driverId: string, companyId: s
     driverId,
     companyId,
     cancelledBy: 'driver',
+    noShow: true,
+    terminalKind: 'No Show',
     reason: 'No Show',
+  });
+}
+
+export async function cancelJobAsDriver(
+  jobId: string,
+  driverId: string,
+  companyId: string,
+  opts?: { terminalKind?: 'Cancelled' | 'No Show' },
+) {
+  const terminalKind = opts?.terminalKind ?? 'Cancelled';
+  return dispatchPost('/api/cancel', {
+    bookingId: jobId,
+    driverId,
+    companyId,
+    cancelledBy: 'driver',
+    forceTerminal: true,
+    terminalKind,
+    reason: terminalKind === 'No Show' ? 'No Show' : 'Cancelled by driver',
   });
 }

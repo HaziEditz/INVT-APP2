@@ -62,19 +62,28 @@ export function ActiveJobPanel() {
 
       <View style={styles.actions}>
         <Button title={nextLabel} onPress={onAdvance} />
-        {activeJob.stage === 'pickup' || activeJob.stage === 'arrived' ? (
+        {activeJob.stage === 'pickup' ? (
+          <Button
+            title="Recall"
+            variant="secondary"
+            onPress={() => {
+              Alert.alert('Recall job?', 'Return this job to dispatch (before pickup arrival).', [
+                { text: 'Back', style: 'cancel' },
+                { text: 'Recall', onPress: recallJob },
+              ]);
+            }}
+          />
+        ) : null}
+        {activeJob.stage === 'arrived' ? (
           <>
             <Button title="No Show" variant="secondary" onPress={noShowActiveJob} />
             <Button title="Cancel" variant="danger" onPress={() => {
-              Alert.alert('Cancel job?', 'Dispatch will be notified.', [
+              Alert.alert('Cancel job?', 'This permanently closes the job.', [
                 { text: 'Back', style: 'cancel' },
                 { text: 'Cancel job', style: 'destructive', onPress: cancelActiveJob },
               ]);
             }} />
           </>
-        ) : null}
-        {idx > 0 && idx < STAGES.length - 1 ? (
-          <Button title="Recall" variant="secondary" onPress={recallJob} />
         ) : null}
       </View>
     </ScrollView>
