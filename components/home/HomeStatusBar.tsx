@@ -1,7 +1,6 @@
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { formatQueueDisplay } from '@/lib/zoneQueue';
-import { STAGE_LABELS } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,17 +13,28 @@ function formatZoneElapsed(ms: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-/** Top bar: Available/Away | ZQ | Zone | Time — single compact row */
+/** Top bar: lifecycle status (color) | ZQ | Zone | Time */
 export function HomeStatusBar() {
   const insets = useSafeAreaInsets();
-  const { presenceStatus, shiftActive, togglePresence, zone, readyForJobs, hasTripInProgress, activeJob } =
-    useDriver();
+  const {
+    shiftActive,
+    togglePresence,
+    zone,
+    readyForJobs,
+    presenceStatus,
+    hasTripInProgress,
+    tripDisplayLabel,
+    tripDisplayColor,
+    tripDisplayPhase,
+  } = useDriver();
   const [zoneEnteredAt, setZoneEnteredAt] = useState<number | null>(null);
   const [, setTick] = useState(0);
   const lastZoneNameRef = useRef('');
 
-  const isAvailable = presenceStatus === 'Online' && shiftActive && readyForJobs;
-  const isAway = presenceStatus === 'Away' && shiftActive;
+  const canTogglePresence =
+    shiftActive &&
+    !hasTripInProgress &&
+    (tripDisplayPhase === 'available' || tripDisplayPhase === 'away');
 
   useEffect(() => {
     const name = zone.name?.trim() || '';
@@ -56,35 +66,25 @@ export function HomeStatusBar() {
   const timeInZone =
     shiftActive && zoneEnteredAt ? formatZoneElapsed(Date.now() - zoneEnteredAt) : '—';
 
-  const toggleLabel = !shiftActive
-    ? 'Off'
-    : activeJob && activeJob.stage !== 'complete'
-      ? STAGE_LABELS[activeJob.stage]
-      : isAvailable
-        ? 'Avail'
-        : isAway
-          ? 'Away'
-          : 'Avail';
-
   return (
     <View style={[styles.bar, { paddingTop: insets.top + 4 }]}>
       <Pressable
-        style={[styles.toggle, isAvailable ? styles.toggleOn : isAway ? styles.toggleAway : styles.toggleOff]}
+        style={[styles.lifecyclePill, { backgroundColor: tripDisplayColor }]}
         onPress={
-          shiftActive
+          canTogglePresence
             ? () => {
-                if (hasTripInProgress) {
-                  Alert.alert('Job in progress', 'Complete your current job first');
-                  return;
-                }
                 void togglePresence();
               }
-            : undefined
+            : shiftActive && hasTripInProgress
+              ? () => {
+                  Alert.alert('Job in progress', 'Complete your current job first');
+                }
+              : undefined
         }
         disabled={!shiftActive}
       >
-        <Text style={styles.toggleText} numberOfLines={1}>
-          {toggleLabel}
+        <Text style={styles.lifecycleText} numberOfLines={1}>
+          {tripDisplayLabel}
         </Text>
       </Pressable>
 
@@ -110,20 +110,18 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
-    gap: 4,
+    gap: 6,
   },
-  toggle: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
+  lifecyclePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 14,
-    minWidth: 52,
-    maxWidth: 56,
+    minWidth: 68,
+    maxWidth: 96,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  toggleOn: { backgroundColor: Colors.success },
-  toggleAway: { backgroundColor: Colors.warning },
-  toggleOff: { backgroundColor: Colors.textMuted },
-  toggleText: { color: '#fff', fontWeight: '800', fontSize: 10 },
+  lifecycleText: { color: '#fff', fontWeight: '800', fontSize: 11 },
   metaLine: { flex: 1, minWidth: 0 },
   meta: { color: Colors.textMuted, fontSize: 11, fontWeight: '600' },
   metaVal: { color: Colors.text, fontWeight: '700', fontSize: 11 },

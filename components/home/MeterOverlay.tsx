@@ -6,6 +6,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 type Props = {
   meter: MeterState;
   onPause: () => void;
+  /** overlay = bottom of full map; strip = inline under compact map during trip */
+  layout?: 'overlay' | 'strip';
 };
 
 function formatClock(ms: number) {
@@ -15,7 +17,7 @@ function formatClock(ms: number) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-export function MeterOverlay({ meter, onPause }: Props) {
+export function MeterOverlay({ meter, onPause, layout = 'overlay' }: Props) {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -27,33 +29,42 @@ export function MeterOverlay({ meter, onPause }: Props) {
   const breakdown = meter.breakdown;
   const waitMin = breakdown.waitingMinutes;
   const modeLabel = meter.mode === 'moving' ? 'Moving' : 'Waiting';
+  const strip = layout === 'strip';
 
   return (
-    <View style={styles.box}>
-      <Text style={styles.fare}>${meter.fare.toFixed(2)}</Text>
-      <Text style={[styles.mode, meter.mode === 'moving' ? styles.modeMoving : styles.modeWaiting]}>
-        {modeLabel}
-      </Text>
+    <View style={[styles.box, strip && styles.boxStrip]}>
+      <View style={[styles.mainRow, strip && styles.mainRowStrip]}>
+        <View style={styles.fareBlock}>
+          <Text style={[styles.fare, strip && styles.fareStrip]}>${meter.fare.toFixed(2)}</Text>
+          <Text style={[styles.mode, meter.mode === 'moving' ? styles.modeMoving : styles.modeWaiting]}>
+            {modeLabel}
+          </Text>
+        </View>
 
-      <View style={styles.statsRow}>
-        <Text style={styles.statText}>{meter.distanceKm.toFixed(2)} km</Text>
-        <Text style={styles.statSep}>·</Text>
-        <Text style={styles.statText}>wait {waitMin.toFixed(1)}m</Text>
+        <View style={[styles.statsCol, strip && styles.statsColStrip]}>
+          <View style={[styles.statsRow, strip && styles.statsRowStrip]}>
+            <Text style={styles.statText}>{meter.distanceKm.toFixed(2)} km</Text>
+            <Text style={styles.statSep}>·</Text>
+            <Text style={styles.statText}>wait {waitMin.toFixed(1)}m</Text>
+            <Text style={styles.statSep}>·</Text>
+            <Text style={styles.statText}>{formatClock(tripMs)}</Text>
+          </View>
+          <View style={[styles.statsRow, strip && styles.statsRowStrip]}>
+            <Text style={styles.statText}>Flag ${breakdown.flagFall.toFixed(2)}</Text>
+            <Text style={styles.statSep}>·</Text>
+            <Text style={styles.statText}>Dist ${breakdown.distanceCharge.toFixed(2)}</Text>
+            <Text style={styles.statSep}>·</Text>
+            <Text style={styles.statText}>Wait ${breakdown.waitingCharge.toFixed(2)}</Text>
+          </View>
+        </View>
+
+        <Pressable
+          style={[styles.pauseBtn, strip && styles.pauseBtnStrip, meter.paused && styles.pauseBtnActive]}
+          onPress={onPause}
+        >
+          <Text style={styles.pauseText}>{meter.paused ? 'RESUME' : 'PAUSE'}</Text>
+        </Pressable>
       </View>
-
-      <View style={styles.statsRow}>
-        <Text style={styles.statText}>Flag ${breakdown.flagFall.toFixed(2)}</Text>
-        <Text style={styles.statSep}>·</Text>
-        <Text style={styles.statText}>Dist ${breakdown.distanceCharge.toFixed(2)}</Text>
-        <Text style={styles.statSep}>·</Text>
-        <Text style={styles.statText}>Wait ${breakdown.waitingCharge.toFixed(2)}</Text>
-      </View>
-
-      <Text style={styles.subStat}>Trip {formatClock(tripMs)}</Text>
-
-      <Pressable style={[styles.pauseBtn, meter.paused && styles.pauseBtnActive]} onPress={onPause}>
-        <Text style={styles.pauseText}>{meter.paused ? 'RESUME' : 'PAUSE'}</Text>
-      </Pressable>
     </View>
   );
 }
@@ -62,20 +73,45 @@ const styles = StyleSheet.create({
   box: {
     backgroundColor: Colors.surface + 'F0',
     borderRadius: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     marginHorizontal: 8,
     marginBottom: 6,
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
-    maxHeight: 150,
+  },
+  boxStrip: {
+    marginHorizontal: 0,
+    marginBottom: 0,
+    borderRadius: 0,
+    borderWidth: 0,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: Colors.surface,
+    alignItems: 'stretch',
+  },
+  mainRow: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  mainRowStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  fareBlock: {
+    alignItems: 'center',
   },
   fare: {
     color: Colors.success,
     fontSize: 26,
     fontWeight: '900',
     lineHeight: 30,
+  },
+  fareStrip: {
+    fontSize: 22,
+    lineHeight: 26,
   },
   mode: {
     fontSize: 12,
@@ -86,6 +122,13 @@ const styles = StyleSheet.create({
   },
   modeMoving: { color: Colors.success },
   modeWaiting: { color: Colors.warning },
+  statsCol: {
+    gap: 2,
+  },
+  statsColStrip: {
+    flex: 1,
+    minWidth: 0,
+  },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -94,11 +137,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
     gap: 4,
   },
-  subStat: {
-    color: Colors.textMuted,
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 2,
+  statsRowStrip: {
+    justifyContent: 'flex-start',
+    marginTop: 0,
   },
   statText: {
     color: Colors.textMuted,
@@ -110,7 +151,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   pauseBtn: {
-    marginTop: 6,
+    marginTop: 8,
     paddingVertical: 6,
     paddingHorizontal: 18,
     borderRadius: 6,
@@ -119,6 +160,13 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     minWidth: 100,
     alignItems: 'center',
+  },
+  pauseBtnStrip: {
+    marginTop: 0,
+    flexShrink: 0,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    minWidth: 72,
   },
   pauseBtnActive: {
     borderColor: Colors.warning,

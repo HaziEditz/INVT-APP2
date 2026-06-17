@@ -216,7 +216,7 @@ export interface CompanyInfo {
 }
 
 export const STAGE_LABELS: Record<JobStage, string> = {
-  pickup: 'On Way',
+  pickup: 'Accepted',
   arrived: 'Arrived',
   onboard: 'On Board',
   complete: 'Complete',

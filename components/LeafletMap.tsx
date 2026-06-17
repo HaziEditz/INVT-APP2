@@ -16,6 +16,7 @@ export default function LeafletMap({
   dropoffLng,
   showRoute = false,
   showsUserLocation = true,
+  compact = false,
   zones,
 }: JobMapProps) {
   const webRef = useRef<WebView | null>(null);
@@ -138,7 +139,7 @@ export default function LeafletMap({
   };
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, compact && styles.wrapCompact]}>
       {!ready ? (
         <View style={styles.loadingOverlay} pointerEvents="none">
           <ActivityIndicator color="#1565C0" size="large" />
@@ -177,6 +178,7 @@ export default function LeafletMap({
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, width: '100%', minHeight: 160, backgroundColor: '#dbeafe' },
+  wrapCompact: { minHeight: 0 },
   webview: { flex: 1, backgroundColor: '#dbeafe' },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

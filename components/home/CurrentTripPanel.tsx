@@ -5,7 +5,8 @@ import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
 import { STAGE_LABELS, JobStage } from '@/types';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef } from 'react';
 
 const STAGES: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
 
@@ -30,6 +31,8 @@ export function CurrentTripPanel() {
     completionBusy,
     completionError,
     clearCompletionError,
+    nearPickup,
+    tripOnTheWay,
   } = useDriver();
 
   const meterRunning = !!meter?.running;
@@ -128,6 +131,29 @@ export function CurrentTripPanel() {
     await advanceStage();
   };
 
+  const highlightArrived = activeJob.stage === 'pickup' && nearPickup;
+  const pulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (!highlightArrived) {
+      pulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.55, duration: 700, useNativeDriver: false }),
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: false }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [highlightArrived, pulse]);
+
+  const stageLabel = (s: JobStage) => {
+    if (s === 'pickup') return tripOnTheWay ? 'On the way' : 'Accepted';
+    return STAGE_LABELS[s];
+  };
+
   return (
     <View style={styles.panelActive}>
       <ScrollView
@@ -140,7 +166,7 @@ export function CurrentTripPanel() {
           {STAGES.map((s, i) => (
             <View key={s} style={styles.stageChip}>
               <View style={[styles.dot, i <= idx && styles.dotOn]} />
-              <Text style={[styles.stageText, i <= idx && styles.stageOn]}>{STAGE_LABELS[s]}</Text>
+              <Text style={[styles.stageText, i <= idx && styles.stageOn]}>{stageLabel(s)}</Text>
             </View>
           ))}
         </ScrollView>
@@ -173,12 +199,14 @@ export function CurrentTripPanel() {
             onPress={() => confirmEndTrip(() => void endTrip())}
           />
         ) : (
-          <Button
-            title={completionBusy ? 'Please wait…' : nextLabel}
-            onPress={onAdvance}
-            disabled={completionBusy}
-            compact
-          />
+          <Animated.View style={{ opacity: highlightArrived ? pulse : 1 }}>
+            <Button
+              title={completionBusy ? 'Please wait…' : nextLabel}
+              onPress={onAdvance}
+              disabled={completionBusy}
+              compact
+            />
+          </Animated.View>
         )}
 
         <View style={styles.secondaryRow}>

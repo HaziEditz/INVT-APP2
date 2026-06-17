@@ -8,19 +8,32 @@ type Props = {
   open: boolean;
   locked?: boolean;
   compact?: boolean;
+  /** Flush inline strip under compact map (no outer margins / card chrome). */
+  strip?: boolean;
   onOpen: () => void;
   onClose: () => void;
   onSelect: (t: Tariff) => void;
 };
 
-export function TariffPicker({ tariffs, selected, open, locked, compact, onOpen, onClose, onSelect }: Props) {
+export function TariffPicker({ tariffs, selected, open, locked, compact, strip, onOpen, onClose, onSelect }: Props) {
   const hasTariffs = tariffs.length > 0;
   const canOpen = hasTariffs && !locked;
 
   return (
     <>
-      <Pressable style={[styles.dropdown, compact && styles.dropdownCompact]} onPress={canOpen ? onOpen : undefined} disabled={!canOpen}>
-        <Text style={[styles.name, compact && styles.nameCompact]}>{selected.name}</Text>
+      <Pressable
+        style={[
+          styles.dropdown,
+          compact && styles.dropdownCompact,
+          strip && styles.dropdownStrip,
+          strip && styles.dropdownStripRow,
+        ]}
+        onPress={canOpen ? onOpen : undefined}
+        disabled={!canOpen}
+      >
+        <Text style={[styles.name, compact && styles.nameCompact, strip && styles.nameStrip]} numberOfLines={1}>
+          {selected.name}
+        </Text>
         {!compact ? (
           hasTariffs ? (
             <Text style={styles.rates}>
@@ -85,9 +98,25 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   dropdownCompact: {
-    marginVertical: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    marginVertical: 0,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  dropdownStrip: {
+    marginHorizontal: 0,
+    marginVertical: 0,
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: Colors.surface,
+  },
+  dropdownStripRow: {
+    flexWrap: 'nowrap',
+    gap: 8,
+  },
+  nameStrip: {
+    flexShrink: 1,
+    flexGrow: 0,
+    maxWidth: '38%',
   },
   name: { color: Colors.text, fontWeight: '700', fontSize: 15, flex: 1 },
   nameCompact: { fontSize: 13 },

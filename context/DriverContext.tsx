@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useMemo, useRef, useState, ReactNode } from 'react';
 import { Alert } from 'react-native';
 import { get, onValue, ref, update } from 'firebase/database';
 import { getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
@@ -160,6 +160,13 @@ interface DriverContextValue {
   goAway: () => Promise<void>;
   goAvailable: () => Promise<void>;
   hasTripInProgress: boolean;
+  /** Status-bar lifecycle display (label/color only — not server stage). */
+  tripDisplayPhase: DriverTripDisplayPhase;
+  tripDisplayLabel: string;
+  tripDisplayColor: string;
+  /** GPS within ~50m of pickup — prompts Arrived button. */
+  nearPickup: boolean;
+  tripOnTheWay: boolean;
 }
 
 const DriverContext = createContext<DriverContextValue | null>(null);
@@ -172,6 +179,12 @@ const EMPTY_ZONE: ZoneInfo = {
 };
 
 import { parseZoneFromOnlineNode } from '@/lib/zoneQueue';
+import {
+  haversineMeters,
+  resolveTripDisplayPhase,
+  tripDisplayStyle,
+  type DriverTripDisplayPhase,
+} from '@/lib/driverTripDisplay';
 
 function fmtNzDate(d: Date) {
   return d.toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -302,7 +315,7 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
     distanceKm: 0,
     durationMin: 0,
     fare: offer.fixedFare ?? offer.estimatedFare ?? 0,
-    stepTimes: { acceptedAt: now, onWayAt: now },
+    stepTimes: { acceptedAt: now },
     tariffChanges: [],
   };
 }
@@ -380,6 +393,47 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
   /** Suppress false "taken back" alerts when we initiated completion (allbookings node deleted). */
   const localCompletionRef = useRef(false);
+  const [tripOnTheWay, setTripOnTheWay] = useState(false);
+  const [nearPickup, setNearPickup] = useState(false);
+  const tripOnTheWayRef = useRef(false);
+  const acceptCoordsRef = useRef<{ jobId: string; lat: number; lng: number } | null>(null);
+
+  const resetTripDisplayTracking = () => {
+    acceptCoordsRef.current = null;
+    tripOnTheWayRef.current = false;
+    setTripOnTheWay(false);
+    setNearPickup(false);
+  };
+
+  const captureAcceptLocation = async (jobId: string) => {
+    resetTripDisplayTracking();
+    try {
+      const coords = await getCurrentCoords();
+      acceptCoordsRef.current = { jobId, lat: coords.latitude, lng: coords.longitude };
+    } catch {
+      // On-the-way auto-detect waits until GPS is available on next tick.
+    }
+  };
+
+  const applyTripGpsSample = (lat: number, lng: number) => {
+    const job = activeJobRef.current;
+    if (!job || job.stage !== 'pickup') {
+      setNearPickup(false);
+      return;
+    }
+    const accept = acceptCoordsRef.current;
+    if (accept && accept.jobId === job.id && !tripOnTheWayRef.current) {
+      if (haversineMeters(accept.lat, accept.lng, lat, lng) >= 50) {
+        tripOnTheWayRef.current = true;
+        setTripOnTheWay(true);
+      }
+    }
+    if (job.pickupLat != null && job.pickupLng != null) {
+      setNearPickup(haversineMeters(job.pickupLat, job.pickupLng, lat, lng) <= 50);
+    } else {
+      setNearPickup(false);
+    }
+  };
 
   useSafeEffect(() => {
     shiftActiveRef.current = shiftActive;
@@ -690,9 +744,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (status !== 'granted' || cancelled) return;
         const coords = await getCurrentCoords();
         applyZoneFromCoords(coords.latitude, coords.longitude);
+        applyTripGpsSample(coords.latitude, coords.longitude);
         sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.Balanced, distanceInterval: 15, timeInterval: 5000 },
-          (loc) => applyZoneFromCoords(loc.coords.latitude, loc.coords.longitude),
+          (loc) => {
+            applyZoneFromCoords(loc.coords.latitude, loc.coords.longitude);
+            applyTripGpsSample(loc.coords.latitude, loc.coords.longitude);
+          },
         );
       } catch (err) {
         console.warn('[Driver] GPS zone detect failed:', err);
@@ -833,6 +891,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       await storeData(STORAGE_KEYS.activeJob, job);
       setQueuedOffers((prev) => prev.filter((o) => o.id !== q.id));
       setPreferredPanelTab('current');
+      await captureAcceptLocation(job.id);
       const vehicleId = await resolveVehicleId();
       if (vehicleId) {
         writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
@@ -864,6 +923,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     stopMeterForJob();
     setMeter(null);
     meterRef.current = null;
+    resetTripDisplayTracking();
     setActiveJob(null);
     activeJobIdRef.current = null;
     bookingRawRef.current = null;
@@ -1705,6 +1765,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         await storeData(STORAGE_KEYS.activeJob, job);
         setQueuedOffers((prev) => prev.filter((o) => o.id !== offerSnapshot.id));
         setPreferredPanelTab('current');
+        await captureAcceptLocation(job.id);
         const vehicleId = await resolveVehicleId();
         if (vehicleId) {
           writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
@@ -1758,6 +1819,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
     setPreferredPanelTab('current');
+    await captureAcceptLocation(job.id);
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
@@ -1838,6 +1900,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
     setPreferredPanelTab('current');
+    await captureAcceptLocation(job.id);
 
     const vehicleId = await resolveVehicleId();
     if (vehicleId) {
@@ -2502,7 +2565,48 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  useSafeEffect(() => {
+    if (activeJob?.stage !== 'pickup') {
+      setNearPickup(false);
+    }
+  }, [activeJob?.stage], 'Driver-clearNearPickupAfterPickup');
+
   const dismissJobEditNotice = () => setJobEditNotice(null);
+
+  const isAvailableForDisplay =
+    presenceStatus === 'Online' && shiftActive && readyForJobs && !paymentJob;
+  const isAwayForDisplay = presenceStatus === 'Away' && shiftActive;
+
+  const tripDisplayPhase = useMemo(
+    () =>
+      resolveTripDisplayPhase({
+        shiftActive,
+        hasOfferPopup: !!jobOffer && !activeJob && !paymentJob && !hailActive,
+        hailActive,
+        meterRunning: !!meter?.running,
+        activeStage: activeJob?.stage,
+        paymentOpen: !!paymentJob,
+        tripOnTheWay,
+        isAway: isAwayForDisplay,
+        isAvailable: isAvailableForDisplay,
+      }),
+    [
+      shiftActive,
+      jobOffer,
+      activeJob,
+      paymentJob,
+      hailActive,
+      meter?.running,
+      tripOnTheWay,
+      isAwayForDisplay,
+      isAvailableForDisplay,
+    ],
+  );
+
+  const { label: tripDisplayLabel, color: tripDisplayColor } = useMemo(
+    () => tripDisplayStyle(tripDisplayPhase),
+    [tripDisplayPhase],
+  );
 
   return (
     <DriverContext.Provider
@@ -2577,6 +2681,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         goAway,
         goAvailable,
         hasTripInProgress: hailActive || !!activeJob,
+        tripDisplayPhase,
+        tripDisplayLabel,
+        tripDisplayColor,
+        nearPickup,
+        tripOnTheWay,
       }}
     >
       {children}

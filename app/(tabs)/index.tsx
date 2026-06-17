@@ -109,6 +109,7 @@ export default function MainScreen() {
       <View style={[styles.mapFlex, compactMap && styles.mapCompact]}>
         <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
           <JobMap
+            compact={compactMap}
             pickupLat={activeJob?.pickupLat}
             pickupLng={activeJob?.pickupLng}
             dropoffLat={activeJob?.dropoffLat}
@@ -131,24 +132,48 @@ export default function MainScreen() {
           <Text style={styles.expandIcon}>⛶</Text>
         </Pressable>
 
-        {meterRunning && meter ? (
+        {meterRunning && meter && !compactMap ? (
           <View style={styles.meterOverlayWrap} pointerEvents="box-none">
             <MeterOverlay meter={meter} onPause={pauseMeter} />
           </View>
         ) : null}
       </View>
 
-      <View style={[styles.bottomChrome, compactMap && styles.bottomChromeTrip]}>
-        <TariffPicker
-          tariffs={tariffs}
-          selected={selectedTariff}
-          open={tariffOpen}
-          locked={tariffLocked}
-          compact={compactMap}
-          onOpen={() => !tariffLocked && setTariffOpen(true)}
-          onClose={() => setTariffOpen(false)}
-          onSelect={setSelectedTariff}
-        />
+      <View
+        style={[
+          styles.bottomChrome,
+          compactMap ? styles.bottomChromeTrip : styles.bottomChromeIdle,
+        ]}
+      >
+        {compactMap ? (
+          <View style={styles.tripChromeStrip}>
+            {meterRunning && meter ? (
+              <MeterOverlay meter={meter} onPause={pauseMeter} layout="strip" />
+            ) : (
+              <TariffPicker
+                tariffs={tariffs}
+                selected={selectedTariff}
+                open={tariffOpen}
+                locked={tariffLocked}
+                compact
+                strip
+                onOpen={() => !tariffLocked && setTariffOpen(true)}
+                onClose={() => setTariffOpen(false)}
+                onSelect={setSelectedTariff}
+              />
+            )}
+          </View>
+        ) : (
+          <TariffPicker
+            tariffs={tariffs}
+            selected={selectedTariff}
+            open={tariffOpen}
+            locked={tariffLocked}
+            onOpen={() => !tariffLocked && setTariffOpen(true)}
+            onClose={() => setTariffOpen(false)}
+            onSelect={setSelectedTariff}
+          />
+        )}
 
         <HomeMainTabs
           active={mainTab}
@@ -159,7 +184,7 @@ export default function MainScreen() {
         />
 
         <ErrorBoundary name="MainPanel">
-          <View style={styles.panelWrap}>
+          <View style={compactMap ? styles.panelWrapTrip : styles.panelWrapIdle}>
             {mainTab === 'offers' ? <OffersPanel /> : null}
             {mainTab === 'current' ? <CurrentTripPanel /> : null}
             {mainTab === 'queue' ? <QueuePanel /> : null}
@@ -209,6 +234,7 @@ const styles = StyleSheet.create({
     height: 120,
     minHeight: 120,
     maxHeight: 120,
+    overflow: 'hidden',
   },
   expandBtn: {
     position: 'absolute',
@@ -240,12 +266,25 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
     backgroundColor: Colors.background,
   },
+  bottomChromeIdle: {
+    maxHeight: '46%',
+  },
   bottomChromeTrip: {
     flex: 1,
     flexShrink: 1,
     minHeight: 0,
   },
-  panelWrap: {
+  tripChromeStrip: {
+    flexShrink: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  panelWrapIdle: {
+    maxHeight: 280,
+    minHeight: 200,
+  },
+  panelWrapTrip: {
     flex: 1,
     minHeight: 0,
   },
