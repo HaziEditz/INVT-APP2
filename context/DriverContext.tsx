@@ -9,7 +9,13 @@ import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
 import { loadDriverVehicles } from '@/lib/vehicles';
-import { acceptJobOffer, cancelJobAsDriver, declineJobOffer, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, declineJobOffer, DispatchApiError, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import {
+  catchUpJobStagesOnDispatch,
+  localStageFromServerStatus,
+  resolveServerBookingState,
+  serverStatusIndex,
+} from '@/lib/jobServerSync';
 import { isValidBookingId, normalizeBookingId } from '@/lib/bookingId';
 import {
   clearDriverNotification,
@@ -38,7 +44,6 @@ import {
 import { loadCompanyTariffs } from '@/lib/companyTariffs';
 import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
-import { completeJobPayment } from '@/lib/dispatchApi';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
 import { getCurrentCoords, refreshHailPickupLocation } from '@/services/locationService';
 import * as Location from 'expo-location';
@@ -366,6 +371,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const activeJobRef = useRef<ActiveJob | null>(null);
   const presenceWriteStatusRef = useRef<FirebaseDriverStatus>('Available');
   const repairPresenceRef = useRef<((reason?: string) => Promise<void>) | null>(null);
+  const refreshActiveJobRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
   const meterRef = useRef<MeterState | null>(null);
   const meterStopRef = useRef<(() => void) | null>(null);
@@ -427,6 +433,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         }
         // Do not restore shift as "online" on launch — driver must confirm vehicle each session.
         await storeData(STORAGE_KEYS.shiftActive, false);
+        if (j && isValidBookingId(j.id)) {
+          // Mid-job reload: force vehicle re-confirm + startShift so dispatch API sync runs.
+          await storeData(STORAGE_KEYS.vehicleSessionReady, false);
+        }
         const m = await getData<MeterState>(STORAGE_KEYS.meterState);
         if (m?.running && m.mode && m.breakdown) {
           setMeter(m);
@@ -448,6 +458,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             await flushOfflineQueue();
             if (shiftActiveRef.current) {
               void repairPresenceRef.current?.('netinfo-reconnect');
+              void refreshActiveJobRef.current?.('netinfo-reconnect');
             }
           }
         } catch (err) {
@@ -1048,6 +1059,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         meterStarted,
       );
       bookingRawRef.current = update.raw;
+      const rawSeq = update.raw.updateSeq ?? update.raw._seq ?? update.raw.version;
+      const parsedSeq = rawSeq != null ? parseInt(String(rawSeq), 10) : NaN;
+      if (!Number.isNaN(parsedSeq) && parsedSeq > 0) {
+        setActiveJob((prev) => {
+          if (!prev || prev.id !== activeJob.id) return prev;
+          if ((prev.updateSeq ?? 0) >= parsedSeq) return prev;
+          const merged = { ...prev, updateSeq: parsedSeq };
+          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+          return merged;
+        });
+      }
       const syncedNotes = collectJobNotes(update.raw);
 
       if (blocked.length > 0) {
@@ -1193,6 +1215,61 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
   repairPresenceRef.current = repairPresenceIfNeeded;
 
+  const refreshActiveJobFromServer = async (reason = 'reconcile') => {
+    if (!driver?.companyId || !driver.id) return;
+    const job = activeJobRef.current;
+    if (!job?.id || !isValidBookingId(job.id)) return;
+    try {
+      const server = await resolveServerBookingState(driver.companyId, driver.id, job.id);
+      if (!server?.status) {
+        console.warn(`[Driver] ${reason}: job #${job.id} not found on server`);
+        Alert.alert(
+          'Dispatch sync',
+          `Job #${job.id} was not found on dispatch. It may have been cancelled or closed — contact dispatch if this is wrong.`,
+        );
+        return;
+      }
+
+      const serverIdx = serverStatusIndex(server.status);
+      const localIdx = ['pickup', 'arrived', 'onboard', 'complete'].indexOf(job.stage);
+      let ver = server.version || job.updateSeq;
+
+      if (localIdx > serverIdx) {
+        const caught = await catchUpJobStagesOnDispatch(job.id, driver.id, job.stage, ver);
+        ver = caught.version ?? ver;
+        if (caught.synced.length > 0) {
+          console.log(`[Driver] ${reason}: caught up stages → ${caught.synced.join(', ')}`);
+        }
+      } else if (localIdx < serverIdx) {
+        const reconciledStage = localStageFromServerStatus(server.status);
+        console.log(`[Driver] ${reason}: local stage ${job.stage} behind server ${server.status} → ${reconciledStage}`);
+        setActiveJob((prev) => {
+          if (!prev || prev.id !== job.id) return prev;
+          const merged = { ...prev, stage: reconciledStage, updateSeq: ver ?? prev.updateSeq };
+          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+          return merged;
+        });
+      } else {
+        setActiveJob((prev) => {
+          if (!prev || prev.id !== job.id) return prev;
+          if (ver == null || ver === prev.updateSeq) return prev;
+          const merged = { ...prev, updateSeq: ver };
+          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+          return merged;
+        });
+      }
+    } catch (err) {
+      console.warn(`[Driver] refreshActiveJobFromServer (${reason}) failed:`, err);
+    }
+  };
+  refreshActiveJobRef.current = refreshActiveJobFromServer;
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !driver.id || !activeJob?.id || !shiftActive) return;
+    void refreshActiveJobFromServer('active-job-resume');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.companyId, driver?.id, activeJob?.id, shiftActive], 'Driver-reconcile-active-job');
+
   useSafeEffect(() => {
     if (!driver || !shiftActive || !selectedVehicleId) {
       stopPresenceHeartbeat();
@@ -1208,7 +1285,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     if (!driver?.companyId || !shiftActive) return;
     const unsubRtdb = subscribeFirebaseRtdbConnected((connected) => {
-      if (connected) void repairPresenceRef.current?.('rtdb-reconnect');
+      if (connected) {
+        void repairPresenceRef.current?.('rtdb-reconnect');
+        void refreshActiveJobRef.current?.('rtdb-reconnect');
+      }
     });
     return unsubRtdb;
   }, [driver?.companyId, shiftActive], 'Driver-presence-rtdb');
@@ -1286,6 +1366,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       startShiftRuntime({
         onForegroundResume: () => {
           void repairPresenceRef.current?.('app-foreground');
+          void refreshActiveJobRef.current?.('app-foreground');
         },
       }).catch((err) => console.warn('[Shift] shiftRuntime start failed:', err)),
     );
@@ -1321,6 +1402,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     console.log('[Shift] startShift complete — safe to navigate to tabs');
+    if (activeJobRef.current?.id && isValidBookingId(activeJobRef.current.id)) {
+      void refreshActiveJobFromServer('shift-start');
+    }
   };
 
   const goAway = async () => {
@@ -1505,9 +1589,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     stage: JobStage,
     jobOverride?: { id: string; updateSeq?: number },
   ) => {
-    if (!driver || !shiftActive) return;
-    const vehicleId = await resolveVehicleId();
-    if (!vehicleId) return;
+    if (!driver) {
+      throw new Error('Driver profile not loaded.');
+    }
     const statusMap: Record<JobStage, FirebaseDriverStatus> = {
       pickup: 'Assigned',
       arrived: 'Arrived',
@@ -1519,37 +1603,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       arrived: 'Arrived',
       onboard: 'Active',
     };
-    writeOnlinePresence(driver, vehicleId, statusMap[stage]).catch(() => undefined);
-    void syncBgLocationFirebaseStatus(statusMap[stage]);
     const bookingStatus = bookingStatusMap[stage];
     const jobRef = jobOverride ?? activeJob;
     if (!jobRef?.id || !bookingStatus || !isValidBookingId(jobRef.id)) {
       if (jobRef?.id && !isValidBookingId(jobRef.id)) {
-        console.warn('[Driver] stage sync skipped — invalid booking id:', jobRef.id);
+        throw new Error(`Invalid booking id: ${jobRef.id}`);
       }
       return;
     }
-    try {
-      const { version } = await syncJobStageOnDispatch(
-        jobRef.id,
-        bookingStatus,
-        driver.id,
-        jobRef.updateSeq,
-      );
-      if (version != null && activeJob?.id === jobRef.id) {
-        setActiveJob((prev) => {
-          if (!prev || prev.id !== jobRef.id) return prev;
-          const merged = { ...prev, updateSeq: version };
-          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
-          return merged;
-        });
-      }
-    } catch (err) {
-      console.warn('[Driver] dispatch stage sync failed:', stage, err);
-      Alert.alert(
-        'Dispatch sync issue',
-        `Could not update dispatch for ${bookingStatus}. Check connection and try again.`,
-      );
+
+    const vehicleId = await resolveVehicleId();
+    if (vehicleId && shiftActiveRef.current) {
+      writeOnlinePresence(driver, vehicleId, statusMap[stage]).catch(() => undefined);
+      void syncBgLocationFirebaseStatus(statusMap[stage]);
+    }
+
+    const { version } = await syncJobStageOnDispatch(
+      jobRef.id,
+      bookingStatus,
+      driver.id,
+      jobRef.updateSeq,
+    );
+    if (version != null && activeJob?.id === jobRef.id) {
+      setActiveJob((prev) => {
+        if (!prev || prev.id !== jobRef.id) return prev;
+        const merged = { ...prev, updateSeq: version };
+        storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+        return merged;
+      });
     }
   };
 
@@ -1767,6 +1848,37 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
       const idx = order.indexOf(activeJob.stage);
       const nextStage = order[Math.min(idx + 1, order.length - 1)];
+
+      if (nextStage === 'complete') {
+        const now = Date.now();
+        const stepTimes: JobStepTimes = { ...activeJob.stepTimes, completeAt: now };
+        stopMeterForJob();
+        let meterSnapshot = meterRef.current;
+        if (meterSnapshot) {
+          meterSnapshot = { ...meterSnapshot, running: false, finishedAt: now };
+        }
+        const updated: ActiveJob = {
+          ...activeJob,
+          stage: nextStage,
+          stepTimes,
+          meterSnapshot: meterSnapshot ?? activeJob.meterSnapshot,
+          fare: meterSnapshot?.fare ?? activeJob.fare,
+          distanceKm: meterSnapshot?.distanceKm ?? activeJob.distanceKm,
+        };
+        setActiveJob(updated);
+        setPaymentJob(updated);
+        persistActiveJobAsync(updated);
+        const vehicleId = await resolveVehicleId();
+        if (vehicleId && shiftActiveRef.current) {
+          writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+        }
+        return;
+      }
+
+      if (nextStage === 'arrived' || nextStage === 'onboard') {
+        await syncJobStageToDispatch(nextStage, { id: activeJob.id, updateSeq: activeJob.updateSeq });
+      }
+
       const now = Date.now();
       const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
       if (nextStage === 'arrived') stepTimes.arrivedAt = now;
@@ -1774,57 +1886,31 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         stepTimes.onboardAt = now;
         startMeterForJob();
       }
-      if (nextStage === 'complete') {
-        stepTimes.completeAt = now;
-        stopMeterForJob();
-      }
-
-      let meterSnapshot = meterRef.current;
-      if (nextStage === 'complete' && meterSnapshot) {
-        meterSnapshot = { ...meterSnapshot, running: false, finishedAt: now };
-      }
 
       const updated: ActiveJob = {
         ...activeJob,
         stage: nextStage,
         stepTimes,
-        meterSnapshot: meterSnapshot ?? activeJob.meterSnapshot,
-        fare: meterSnapshot?.fare ?? activeJob.fare,
-        distanceKm: meterSnapshot?.distanceKm ?? activeJob.distanceKm,
+        meterSnapshot: activeJob.meterSnapshot,
+        fare: activeJob.fare,
+        distanceKm: activeJob.distanceKm,
       };
       setActiveJob(updated);
-
-      // Open payment immediately — do not await AsyncStorage first (large route polylines
-      // can block the JS thread for seconds and look like a freeze with no payment UI).
-      if (nextStage === 'complete') {
-        setPaymentJob(updated);
-        persistActiveJobAsync(updated);
-        const vehicleId = await resolveVehicleId();
-        if (vehicleId) {
-          writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
-        }
-        return;
-      }
-
       persistActiveJobAsync(updated);
+
       const vehicleId = await resolveVehicleId();
-      if (vehicleId) {
-        if (nextStage === 'onboard') {
-          writeOnlinePresence(driver, vehicleId, 'Active').catch(() => undefined);
-          await syncJobStageToDispatch('onboard', { id: updated.id, updateSeq: updated.updateSeq });
-        } else if (nextStage === 'arrived') {
-          writeOnlinePresence(driver, vehicleId, 'Arrived').catch(() => undefined);
-          await syncJobStageToDispatch('arrived', { id: updated.id, updateSeq: updated.updateSeq });
-        } else {
-          writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
-          await syncJobStageToDispatch(nextStage, { id: updated.id, updateSeq: updated.updateSeq });
-        }
+      if (vehicleId && shiftActiveRef.current) {
+        const pres: FirebaseDriverStatus = nextStage === 'onboard' ? 'Active' : nextStage === 'arrived' ? 'Arrived' : 'Assigned';
+        writeOnlinePresence(driver, vehicleId, pres).catch(() => undefined);
       }
     } catch (err) {
       console.error('[Driver] advanceStage failed:', err);
-      const msg = completionErrorMessage(err);
+      const msg =
+        err instanceof DispatchApiError
+          ? `${err.message}${err.errorCode ? ` (${err.errorCode})` : ''}`
+          : completionErrorMessage(err);
       setCompletionError(msg);
-      Alert.alert('Could not update trip', msg);
+      Alert.alert('Could not update trip', `${msg}\n\nDispatch was not updated — try again when connected.`);
     } finally {
       setCompletionBusy(false);
     }
@@ -1930,6 +2016,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    if (job.id && !String(job.id).startsWith('hail_')) {
+      try {
+        const catchUpStage = job.stage === 'complete' ? 'onboard' : job.stage;
+        await catchUpJobStagesOnDispatch(job.id, driver.id, catchUpStage, job.updateSeq);
+      } catch (catchUpErr) {
+        console.warn('[Driver] stage catch-up before complete failed:', catchUpErr);
+      }
+    }
+
     try {
       await completeJobPayment({
         jobId: job.id,
@@ -1954,6 +2049,35 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       });
     } catch (err) {
       console.error('[Driver] completeJobPayment failed:', err);
+      if (err instanceof DispatchApiError && err.status === 409 && job.id && driver.id) {
+        try {
+          await catchUpJobStagesOnDispatch(job.id, driver.id, 'onboard', job.updateSeq);
+          await completeJobPayment({
+            jobId: job.id,
+            bookingId: job.id,
+            driverId: driver.id,
+            companyId: driver.companyId,
+            paymentType,
+            fare: totalFare,
+            totalFare,
+            distanceKm: closed.distanceKm,
+            distance: closed.distanceKm,
+            extras,
+            ...(tmDetails ?? {}),
+            payload: {
+              fare: totalFare,
+              totalFare,
+              distanceKm: closed.distanceKm,
+              distance: closed.distanceKm,
+              paymentType,
+              extras,
+            },
+          });
+          // success on retry — fall through to completion below
+        } catch (retryErr) {
+          err = retryErr;
+        }
+      }
       await enqueueOfflineItem({
         type: 'job_update',
         payload: { action: 'complete', jobId: job.id, paymentType, fare: totalFare, extras },

@@ -90,7 +90,7 @@ export default function MainScreen() {
 
   const mapShowsRoute = !!activeJob || hailActive;
 
-  if (profileLoading || (firebaseUser && !driver)) {
+  if (profileLoading && !driver) {
     return (
       <View style={styles.loadingRoot}>
         <ActivityIndicator color={Colors.accent} size="large" />

@@ -44,7 +44,7 @@ export default function SelectVehicleScreen() {
     }
   };
 
-  if (profileLoading || !driver) {
+  if (profileLoading && !driver) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={Colors.accent} size="large" />

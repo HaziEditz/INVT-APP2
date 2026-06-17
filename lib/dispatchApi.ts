@@ -5,27 +5,107 @@ import { isPresenceSessionEnded } from '@/lib/presenceGuards';
 import { loadLiveMeterPresenceFields } from '@/lib/liveMeterPresence';
 import { update, ref } from 'firebase/database';
 
-export async function dispatchGet<T>(path: string): Promise<T> {
-  const token = await getAuthInstance().currentUser?.getIdToken();
+export class DispatchApiError extends Error {
+  status: number;
+  errorCode?: string;
+  body: Record<string, unknown>;
+
+  constructor(message: string, status: number, body: Record<string, unknown> = {}) {
+    super(message);
+    this.name = 'DispatchApiError';
+    this.status = status;
+    this.body = body;
+    this.errorCode = String(body.error_code ?? body.errorCode ?? '');
+  }
+}
+
+async function refreshAuthToken(): Promise<string | undefined> {
+  try {
+    const user = getAuthInstance().currentUser;
+    if (!user) return undefined;
+    return await user.getIdToken(true);
+  } catch {
+    return getAuthInstance().currentUser?.getIdToken().catch(() => undefined);
+  }
+}
+
+async function driverApiHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = await refreshAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const config = await getDispatchConfig();
+    if (config.passforlink) headers['X-User-Key'] = config.passforlink;
+  } catch {
+    // non-fatal — some endpoints resolve driver via body driverId
+  }
+  return headers;
+}
+
+async function parseJsonBody(res: Response): Promise<Record<string, unknown>> {
+  try {
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+export async function driverApiPost<T extends Record<string, unknown>>(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const headers = await driverApiHeaders();
   const res = await fetch(`${DISPATCH_API_URL}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Dispatch GET ${path} failed: ${res.status}`);
-  return res.json() as Promise<T>;
+  const data = await parseJsonBody(res);
+  if (!res.ok || data.ok === false) {
+    throw new DispatchApiError(
+      String(data.error || `Dispatch POST ${path} failed: ${res.status}`),
+      res.status,
+      data,
+    );
+  }
+  return data as T;
+}
+
+export async function driverApiGet<T extends Record<string, unknown>>(path: string): Promise<T> {
+  const headers = await driverApiHeaders();
+  const res = await fetch(`${DISPATCH_API_URL}${path}`, { headers });
+  const data = await parseJsonBody(res);
+  if (!res.ok || data.ok === false) {
+    throw new DispatchApiError(
+      String(data.error || `Dispatch GET ${path} failed: ${res.status}`),
+      res.status,
+      data,
+    );
+  }
+  return data as T;
+}
+
+export async function dispatchGet<T>(path: string): Promise<T> {
+  return driverApiGet(path) as Promise<T>;
 }
 
 export async function dispatchPost<T>(path: string, body: Record<string, unknown>, opts?: { userKey?: string }): Promise<T> {
-  const token = await getAuthInstance().currentUser?.getIdToken();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers = await driverApiHeaders();
   if (opts?.userKey) headers['X-User-Key'] = opts.userKey;
   const res = await fetch(`${DISPATCH_API_URL}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Dispatch POST ${path} failed: ${res.status}`);
-  return res.json() as Promise<T>;
+  const data = await parseJsonBody(res);
+  if (!res.ok) {
+    throw new DispatchApiError(
+      String(data.error || `Dispatch POST ${path} failed: ${res.status}`),
+      res.status,
+      data,
+    );
+  }
+  return data as T;
 }
 
 /** Legacy DriverApp API — POST to links/serviceon base + action name. */
@@ -180,8 +260,32 @@ export async function createPreBooking(payload: Record<string, unknown>) {
 }
 
 export async function completeJobPayment(payload: Record<string, unknown>) {
-  const config = await getDispatchConfig();
-  return dispatchPost('/api/job/complete', payload, { userKey: config.passforlink });
+  return driverApiPost('/api/job/complete', payload);
+}
+
+export interface ActiveBookingRow {
+  bookingId: number;
+  status: string;
+  bookingStatus: string;
+  version: number;
+}
+
+export async function fetchDriverActiveBookings(driverId: string): Promise<ActiveBookingRow[]> {
+  const data = await driverApiGet<{
+    ok?: boolean;
+    bookings?: Array<{
+      bookingId: number;
+      status: string;
+      version?: number;
+    }>;
+  }>(`/api/driver/active-bookings?driverId=${encodeURIComponent(driverId)}`);
+  const rows = data.bookings ?? [];
+  return rows.map((b) => ({
+    bookingId: b.bookingId,
+    status: String(b.status || ''),
+    bookingStatus: String((b as { bookingStatus?: string }).bookingStatus || b.status || ''),
+    version: parseInt(String(b.version ?? 0), 10) || 0,
+  }));
 }
 
 export async function syncJobStageOnDispatch(
@@ -196,38 +300,42 @@ export async function syncJobStageOnDispatch(
   }
 
   const post = async (ver?: number) => {
-    const body: Record<string, unknown> = {
-      bookingId: bid,
-      driverId,
-      status,
-    };
+    const body: Record<string, unknown> = { bookingId: bid, driverId, status };
     if (ver != null && !Number.isNaN(ver)) body.ifVersion = ver;
+    const headers = await driverApiHeaders();
     const res = await fetch(`${DISPATCH_API_URL}/api/job/stage`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
     });
-    const data = (await res.json().catch(() => ({}))) as {
-      ok?: boolean;
-      stale?: boolean;
-      version?: number;
-      currentVersion?: number;
-      currentSeq?: number;
-      error?: string;
-      error_code?: string;
+    const data = await parseJsonBody(res);
+    const retryVer =
+      parseInt(String(data.version ?? data.currentVersion ?? data.currentSeq ?? ''), 10) || undefined;
+    return {
+      ...data,
+      httpOk: res.ok,
+      status: res.status,
+      retryVer: Number.isNaN(retryVer!) ? undefined : retryVer,
     };
-    return { ...data, httpOk: res.ok, status: res.status };
   };
 
   let result = await post(ifVersion);
-  const retryVer = result.version ?? result.currentVersion ?? result.currentSeq;
-  if ((!result.ok || !result.httpOk) && retryVer != null && ifVersion != null) {
-    result = await post(retryVer);
+  if ((!result.ok || !result.httpOk) && result.retryVer != null) {
+    result = await post(result.retryVer);
+  }
+  if ((!result.ok || !result.httpOk) && ifVersion != null) {
+    result = await post(undefined);
   }
   if (!result.ok || !result.httpOk) {
-    throw new Error(result.error || `Dispatch stage sync failed for #${bid} → ${status}`);
+    throw new DispatchApiError(
+      String(result.error || `Dispatch stage sync failed for #${bid} → ${status}`),
+      result.status as number,
+      result as Record<string, unknown>,
+    );
   }
-  return { version: result.version ?? retryVer };
+  const version =
+    parseInt(String(result.version ?? result.retryVer ?? ''), 10) || undefined;
+  return { version: Number.isNaN(version!) ? undefined : version };
 }
 
 export async function promoteQueuedJob(bookingId: string, driverId: string) {

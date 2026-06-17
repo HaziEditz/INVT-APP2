@@ -72,6 +72,17 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const PROFILE_LOAD_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+    }),
+  ]);
+}
+
 async function loadDriverProfile(
   uid: string,
   companyId: string,
@@ -156,10 +167,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileLoading(true);
     try {
       const saved = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
-      const companyId = await resolveCompanyId(user.uid, user.displayName);
-      const profile = await loadDriverProfile(user.uid, companyId, saved?.id ?? '');
+      const companyId = await withTimeout(
+        resolveCompanyId(user.uid, user.displayName),
+        PROFILE_LOAD_TIMEOUT_MS,
+        'Company lookup',
+      );
+      const profile = await withTimeout(
+        loadDriverProfile(user.uid, companyId, saved?.id ?? ''),
+        PROFILE_LOAD_TIMEOUT_MS,
+        'Profile load',
+      );
 
       if (!profile) {
+        if (saved?.uid === user.uid) {
+          setDriver(saved);
+          return;
+        }
         setDriver(null);
         Alert.alert(
           'Profile Not Found',
@@ -187,10 +210,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await storeData(STORAGE_KEYS.driverSession, profile);
     } catch (err) {
       console.error('[Auth] refreshDriver failed:', err);
-      Alert.alert(
-        'Profile Error',
-        err instanceof Error ? err.message : 'Could not load your driver profile.',
-      );
+      const saved = await getData<DriverProfile>(STORAGE_KEYS.driverSession).catch(() => null);
+      if (saved?.uid === user.uid) {
+        setDriver(saved);
+        Alert.alert(
+          'Connection slow',
+          'Using cached profile — some data may be stale until connection improves.',
+        );
+      } else {
+        Alert.alert(
+          'Profile Error',
+          err instanceof Error ? err.message : 'Could not load your driver profile.',
+        );
+      }
     } finally {
       setProfileLoading(false);
     }
