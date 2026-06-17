@@ -248,6 +248,22 @@ export async function startShiftOnline(driver: DriverProfile, vehicleId: string)
   const authUser = await ensureAuthUserForRtdbWrite(`startShiftOnline → ${onlinePath}`);
   console.log('[Presence] startShiftOnline auth uid:', authUser.uid, 'driver profile uid:', driver.uid);
 
+  let vehicleType = '';
+  let seatCapacity = 4;
+  try {
+    const vehSnap = await get(ref(getDatabaseInstance(), `vehicles/${driver.companyId}/${vehicleId}`));
+    if (vehSnap.exists()) {
+      const meta = vehSnap.val() as Record<string, unknown>;
+      vehicleType = String(
+        meta.vehicleType ?? meta.vehicleTypeCode ?? meta.bodyType ?? meta.VehicleType ?? '',
+      ).trim();
+      seatCapacity =
+        parseInt(String(meta.seatCapacity ?? meta.seats ?? meta.capacity ?? '4'), 10) || 4;
+    }
+  } catch {
+    // non-fatal — dispatch falls back to defaults
+  }
+
   const startedAt = new Date();
   const baseRef = ref(getDatabaseInstance(), onlinePath);
   const currentRef = ref(getDatabaseInstance(), `${onlinePath}/current`);
@@ -264,6 +280,9 @@ export async function startShiftOnline(driver: DriverProfile, vehicleId: string)
     CompanyId: driver.companyId,
     shiftStarted: true,
     zonequeue: 0,
+    ...(vehicleType ? { vehicletype: vehicleType, vehicleType } : {}),
+    seatCapacity,
+    seats: seatCapacity,
   });
   console.log('[Presence] startShiftOnline update base OK');
 
@@ -281,6 +300,9 @@ export async function startShiftOnline(driver: DriverProfile, vehicleId: string)
     shiftStarted: true,
     online: true,
     lastSeen: Date.now(),
+    ...(vehicleType ? { vehicletype: vehicleType, vehicleType } : {}),
+    seatCapacity,
+    seats: seatCapacity,
   });
   console.log('[Presence] startShiftOnline set /current OK');
 

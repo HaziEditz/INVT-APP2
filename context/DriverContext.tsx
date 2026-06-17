@@ -410,6 +410,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [nearPickup, setNearPickup] = useState(false);
   const tripOnTheWayRef = useRef(false);
   const acceptCoordsRef = useRef<{ jobId: string; lat: number; lng: number } | null>(null);
+  const acceptingOfferRef = useRef(false);
 
   const resetTripDisplayTracking = () => {
     acceptCoordsRef.current = null;
@@ -1321,13 +1322,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const derivePresenceWriteStatus = (): FirebaseDriverStatus => {
     if (awayIntentRef.current !== 'none') return 'Away';
+    if (paymentJobRef.current) return 'Busy';
     const job = activeJobRef.current;
     if (job?.stage) {
       const map: Record<JobStage, FirebaseDriverStatus> = {
         pickup: 'Assigned',
         arrived: 'Arrived',
         onboard: 'Active',
-        complete: 'Available',
+        complete: 'Busy',
       };
       return map[job.stage] ?? 'Busy';
     }
@@ -1447,7 +1449,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!shiftActive || !driver) return;
     void syncBgLocationFirebaseStatus(derivePresenceWriteStatus());
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftActive, activeJob?.stage, hailActive, presenceStatus, readyForJobs], 'Driver-bg-location-status');
+  }, [shiftActive, activeJob?.stage, hailActive, presenceStatus, readyForJobs, paymentJob], 'Driver-bg-location-status');
 
   const startShift = async (vehicleIdOverride?: string): Promise<boolean> => {
     if (!driver) return false;
@@ -1745,7 +1747,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       pickup: 'Assigned',
       arrived: 'Arrived',
       onboard: 'Active',
-      complete: 'Available',
+      complete: 'Busy',
     };
     const bookingStatusMap: Partial<Record<JobStage, string>> = {
       pickup: 'Assigned',
@@ -1784,7 +1786,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const acceptOffer = async () => {
-    if (!jobOffer || !driver) return;
+    if (!jobOffer || !driver || acceptingOfferRef.current) return;
+    acceptingOfferRef.current = true;
+    try {
     const offerSnapshot = jobOffer;
     if (!isValidBookingId(offerSnapshot.id)) {
       Alert.alert('Invalid job', 'This offer has no valid booking ID. Ask dispatch to re-send the job.');
@@ -1867,6 +1871,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       syncJobStageToDispatch('pickup');
     }
     await clearDriverNotification(driver.id);
+    } finally {
+      acceptingOfferRef.current = false;
+    }
   };
 
   const declineOffer = async (opts?: { timedOut?: boolean }) => {

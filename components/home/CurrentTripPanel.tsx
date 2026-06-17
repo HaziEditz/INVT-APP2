@@ -173,6 +173,8 @@ export function CurrentTripPanel() {
           <Text style={styles.metaLine}>Payment: {activeJob.paymentType}</Text>
         ) : null}
 
+        <JobDispatchMetaSection job={activeJob} compact />
+
         <View style={styles.addrBlock}>
           <Text style={styles.addrLabel}>Pickup</Text>
           <Text style={styles.addr} numberOfLines={3}>
@@ -204,7 +206,6 @@ export function CurrentTripPanel() {
           <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
         ) : null}
 
-        <JobDispatchMetaSection job={activeJob} compact />
         <JobNotesSection job={activeJob} compact />
       </ScrollView>
 

@@ -6,11 +6,12 @@ import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { useRef, useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function JobOfferModal() {
   const { jobOffer, acceptOffer, declineOffer, hailActive, activeJob, paymentJob } = useDriver();
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [accepting, setAccepting] = useState(false);
   const timedOutRef = useRef(false);
 
   useSafeEffect(() => {
@@ -39,15 +40,28 @@ export function JobOfferModal() {
 
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
 
+  const onAccept = () => {
+    if (accepting) return;
+    setAccepting(true);
+    void acceptOffer()
+      .catch((err) => console.error('[JobOfferModal] accept', err))
+      .finally(() => setAccepting(false));
+  };
+
   return (
     <Modal visible transparent animationType="slide" statusBarTranslucent presentationStyle="overFullScreen">
-      <View style={styles.overlay} pointerEvents="box-none">
+      <View style={styles.overlay}>
         <View style={styles.card}>
           <Text style={styles.title}>Job offer</Text>
           <Text style={styles.timer}>{secondsLeft}s to respond</Text>
           <JobTypeBadge type={jobOffer.type} />
 
-          <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.scroll}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
             <Text style={styles.jobId}>Job #{jobOffer.id}</Text>
 
             <View style={styles.row}>
@@ -69,8 +83,9 @@ export function JobOfferModal() {
               <Text style={styles.meta}>Payment: {jobOffer.paymentType}</Text>
             ) : null}
 
-            <Text style={styles.section}>Job details</Text>
             <JobDispatchMetaSection job={jobOffer} compact />
+
+            <Text style={styles.section}>Job details</Text>
             <Text style={styles.detail}>Service type: {jobOffer.serviceTypeRaw ?? jobOffer.type}</Text>
             {jobOffer.vehicleTypeRequired ? (
               <Text style={styles.detail}>Vehicle required: {jobOffer.vehicleTypeRequired}</Text>
@@ -99,7 +114,20 @@ export function JobOfferModal() {
 
           <View style={styles.actions}>
             <Button title="Reject" variant="secondary" onPress={() => declineOffer()} style={styles.btn} />
-            <Button title="Accept" onPress={acceptOffer} style={styles.btn} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Accept job offer"
+              disabled={accepting}
+              onPress={onAccept}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.acceptBtn,
+                accepting && styles.acceptBtnDisabled,
+                pressed && !accepting && styles.acceptBtnPressed,
+              ]}
+            >
+              <Text style={styles.acceptBtnText}>{accepting ? 'Accepting…' : 'Accept'}</Text>
+            </Pressable>
           </View>
         </View>
       </View>
@@ -136,4 +164,16 @@ const styles = StyleSheet.create({
   special: { color: Colors.acc, fontWeight: '700', marginTop: 4 },
   actions: { flexDirection: 'row', gap: 12, marginTop: 12 },
   btn: { flex: 1 },
+  acceptBtn: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.accent,
+    minHeight: 52,
+  },
+  acceptBtnDisabled: { opacity: 0.55 },
+  acceptBtnPressed: { opacity: 0.85 },
+  acceptBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
