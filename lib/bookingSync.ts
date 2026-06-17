@@ -5,6 +5,8 @@ import { JobOffer, JobStage } from '@/types';
 export type BookingUpdate = {
   bookingId: string;
   cancelled: boolean;
+  /** Server closed the booking (Completed / Cancelled / No Show). */
+  terminal: boolean;
   status: string;
   pickup: string;
   dropoff: string;
@@ -18,15 +20,20 @@ export type BookingUpdate = {
 export function parseBookingNode(val: unknown): Partial<BookingUpdate> | null {
   if (!val || typeof val !== 'object') return null;
   const b = val as Record<string, unknown>;
-  const status = String(b.Status ?? b.status ?? b.BookingStatus ?? '').toLowerCase();
+  const statusRaw = String(b.Status ?? b.status ?? b.BookingStatus ?? '');
+  const status = statusRaw.toLowerCase();
   const cancelled =
     status.includes('cancel') ||
     status.includes('void') ||
     !!b.cancelled ||
     !!b.Cancelled;
+  const completed = status.includes('complete');
+  const noShow = status.includes('no show') || status.includes('noshow');
+  const terminal = cancelled || completed || noShow;
   return {
     bookingId: String(b.BookingId ?? b.bookingId ?? b.id ?? ''),
-    cancelled,
+    cancelled: cancelled || completed || noShow,
+    terminal,
     status,
     pickup: String(b.PickAddress ?? b.pickup ?? b.pickAddress ?? ''),
     dropoff: String(b.DropAddress ?? b.dropoff ?? b.dropAddress ?? ''),
@@ -51,7 +58,18 @@ export function subscribeBooking(
 ): () => void {
   const bookingRef = ref(getDatabaseInstance(), `allbookings/${companyId}/${bookingId}`);
   return onValue(bookingRef, (snap) => {
-    if (!snap.exists()) return;
+    if (!snap.exists()) {
+      onUpdate({
+        bookingId,
+        cancelled: true,
+        terminal: true,
+        status: 'removed',
+        pickup: '',
+        dropoff: '',
+        raw: {},
+      });
+      return;
+    }
     const parsed = parseBookingNode(snap.val());
     if (!parsed?.bookingId) return;
     onUpdate({ ...parsed, bookingId: parsed.bookingId || bookingId } as BookingUpdate);

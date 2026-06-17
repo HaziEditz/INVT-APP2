@@ -11,6 +11,32 @@ const STAGE_SERVER_STATUSES: Partial<Record<JobStage, string>> = {
 
 const STAGE_ORDER: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
 
+const TERMINAL_BOOKING_STATUSES = new Set([
+  'Completed',
+  'Cancelled',
+  'Canceled',
+  'No Show',
+  'NoShow',
+  'Closed',
+  'Reject',
+  'Void',
+]);
+
+/** True when dispatch has closed the booking — local activeJob must not block sign-out. */
+export function isTerminalBookingStatus(status: string): boolean {
+  const raw = String(status || '').trim();
+  if (!raw) return false;
+  if (TERMINAL_BOOKING_STATUSES.has(raw)) return true;
+  const s = raw.toLowerCase().replace(/\s+/g, ' ');
+  return (
+    s.includes('cancel') ||
+    s.includes('complete') ||
+    s.includes('no show') ||
+    s.includes('void') ||
+    s === 'closed'
+  );
+}
+
 /** Map server booking status → local trip stage (best-effort). */
 export function localStageFromServerStatus(status: string): JobStage {
   const s = String(status || '').trim();
@@ -72,7 +98,7 @@ export interface ServerBookingRow {
   bookingStatus?: string;
 }
 
-/** Resolve server truth for an active booking (REST first, Firebase fallback). */
+/** Resolve server truth for a cached booking (Firebase first — includes Completed/Cancelled). */
 export async function resolveServerBookingState(
   companyId: string,
   driverId: string,
@@ -80,6 +106,19 @@ export async function resolveServerBookingState(
 ): Promise<ServerBookingRow | null> {
   const bid = parseInt(bookingId, 10);
   if (!bid) return null;
+
+  const fb = await fetchBookingFromFirebase(companyId, bookingId);
+  if (fb?.status) {
+    const row: ServerBookingRow = {
+      bookingId: bid,
+      status: fb.status,
+      version: fb.updateSeq ?? 0,
+      bookingStatus: fb.status,
+    };
+    if (isTerminalBookingStatus(fb.status)) {
+      return row;
+    }
+  }
 
   try {
     const list = await fetchDriverActiveBookings(driverId);
@@ -89,17 +128,21 @@ export async function resolveServerBookingState(
         bookingId: hit.bookingId,
         status: hit.bookingStatus || hit.status,
         version: hit.version,
+        bookingStatus: hit.bookingStatus || hit.status,
       };
     }
   } catch (err) {
     console.warn('[jobServerSync] active-bookings lookup failed:', err);
   }
 
-  const fb = await fetchBookingFromFirebase(companyId, bookingId);
-  if (!fb?.status) return null;
-  return {
-    bookingId: bid,
-    status: fb.status,
-    version: fb.updateSeq ?? 0,
-  };
+  if (fb?.status) {
+    return {
+      bookingId: bid,
+      status: fb.status,
+      version: fb.updateSeq ?? 0,
+      bookingStatus: fb.status,
+    };
+  }
+
+  return null;
 }

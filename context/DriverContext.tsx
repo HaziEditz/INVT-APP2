@@ -12,6 +12,7 @@ import { loadDriverVehicles } from '@/lib/vehicles';
 import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, declineJobOffer, DispatchApiError, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
+  isTerminalBookingStatus,
   localStageFromServerStatus,
   resolveServerBookingState,
   serverStatusIndex,
@@ -456,9 +457,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           setIsOffline(!connected);
           if (connected) {
             await flushOfflineQueue();
+            if (activeJobRef.current?.id) {
+              void refreshActiveJobRef.current?.('netinfo-reconnect');
+            }
             if (shiftActiveRef.current) {
               void repairPresenceRef.current?.('netinfo-reconnect');
-              void refreshActiveJobRef.current?.('netinfo-reconnect');
             }
           }
         } catch (err) {
@@ -869,6 +872,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /** Drop cached activeJob when dispatch confirms it is no longer live. */
+  const clearStaleActiveJobLocal = async (detail: string, opts?: { silent?: boolean }) => {
+    const hadJob = !!activeJobRef.current?.id;
+    await clearActiveJobInternal();
+    setPaymentJob(null);
+    setCompletionError(null);
+    if (shiftActiveRef.current) {
+      await restoreAvailableAfterJobClear();
+    }
+    if (hadJob && !opts?.silent) {
+      Alert.alert('Job already closed', detail);
+    }
+  };
+
   const handleIncomingOffer = async (val: Record<string, unknown>) => {
     if (!shiftActiveRef.current || paymentJobRef.current) return;
 
@@ -1038,18 +1055,31 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         ? String(bookingRawRef.current.Status ?? bookingRawRef.current.status ?? bookingRawRef.current.BookingStatus ?? '')
         : '';
       if (
+        update.terminal ||
         update.cancelled ||
+        isTerminalBookingStatus(
+          String(update.raw.BookingStatus ?? update.raw.Status ?? update.raw.status ?? update.status),
+        ) ||
         (bookingRawRef.current && isReturnedToDispatchPool(update.status) && !isReturnedToDispatchPool(prevStatus))
       ) {
+        if (update.terminal && !update.status.includes('cancel') && update.status !== 'removed') {
+          void playInAppNotificationSound('general');
+          void clearStaleActiveJobLocal(
+            `Job #${activeJob.id} was already completed on dispatch. You can end shift or take new jobs.`,
+          );
+          return;
+        }
         void playInAppNotificationSound('cancel');
         Alert.alert(
-          update.cancelled ? 'Job cancelled' : 'Job taken back',
-          update.cancelled
-            ? 'This booking was cancelled by dispatch.'
+          update.cancelled || update.status === 'removed' ? 'Job cancelled' : 'Job taken back',
+          update.cancelled || update.status === 'removed'
+            ? 'This booking was cancelled or closed by dispatch.'
             : 'This booking was returned to dispatch.',
         );
-        void cancelActiveJobInternal();
-        void restoreAvailableAfterJobClear();
+        void clearStaleActiveJobLocal(
+          update.cancelled ? 'This booking was cancelled on dispatch.' : 'This booking was returned to dispatch.',
+          { silent: true },
+        );
         return;
       }
       const meterStarted = stageAllowsMeter(activeJob?.stage ?? 'pickup');
@@ -1223,9 +1253,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const server = await resolveServerBookingState(driver.companyId, driver.id, job.id);
       if (!server?.status) {
         console.warn(`[Driver] ${reason}: job #${job.id} not found on server`);
-        Alert.alert(
-          'Dispatch sync',
-          `Job #${job.id} was not found on dispatch. It may have been cancelled or closed — contact dispatch if this is wrong.`,
+        return;
+      }
+
+      if (isTerminalBookingStatus(server.status)) {
+        console.log(`[Driver] ${reason}: clearing stale local job #${job.id} — server=${server.status}`);
+        await clearStaleActiveJobLocal(
+          `Job #${job.id} is ${server.status} on dispatch. You can end shift or take new jobs.`,
         );
         return;
       }
@@ -1265,10 +1299,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   refreshActiveJobRef.current = refreshActiveJobFromServer;
 
   useSafeEffect(() => {
-    if (!driver?.companyId || !driver.id || !activeJob?.id || !shiftActive) return;
+    if (!driver?.companyId || !driver.id || !activeJob?.id) return;
     void refreshActiveJobFromServer('active-job-resume');
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver?.companyId, driver?.id, activeJob?.id, shiftActive], 'Driver-reconcile-active-job');
+  }, [driver?.companyId, activeJob?.id], 'Driver-reconcile-active-job');
 
   useSafeEffect(() => {
     if (!driver || !shiftActive || !selectedVehicleId) {
@@ -1283,15 +1317,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [driver?.companyId, driver?.id, shiftActive, selectedVehicleId], 'Driver-presence-heartbeat');
 
   useSafeEffect(() => {
-    if (!driver?.companyId || !shiftActive) return;
+    if (!driver?.companyId) return;
     const unsubRtdb = subscribeFirebaseRtdbConnected((connected) => {
       if (connected) {
-        void repairPresenceRef.current?.('rtdb-reconnect');
-        void refreshActiveJobRef.current?.('rtdb-reconnect');
+        if (activeJobRef.current?.id) {
+          void refreshActiveJobRef.current?.('rtdb-reconnect');
+        }
+        if (shiftActiveRef.current) {
+          void repairPresenceRef.current?.('rtdb-reconnect');
+        }
       }
     });
     return unsubRtdb;
-  }, [driver?.companyId, shiftActive], 'Driver-presence-rtdb');
+  }, [driver?.companyId], 'Driver-presence-rtdb');
 
   useSafeEffect(() => {
     if (!shiftActive || !driver) return;
