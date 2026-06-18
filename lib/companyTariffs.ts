@@ -1,82 +1,58 @@
-import { get, ref } from 'firebase/database';
+import { onValue, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
+import { ingestTariffSnapshot, mergeTariffMaps } from '@/lib/parseTariffRecord';
 import { Tariff } from '@/types';
 
-function parseTariffNode(id: string, val: unknown): Tariff | null {
-  if (!val || typeof val !== 'object') return null;
-  const t = val as Record<string, unknown>;
-  const name = String(t.name ?? t.label ?? t.TariffName ?? id);
-  const flagFall = Number(
-    t.flagFall ?? t.flagfall ?? t.base ?? t.baseFare ?? NaN,
-  );
-  const ratePerKm = Number(
-    t.ratePerKm ?? t.perKm ?? t.kmRate ?? t.pricePerKm ?? NaN,
-  );
-  const waitingPerMin = Number(
-    t.waitingRate ??
-      t.waitingRatePerMinute ??
-      t.waitingPerMin ??
-      t.waitPerMin ??
-      t.waiting ??
-      t.waitingCostPerMin ??
-      t.waitingPerMinute ??
-      NaN,
-  );
-  if (Number.isNaN(flagFall) || Number.isNaN(ratePerKm)) return null;
-  const out: Tariff = {
-    id,
-    name,
-    flagFall,
-    ratePerKm,
-    waitingPerMin: Number.isNaN(waitingPerMin) ? 0 : waitingPerMin,
-  };
-  if (t.nightEnabled) {
-    out.nightEnabled = true;
-    out.nightStart = String(t.nightStart ?? '22:00');
-    out.nightEnd = String(t.nightEnd ?? '06:00');
-    out.nightFlagFall = Number(t.nightFlagFall ?? t.nightBaseFare ?? flagFall);
-    out.nightRatePerKm = Number(t.nightRatePerKm ?? t.nightPricePerKm ?? ratePerKm);
-    out.nightWaitingPerMin = Number(
-      t.nightWaitingPerMin ?? t.nightWaitingRate ?? out.waitingPerMin,
-    );
+/**
+ * Live subscription to company tariffs — merges `tariffs/{companyId}` and
+ * `tariffZones/{companyId}` the same way dispatch `useTariffs` does.
+ * On conflict, tariffZones wins.
+ */
+export function subscribeCompanyTariffs(
+  companyId: string,
+  onChange: (tariffs: Tariff[]) => void,
+): () => void {
+  if (!companyId) {
+    onChange([]);
+    return () => undefined;
   }
-  if (t.weekendEnabled) {
-    out.weekendEnabled = true;
-    out.weekendMultiplier = Number(t.weekendMultiplier ?? 1.2);
-  }
-  if (t.holidayEnabled) {
-    out.holidayEnabled = true;
-    out.holidayMultiplier = Number(t.holidayMultiplier ?? 1.5);
-  }
-  return out;
-}
 
-/** Load tariffs from Firebase `tariffs/{companyId}` only. */
-export async function loadCompanyTariffs(companyId: string): Promise<Tariff[]> {
-  if (!companyId) return [];
+  let database;
   try {
-    const database = getDatabaseInstance();
-    const snap = await get(ref(database, `tariffs/${companyId}`));
-    if (!snap.exists()) return [];
-
-    const val = snap.val();
-    const out: Tariff[] = [];
-
-    if (Array.isArray(val)) {
-      val.forEach((item, i) => {
-        const t = parseTariffNode(String(i), item);
-        if (t) out.push(t);
-      });
-    } else if (val && typeof val === 'object') {
-      Object.entries(val as Record<string, unknown>).forEach(([key, item]) => {
-        const t = parseTariffNode(key, item);
-        if (t) out.push(t);
-      });
-    }
-
-    return out;
+    database = getDatabaseInstance();
   } catch (err) {
-    console.warn('[Tariffs] loadCompanyTariffs failed:', err);
-    return [];
+    console.warn('[Tariffs] subscribeCompanyTariffs: Firebase not ready', err);
+    onChange([]);
+    return () => undefined;
   }
+
+  const maps = [new Map<string, Tariff>(), new Map<string, Tariff>()];
+
+  const sync = () => {
+    onChange(mergeTariffMaps(maps));
+  };
+
+  const ingest = (idx: number, val: unknown) => {
+    ingestTariffSnapshot(val, maps[idx]);
+    sync();
+  };
+
+  const tariffsRef = ref(database, `tariffs/${companyId}`);
+  const zonesRef = ref(database, `tariffZones/${companyId}`);
+
+  const unsubTariffs = onValue(
+    tariffsRef,
+    (snap) => ingest(0, snap.val()),
+    (err) => console.warn('[Tariffs] tariffs listener failed:', err),
+  );
+  const unsubZones = onValue(
+    zonesRef,
+    (snap) => ingest(1, snap.val()),
+    (err) => console.warn('[Tariffs] tariffZones listener failed:', err),
+  );
+
+  return () => {
+    unsubTariffs();
+    unsubZones();
+  };
 }

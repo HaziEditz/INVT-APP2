@@ -52,7 +52,7 @@ import {
   writeOnlinePresence,
   FirebaseDriverStatus,
 } from '@/services/presenceService';
-import { loadCompanyTariffs } from '@/lib/companyTariffs';
+import { subscribeCompanyTariffs } from '@/lib/companyTariffs';
 import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
@@ -422,6 +422,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
   const meterRef = useRef<MeterState | null>(null);
   const meterStopRef = useRef<(() => void) | null>(null);
+  const tariffInitialPickDoneRef = useRef(false);
+  const tariffsListRef = useRef<Tariff[]>([]);
   const paymentJobRef = useRef(false);
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
   /** Suppress false "taken back" alerts when we initiated completion (allbookings node deleted). */
@@ -623,27 +625,42 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (!driver?.companyId) {
+      tariffInitialPickDoneRef.current = false;
       setTariffsState([]);
       setSelectedTariffState(NO_TARIFF_CONFIGURED);
       return;
     }
-    loadCompanyTariffs(driver.companyId)
-      .then(async (list) => {
-        setTariffsState(list);
-        if (list.length === 0) {
-          setSelectedTariffState(NO_TARIFF_CONFIGURED);
-          return;
-        }
-        const savedId = await getData<string>(STORAGE_KEYS.selectedTariffId);
-        const match = savedId ? list.find((t) => t.id === savedId) : null;
-        if (match) setSelectedTariffState(match);
-        else setSelectedTariffState(list[0]);
-      })
-      .catch((err) => {
-        console.error('[Driver] loadCompanyTariffs', err);
-        setTariffsState([]);
+
+    tariffInitialPickDoneRef.current = false;
+
+    return subscribeCompanyTariffs(driver.companyId, (list) => {
+      tariffsListRef.current = list;
+      setTariffsState(list);
+
+      if (list.length === 0) {
         setSelectedTariffState(NO_TARIFF_CONFIGURED);
+        tariffInitialPickDoneRef.current = false;
+        return;
+      }
+
+      if (!tariffInitialPickDoneRef.current) {
+        tariffInitialPickDoneRef.current = true;
+        void (async () => {
+          const savedId = await getData<string>(STORAGE_KEYS.selectedTariffId);
+          const latest = tariffsListRef.current;
+          if (latest.length === 0) return;
+          const match = savedId ? latest.find((t) => t.id === savedId) : null;
+          setSelectedTariffState(match ?? latest[0]);
+        })();
+        return;
+      }
+
+      setSelectedTariffState((prev) => {
+        if (prev.id === NO_TARIFF_CONFIGURED.id) return list[0];
+        const refreshed = list.find((t) => t.id === prev.id);
+        return refreshed ?? list[0];
       });
+    });
   }, [driver?.companyId], 'Driver-tariffs');
 
   useSafeEffect(() => {
