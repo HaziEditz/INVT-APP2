@@ -310,6 +310,43 @@ export async function startShiftOnline(driver: DriverProfile, vehicleId: string)
   console.log('[Presence] startShiftOnline complete', { onlinePath });
 }
 
+/** Mirror GPS-detected zone onto online/{cid}/{vid} for dispatch Zone tab + queue. */
+export async function syncZonePresenceFields(
+  driver: DriverProfile,
+  vehicleId: string,
+  zone: { name: string; zoneNumber?: number; queuePosition?: number },
+): Promise<void> {
+  if (!driver.companyId || !vehicleId || !zone.name.trim()) return;
+  if (isPresenceSessionEnded(driver.companyId, vehicleId)) return;
+  try {
+    assertOnlinePresenceWriteAllowed(driver.companyId, vehicleId, 'syncZonePresenceFields');
+  } catch {
+    return;
+  }
+  const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+  const patch: Record<string, unknown> = {
+    zonename: zone.name,
+    zoneName: zone.name,
+    zoneid: zone.zoneNumber ?? '',
+  };
+  if (zone.queuePosition != null && zone.queuePosition > 0) {
+    patch.zonequeue = zone.queuePosition;
+  }
+  try {
+    await ensureAuthUserForRtdbWrite(`syncZonePresenceFields → ${onlinePath}`);
+    await update(ref(getDatabaseInstance(), onlinePath), patch);
+    await update(ref(getDatabaseInstance(), `${onlinePath}/current`), {
+      zonename: zone.name,
+      zoneName: zone.name,
+      ...(zone.queuePosition != null && zone.queuePosition > 0
+        ? { zonequeue: zone.queuePosition }
+        : {}),
+    });
+  } catch (err) {
+    console.warn('[Presence] syncZonePresenceFields failed:', err);
+  }
+}
+
 export async function writeOnlinePresence(
   driver: DriverProfile,
   vehicleId: string,

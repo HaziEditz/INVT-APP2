@@ -47,6 +47,7 @@ import {
   startShiftOnline,
   stopPresenceHeartbeat,
   subscribeFirebaseRtdbConnected,
+  syncZonePresenceFields,
   updatePresenceHeartbeatStatus,
   writeOnlinePresence,
   FirebaseDriverStatus,
@@ -814,10 +815,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const applyZoneFromCoords = (lat: number, lng: number) => {
       const hit = findZoneAtCoords(lat, lng, companyZonesRef.current);
-      setZone((prev) => ({
-        ...prev,
-        name: hit?.name ?? (prev.name || ''),
-      }));
+      setZone((prev) => {
+        const nextName = hit?.name ?? prev.name ?? '';
+        const nextPos = prev.position;
+        if (driver && selectedVehicleId && hit?.name && hit.name !== prev.name) {
+          syncZonePresenceFields(driver, selectedVehicleId, {
+            name: hit.name,
+            zoneNumber: hit.zoneNumber,
+            queuePosition: nextPos > 0 ? nextPos : undefined,
+          }).catch(() => undefined);
+        }
+        return {
+          ...prev,
+          name: nextName,
+        };
+      });
     };
 
     void (async () => {
