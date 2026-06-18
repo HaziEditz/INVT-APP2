@@ -35,7 +35,6 @@ export default function MainScreen() {
     selectedTariff,
     setSelectedTariff,
     tariffLocked,
-    pendingOffers,
     queuedOffers,
     offersBadgeCount,
     preferredPanelTab,
@@ -161,7 +160,7 @@ export default function MainScreen() {
 
           <HomeMainTabs
             active={mainTab}
-            offersCount={offersBadgeCount || pendingOffers.length}
+            offersCount={offersBadgeCount}
             hasCurrent={hasCurrent}
             queueCount={queuedOffers.length}
             onChange={setMainTab}

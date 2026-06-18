@@ -1,15 +1,14 @@
 import { get, onValue, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
-import { parsePendingJobNode } from '@/lib/pendingJobs';
+import { parseJobOfferRecord } from '@/lib/pendingJobs';
 import { isValidBookingId, normalizeBookingId } from '@/lib/bookingId';
 import { JobOffer, Vehicle } from '@/types';
 
 export function parseDriverQueueNode(id: string, val: Record<string, unknown>): JobOffer | null {
-  const offer = parsePendingJobNode(id, {
+  const offer = parseJobOfferRecord(id, {
     ...val,
-    Status: 'Queued',
     BookingId: val.BookingId ?? val.jobId ?? id,
-  });
+  }, { requirePending: false, requireDispatchWindow: false });
   if (!offer) return null;
   const bookingId = normalizeBookingId(val.jobId ?? val.BookingId ?? val.bookingId ?? offer.id ?? id);
   if (!isValidBookingId(bookingId)) {

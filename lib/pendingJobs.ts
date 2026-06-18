@@ -15,11 +15,15 @@ function parseLatLng(raw?: string): { lat?: number; lng?: number } {
   return {};
 }
 
-export function parsePendingJobNode(id: string, val: Record<string, unknown>): JobOffer | null {
+export function parseJobOfferRecord(
+  id: string,
+  val: Record<string, unknown>,
+  opts?: { requirePending?: boolean; requireDispatchWindow?: boolean },
+): JobOffer | null {
   if (val.claimedBy || val.takenBy) return null;
   const status = String(val.Status ?? val.status ?? 'Pending').toLowerCase();
-  if (status && status !== 'pending') return null;
-  if (!isDispatchWindowOpen(val)) return null;
+  if (opts?.requirePending !== false && status && status !== 'pending') return null;
+  if (opts?.requireDispatchWindow !== false && !isDispatchWindowOpen(val)) return null;
 
   const pickup = String(val.PickAddress ?? val.pickAddress ?? val.pickup ?? '');
   const dropoff = String(val.DropAddress ?? val.dropAddress ?? val.dropoff ?? '');
@@ -37,7 +41,7 @@ export function parsePendingJobNode(id: string, val: Record<string, unknown>): J
     type: serviceTypeToJobType(serviceRaw),
     pickup,
     dropoff,
-    passengerName: String(val.PassengerName ?? val.Name ?? val.passengerName ?? '').trim() || undefined,
+    passengerName: String(val.PassengerName ?? val.Name ?? val.passengername ?? val.passengerName ?? '').trim() || undefined,
     passengerPhone: String(val.PhoneNo ?? val.passengerPhone ?? '').trim() || undefined,
     fixedFare: val.Fare != null ? parseFloat(String(val.Fare)) : undefined,
     estimatedFare: val.Fare != null ? parseFloat(String(val.Fare)) : undefined,
@@ -61,6 +65,10 @@ export function parsePendingJobNode(id: string, val: Record<string, unknown>): J
     silent: true,
     ...scheduling,
   };
+}
+
+export function parsePendingJobNode(id: string, val: Record<string, unknown>): JobOffer | null {
+  return parseJobOfferRecord(id, val);
 }
 
 export function extractPendingOffers(

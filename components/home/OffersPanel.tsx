@@ -17,7 +17,7 @@ function timeSince(ts?: number): string {
 }
 
 export function OffersPanel() {
-  const { broadcastOffers, pickOfferFromList, shiftActive } = useDriver();
+  const { visibleOffers, pickOfferFromList, shiftActive } = useDriver();
 
   if (!shiftActive) {
     return (
@@ -27,7 +27,7 @@ export function OffersPanel() {
     );
   }
 
-  if (broadcastOffers.length === 0) {
+  if (visibleOffers.length === 0) {
     return (
       <View style={styles.empty}>
         <Text style={styles.emptyText}>No offers available</Text>
@@ -37,7 +37,7 @@ export function OffersPanel() {
 
   return (
     <ScrollView style={styles.list} contentContainerStyle={styles.listContent} nestedScrollEnabled showsVerticalScrollIndicator>
-      {broadcastOffers.map((o) => {
+      {visibleOffers.map((o) => {
         const fare = o.fixedFare ?? o.estimatedFare;
         return (
           <View key={o.id} style={styles.card}>

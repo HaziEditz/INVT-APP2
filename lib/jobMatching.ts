@@ -4,6 +4,17 @@ function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
+const OPEN_VEHICLE_TYPES = new Set(['', 'any', 'all', 'not specified']);
+
+function normalizeCategory(raw?: string): string | null {
+  const s = norm(String(raw ?? ''));
+  if (!s || OPEN_VEHICLE_TYPES.has(s)) return null;
+  if (s.includes('van') || s.includes('minibus')) return 'van';
+  if (s.includes('wav') || s.includes('wheelchair')) return 'wav';
+  if (s.includes('car') || s.includes('sedan') || s.includes('suv') || s.includes('saloon')) return 'car';
+  return s;
+}
+
 function mapServiceToJobType(raw: string): JobType {
   const s = norm(raw);
   if (s.includes('food')) return 'Food';
@@ -21,32 +32,35 @@ export function jobMatchesDriverVehicle(offer: JobOffer, vehicle: Vehicle | unde
   if (!vehicle) return false;
 
   const jobType = offer.type ?? serviceTypeToJobType(offer.serviceTypeRaw);
-  const reqType = norm(offer.vehicleTypeRequired ?? '');
-  const reqPax = Math.max(1, offer.passengers ?? 1);
-  const body = norm(vehicle.bodyType);
-  const cap = vehicle.seatCapacity || 4;
-
   if (jobType === 'Food' && !vehicle.hasFoodService) return false;
   if (jobType === 'Freight' && !vehicle.hasFreightService) return false;
 
-  if (reqType.includes('wav') || reqType.includes('wheelchair')) {
-    return vehicle.isWav;
-  }
+  const reqCat = normalizeCategory(offer.vehicleTypeRequired);
+  const body = norm(vehicle.bodyType || vehicle.displayType || '');
+  const drvCat = normalizeCategory(vehicle.bodyType || vehicle.displayType) ||
+    (body.includes('van') || body.includes('minibus') ? 'van' : body.includes('wav') ? 'wav' : 'car');
+  const reqPax = Math.max(1, offer.passengers ?? 1);
+  const cap = vehicle.seatCapacity || 4;
 
-  if (
-    reqType.includes('van') ||
-    reqType.includes('minibus') ||
-    reqPax > 4 ||
-    (reqType && !reqType.includes('sedan') && !reqType.includes('car') && reqType.includes('van'))
-  ) {
-    const isVanBody = body.includes('van') || body.includes('suv') || body.includes('minibus');
+  if (reqCat === 'wav') return vehicle.isWav && cap >= reqPax;
+
+  if (reqCat === 'van') {
+    const isVanBody =
+      drvCat === 'van' || body.includes('van') || body.includes('suv') || body.includes('minibus');
     return isVanBody && cap >= reqPax;
   }
 
-  // Sedan / car / unspecified — any driver with enough seats
-  if (!reqType || reqType === 'not specified' || reqType.includes('sedan') || reqType.includes('car')) {
-    return cap >= reqPax;
+  if (reqCat === 'car') {
+    if (drvCat === 'car' || !reqCat) return cap >= reqPax;
+    const reqExact = norm(offer.vehicleTypeRequired ?? '');
+    const drvExact = body;
+    return !!reqExact && reqExact === drvExact && cap >= reqPax;
   }
 
-  return cap >= reqPax;
+  if (!reqCat) return cap >= reqPax;
+
+  if (reqCat === drvCat) return cap >= reqPax;
+  const reqExact = norm(offer.vehicleTypeRequired ?? '');
+  const drvExact = body;
+  return !!reqExact && reqExact === drvExact && cap >= reqPax;
 }
