@@ -37,6 +37,7 @@ export default function MainScreen() {
     tariffLocked,
     queuedOffers,
     offersBadgeCount,
+    offersLockedForEnrouteDispatch,
     preferredPanelTab,
     clearPreferredPanelTab,
     pauseMeter,
@@ -56,7 +57,12 @@ export default function MainScreen() {
   const mapShowsRoute = !!activeJob || hailActive;
 
   useSafeEffect(() => {
-    if (!firebaseUser) return;
+    if (offersLockedForEnrouteDispatch && mainTab === 'offers') {
+      setMainTab('current');
+    }
+  }, [offersLockedForEnrouteDispatch, mainTab], 'MainScreen-lockOffersTab');
+
+  useSafeEffect(() => {
     refreshDriver().catch((err) => console.error('[Main] refreshDriver failed:', err));
   }, [firebaseUser?.uid], 'MainScreen-loadProfile');
 
@@ -161,6 +167,7 @@ export default function MainScreen() {
           <HomeMainTabs
             active={mainTab}
             offersCount={offersBadgeCount}
+            offersLocked={offersLockedForEnrouteDispatch}
             hasCurrent={hasCurrent}
             queueCount={queuedOffers.length}
             onChange={setMainTab}

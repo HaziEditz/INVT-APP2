@@ -5,14 +5,22 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 type Props = {
   active: MainPanelTab;
   offersCount: number;
+  offersLocked?: boolean;
   hasCurrent: boolean;
   queueCount: number;
   onChange: (tab: MainPanelTab) => void;
 };
 
-export function HomeMainTabs({ active, offersCount, hasCurrent, queueCount, onChange }: Props) {
-  const tabs: { id: MainPanelTab; label: string; badge?: number }[] = [
-    { id: 'offers', label: 'Offers', badge: offersCount },
+export function HomeMainTabs({
+  active,
+  offersCount,
+  offersLocked = false,
+  hasCurrent,
+  queueCount,
+  onChange,
+}: Props) {
+  const tabs: { id: MainPanelTab; label: string; badge?: number; disabled?: boolean }[] = [
+    { id: 'offers', label: 'Offers', badge: offersCount, disabled: offersLocked },
     { id: 'current', label: 'Current' },
     { id: 'queue', label: 'Queue', badge: queueCount },
   ];
@@ -22,13 +30,24 @@ export function HomeMainTabs({ active, offersCount, hasCurrent, queueCount, onCh
       {tabs.map((t) => {
         const isActive = active === t.id;
         const showDot = t.id === 'current' && hasCurrent;
+        const disabled = t.disabled === true;
         return (
           <Pressable
             key={t.id}
-            style={[styles.tab, isActive && styles.tabActive]}
-            onPress={() => onChange(t.id)}
+            style={[styles.tab, isActive && styles.tabActive, disabled && styles.tabDisabled]}
+            onPress={() => {
+              if (!disabled) onChange(t.id);
+            }}
           >
-            <Text style={[styles.label, isActive && styles.labelActive]}>{t.label}</Text>
+            <Text
+              style={[
+                styles.label,
+                isActive && styles.labelActive,
+                disabled && styles.labelDisabled,
+              ]}
+            >
+              {t.label}
+            </Text>
             {t.badge != null && t.badge > 0 ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{t.badge > 99 ? '99+' : t.badge}</Text>
@@ -60,8 +79,10 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   tabActive: { borderBottomColor: Colors.accent },
+  tabDisabled: { opacity: 0.45 },
   label: { color: Colors.textMuted, fontSize: 14, fontWeight: '700' },
   labelActive: { color: Colors.text },
+  labelDisabled: { color: Colors.textMuted },
   badge: {
     minWidth: 20,
     height: 20,

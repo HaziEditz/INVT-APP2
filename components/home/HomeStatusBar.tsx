@@ -36,6 +36,16 @@ export function HomeStatusBar() {
     !hasTripInProgress &&
     (tripDisplayPhase === 'available' || tripDisplayPhase === 'away');
 
+  const prevBusyRef = useRef(false);
+
+  useEffect(() => {
+    const isBusy = hasTripInProgress || presenceStatus === 'Busy';
+    if (prevBusyRef.current && !isBusy && shiftActive && zone.name?.trim()) {
+      setZoneEnteredAt(Date.now());
+    }
+    prevBusyRef.current = isBusy;
+  }, [hasTripInProgress, presenceStatus, shiftActive, zone.name]);
+
   useEffect(() => {
     const name = zone.name?.trim() || '';
     if (!shiftActive || !name) {

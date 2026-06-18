@@ -117,6 +117,8 @@ interface DriverContextValue {
   visibleOffers: JobOffer[];
   /** @deprecated use visibleOffers */
   pendingOffers: JobOffer[];
+  /** Dispatch en-route: Offers tab hidden from accept until On Board (hail exempt). */
+  offersLockedForEnrouteDispatch: boolean;
   offersBadgeCount: number;
   preferredPanelTab: MainPanelTab | null;
   clearPreferredPanelTab: () => void;
@@ -321,6 +323,18 @@ type AwayIntent = 'none' | 'manual' | 'missed';
 
 const EMPTY_STEP_TIMES: JobStepTimes = {};
 const TRIP_BLOCK_MSG = 'Complete your current job first';
+
+/** Hide Offers-tab pool listings for dispatch jobs from accept until On Board (hail exempt). */
+function isDispatchEnrouteOffersLocked(
+  activeJob: ActiveJob | null,
+  hailActive: boolean,
+  meterRunning: boolean,
+): boolean {
+  if (!activeJob || hailActive || activeJob.source === 'hail') return false;
+  if (activeJob.stage === 'onboard' || activeJob.stage === 'complete') return false;
+  if (meterRunning) return false;
+  return true;
+}
 
 function defaultActiveJob(offer: JobOffer): ActiveJob {
   const now = Date.now();
@@ -706,7 +720,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [shiftActive, driver?.companyId, driver?.id, activeVehicle?.id], 'Driver-firebaseQueue');
 
-  const canBrowsePoolOffers = shiftActive && !paymentJob;
+  const offersLockedForEnrouteDispatch = useMemo(
+    () => isDispatchEnrouteOffersLocked(activeJob, hailActive, !!meter?.running),
+    [activeJob, hailActive, meter?.running],
+  );
+
+  const canBrowsePoolOffers =
+    shiftActive && !paymentJob && !offersLockedForEnrouteDispatch;
   const canReceivePopupOffer =
     shiftActive && readyForJobs && presenceStatus === 'Online' && !paymentJob;
 
@@ -725,6 +745,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [canBrowsePoolOffers, driver?.companyId, activeVehicle?.id], 'Driver-pendingPool');
 
   const visibleOffers = useMemo(() => {
+    if (offersLockedForEnrouteDispatch) return [];
     const map = new Map<string, JobOffer>();
     for (const o of poolOffers) {
       map.set(o.id, { ...o, silent: true });
@@ -733,7 +754,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       map.set(o.id, o);
     }
     return Array.from(map.values());
-  }, [poolOffers, broadcastOffers]);
+  }, [poolOffers, broadcastOffers, offersLockedForEnrouteDispatch]);
 
   const upsertBroadcastOffer = (offer: JobOffer) => {
     broadcastOffersRef.current.set(offer.id, offer);
@@ -931,7 +952,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     Alert.alert('Job in progress', TRIP_BLOCK_MSG);
     return true;
   };
-  const offersBadgeCount = shiftActive ? visibleOffers.length : 0;
+  const offersBadgeCount =
+    shiftActive && !offersLockedForEnrouteDispatch ? visibleOffers.length : 0;
   const nextQueuedOffer = queuedOffers[0] ?? null;
 
   useSafeEffect(() => {
@@ -2879,6 +2901,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         broadcastOffers,
         visibleOffers,
         pendingOffers: visibleOffers,
+        offersLockedForEnrouteDispatch,
         offersBadgeCount,
         preferredPanelTab,
         clearPreferredPanelTab: () => setPreferredPanelTab(null),
