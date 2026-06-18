@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -1907,9 +1907,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
       acceptOk = true;
       queued = !!(result?.queued || result?.status === 'Queued');
-    } catch {
-      await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offerSnapshot.id } });
-      Alert.alert('Could not accept', 'The server did not confirm this job. It was queued for retry when you are back online.');
+    } catch (err) {
+      if (isDispatchAcceptRetryable(err)) {
+        await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offerSnapshot.id } });
+        Alert.alert('Could not accept', 'The server did not confirm this job. It was queued for retry when you are back online.');
+      } else {
+        const msg = err instanceof DispatchApiError
+          ? err.message
+          : 'Dispatch did not accept this job.';
+        Alert.alert('Could not accept', msg);
+      }
       return;
     }
 
@@ -1986,8 +1993,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const pickOfferFromList = async (offerId: string) => {
     const offer = visibleOffers.find((o) => o.id === offerId);
-    if (!offer || !driver) return;
-
+    if (!offer || !driver || acceptingOfferRef.current) return;
+    acceptingOfferRef.current = true;
+    try {
     try {
       const result = (await acceptJobOffer(offer.id, driver.id)) as {
         ok?: boolean;
@@ -2003,9 +2011,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         Alert.alert('Job queued', 'This job is in your Queue until your current trip finishes.');
         return;
       }
-    } catch {
-      await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offer.id } });
-      Alert.alert('Could not accept', 'The server did not confirm this job. It was queued for retry when you are back online.');
+    } catch (err) {
+      if (isDispatchAcceptRetryable(err)) {
+        await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offer.id } });
+        Alert.alert('Could not accept', 'The server did not confirm this job. It was queued for retry when you are back online.');
+      } else {
+        const msg = err instanceof DispatchApiError
+          ? err.message
+          : 'Dispatch did not accept this job.';
+        Alert.alert('Could not accept', msg);
+      }
       return;
     }
 
@@ -2022,6 +2037,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (vehicleId) {
       writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
       syncJobStageToDispatch('pickup');
+    }
+    } finally {
+      acceptingOfferRef.current = false;
     }
   };
 

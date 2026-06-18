@@ -19,6 +19,27 @@ export class DispatchApiError extends Error {
   }
 }
 
+/** True when a failed accept should be queued for offline retry (network/5xx only). */
+export function isDispatchAcceptRetryable(err: unknown): boolean {
+  if (err instanceof DispatchApiError) {
+    if (err.status === 409 || err.status === 410 || err.status === 404) return false;
+    const code = err.errorCode || '';
+    if (
+      code === 'invalid_transition' ||
+      code === 'accept_in_flight' ||
+      code === 'status_changed' ||
+      code === 'queue_full' ||
+      code === 'driver_ineligible' ||
+      code === 'cancel_in_flight'
+    ) {
+      return false;
+    }
+    if (err.status >= 500) return true;
+    return false;
+  }
+  return true;
+}
+
 async function refreshAuthToken(): Promise<string | undefined> {
   try {
     const user = getAuthInstance().currentUser;
