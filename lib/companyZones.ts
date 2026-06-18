@@ -9,23 +9,59 @@ export type CompanyZone = {
   boundary: number[][];
 };
 
+function boundaryPoints(raw: unknown): unknown[] {
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    try {
+      return boundaryPoints(JSON.parse(raw));
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    if (Array.isArray(o.points)) return o.points;
+    if (Array.isArray(o.path)) return o.path;
+    return Object.keys(o)
+      .filter((k) => /^\d+$/.test(k))
+      .sort((a, b) => Number(a) - Number(b))
+      .map((k) => o[k]);
+  }
+  return [];
+}
+
 function parseBoundary(raw: unknown): number[][] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((p) => {
-      if (!Array.isArray(p) || p.length < 2) return null;
-      const lat = Number(p[0]);
-      const lng = Number(p[1]);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-      return [lat, lng] as [number, number];
-    })
-    .filter((p): p is [number, number] => p !== null);
+  const out: number[][] = [];
+  for (const p of boundaryPoints(raw)) {
+    if (Array.isArray(p) && p.length >= 2) {
+      let lat = Number(p[0]);
+      let lng = Number(p[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      if (Math.abs(lat) > 90 && Math.abs(lng) <= 90) {
+        const swap = lat;
+        lat = lng;
+        lng = swap;
+      }
+      out.push([lat, lng]);
+      continue;
+    }
+    if (p && typeof p === 'object' && !Array.isArray(p)) {
+      const pt = p as Record<string, unknown>;
+      const lat = Number(pt.lat ?? pt.Lat ?? pt.latitude);
+      const lng = Number(pt.lng ?? pt.Lng ?? pt.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) out.push([lat, lng]);
+    }
+  }
+  return out;
 }
 
 function parseZoneNode(id: string, val: unknown): CompanyZone | null {
   if (!val || typeof val !== 'object') return null;
   const z = val as Record<string, unknown>;
-  const boundary = parseBoundary(z.boundary ?? z.coordinates ?? z.polygon);
+  const boundary = parseBoundary(
+    z.paths ?? z.boundary ?? z.coordinates ?? z.coords ?? z.polygon,
+  );
   if (boundary.length < 3) return null;
   const zoneNumber = Number(z.zoneNumber ?? z.number ?? id);
   const name = String(z.name ?? z.zoneName ?? `Zone ${zoneNumber}`);
