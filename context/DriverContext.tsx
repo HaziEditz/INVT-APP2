@@ -821,6 +821,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (driver && selectedVehicleId && hit?.name && hit.name !== prev.name) {
           syncZonePresenceFields(driver, selectedVehicleId, {
             name: hit.name,
+            zoneId: hit.id,
             zoneNumber: hit.zoneNumber,
             queuePosition: nextPos > 0 ? nextPos : undefined,
           }).catch(() => undefined);

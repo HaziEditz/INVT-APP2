@@ -314,7 +314,7 @@ export async function startShiftOnline(driver: DriverProfile, vehicleId: string)
 export async function syncZonePresenceFields(
   driver: DriverProfile,
   vehicleId: string,
-  zone: { name: string; zoneNumber?: number; queuePosition?: number },
+  zone: { name: string; zoneId?: string; zoneNumber?: number; queuePosition?: number },
 ): Promise<void> {
   if (!driver.companyId || !vehicleId || !zone.name.trim()) return;
   if (isPresenceSessionEnded(driver.companyId, vehicleId)) return;
@@ -327,8 +327,9 @@ export async function syncZonePresenceFields(
   const patch: Record<string, unknown> = {
     zonename: zone.name,
     zoneName: zone.name,
-    zoneid: zone.zoneNumber ?? '',
+    zoneid: zone.zoneId ?? zone.zoneNumber ?? '',
   };
+  if (zone.zoneNumber != null) patch.zoneNumber = zone.zoneNumber;
   if (zone.queuePosition != null && zone.queuePosition > 0) {
     patch.zonequeue = zone.queuePosition;
   }
