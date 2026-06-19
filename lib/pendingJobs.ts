@@ -21,6 +21,13 @@ export function parseJobOfferRecord(
   opts?: { requirePending?: boolean; requireDispatchWindow?: boolean },
 ): JobOffer | null {
   if (val.claimedBy || val.takenBy) return null;
+  if (
+    val.jobEditing === true ||
+    val.dispatcherEditing === true ||
+    val.editLockActive === true
+  ) {
+    return null;
+  }
   const status = String(val.Status ?? val.status ?? 'Pending').toLowerCase();
   if (opts?.requirePending !== false && status && status !== 'pending') return null;
   if (opts?.requireDispatchWindow !== false && !isDispatchWindowOpen(val)) return null;
