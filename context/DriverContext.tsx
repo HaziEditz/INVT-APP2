@@ -27,7 +27,9 @@ import {
 } from '@/lib/jobServerSync';
 import { isValidBookingId, normalizeBookingId } from '@/lib/bookingId';
 import {
+  clearChatNotification,
   clearDriverNotification,
+  clearSosNotification,
   jobIdsMatch,
   readNotificationJobId,
   readNotificationType,
@@ -92,6 +94,10 @@ import {
 } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { router } from 'expo-router';
+
+export type DriverInAppBannerState =
+  | { kind: 'chat'; message: string }
+  | { kind: 'sos'; message: string };
 
 interface DriverContextValue {
   presenceStatus: PresenceDisplayStatus;
@@ -183,6 +189,8 @@ interface DriverContextValue {
   /** GPS within ~50m of pickup — prompts Arrived button. */
   nearPickup: boolean;
   tripOnTheWay: boolean;
+  inAppBanner: DriverInAppBannerState | null;
+  dismissInAppBanner: () => void;
 }
 
 const DriverContext = createContext<DriverContextValue | null>(null);
@@ -399,6 +407,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [meter, setMeter] = useState<MeterState | null>(null);
   const [tariffs, setTariffsState] = useState<Tariff[]>([]);
   const [selectedTariff, setSelectedTariffState] = useState<Tariff>(NO_TARIFF_CONFIGURED);
+  const [inAppBanner, setInAppBanner] = useState<DriverInAppBannerState | null>(null);
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
   const [broadcastOffers, setBroadcastOffers] = useState<JobOffer[]>([]);
   const [poolOffers, setPoolOffers] = useState<JobOffer[]>([]);
@@ -423,6 +432,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const meterRef = useRef<MeterState | null>(null);
   const meterStopRef = useRef<(() => void) | null>(null);
   const tariffInitialPickDoneRef = useRef(false);
+  const prevTariffRatesRef = useRef({ id: '', flagFall: 0, ratePerKm: 0, waitingPerMin: 0 });
   const tariffsListRef = useRef<Tariff[]>([]);
   const paymentJobRef = useRef(false);
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
@@ -1098,20 +1108,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (type === 'driver_sos' || eventType === 'driver_sos') {
-      void playInAppNotificationSound('alert');
-      Alert.alert(
-        'Driver emergency nearby',
-        String(val.content ?? `${val.driverName ?? 'A driver'} has triggered SOS`),
-      );
-      await clearDriverNotification(driver.id);
       return;
     }
 
     if (type === 'chat_message' || eventType === 'chat_message') {
-      void playInAppNotificationSound('general');
-      const body = String(val.content ?? val.message ?? 'New message from dispatch');
-      Alert.alert('Message from dispatch', body);
-      await clearDriverNotification(driver.id);
       return;
     }
 
@@ -1243,6 +1243,58 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canListenForOffers, driver?.id], 'Driver-notification');
+
+  useSafeEffect(() => {
+    if (!shiftActive || !isFirebaseReady || !driver?.id) return;
+    try {
+      const chatRef = ref(getDatabaseInstance(), `notificationChat/${driver.id}`);
+      return onValue(chatRef, async (snap) => {
+        try {
+          const val = snap.val() as Record<string, unknown> | null;
+          if (!val || typeof val !== 'object') return;
+          const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
+          if (eventType !== 'chat_message') return;
+          void playInAppNotificationSound('general');
+          setInAppBanner({
+            kind: 'chat',
+            message: String(val.content ?? val.message ?? 'New message from dispatch'),
+          });
+          await clearChatNotification(driver.id);
+        } catch (err) {
+          console.error('[Driver] chat notification listener', err);
+        }
+      });
+    } catch (err) {
+      console.error('[Driver] chat notification subscribe failed', err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shiftActive, driver?.id], 'Driver-notificationChat');
+
+  useSafeEffect(() => {
+    if (!shiftActive || !isFirebaseReady || !driver?.id) return;
+    try {
+      const sosRef = ref(getDatabaseInstance(), `notificationSos/${driver.id}`);
+      return onValue(sosRef, async (snap) => {
+        try {
+          const val = snap.val() as Record<string, unknown> | null;
+          if (!val || typeof val !== 'object') return;
+          const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
+          if (eventType !== 'driver_sos') return;
+          void playInAppNotificationSound('alert');
+          setInAppBanner({
+            kind: 'sos',
+            message: String(val.content ?? `${val.driverName ?? 'A driver'} has triggered SOS`),
+          });
+          await clearSosNotification(driver.id);
+        } catch (err) {
+          console.error('[Driver] SOS notification listener', err);
+        }
+      });
+    } catch (err) {
+      console.error('[Driver] SOS notification subscribe failed', err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shiftActive, driver?.id], 'Driver-notificationSos');
 
   useSafeEffect(() => {
     if (!driver?.companyId || !activeJob?.id) {
@@ -2870,6 +2922,38 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   useSafeEffect(() => {
+    const t = selectedTariff;
+    const prev = prevTariffRatesRef.current;
+    const sameId = prev.id === t.id && t.id !== NO_TARIFF_CONFIGURED.id;
+    const ratesChanged =
+      sameId &&
+      (prev.flagFall !== t.flagFall || prev.ratePerKm !== t.ratePerKm || prev.waitingPerMin !== t.waitingPerMin);
+    prevTariffRatesRef.current = {
+      id: t.id,
+      flagFall: t.flagFall,
+      ratePerKm: t.ratePerKm,
+      waitingPerMin: t.waitingPerMin,
+    };
+    if (!ratesChanged || !meterRef.current?.running) return;
+    setMeter((m) => {
+      if (!m?.running) return m;
+      const waitMin = m.waitingMs / 60000;
+      const breakdown = calcMeterBreakdown(t, m.distanceKm, waitMin);
+      const next = {
+        ...m,
+        tariffId: t.id,
+        tariffName: t.name,
+        breakdown,
+        fare: breakdown.total,
+      };
+      meterRef.current = next;
+      storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
+      return next;
+    });
+    startMeterWatch();
+  }, [selectedTariff.id, selectedTariff.flagFall, selectedTariff.ratePerKm, selectedTariff.waitingPerMin], 'Driver-tariffMeterRefresh');
+
+  useSafeEffect(() => {
     if (activeJob?.stage !== 'pickup') {
       setNearPickup(false);
     }
@@ -2993,6 +3077,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         tripDisplayColor,
         nearPickup,
         tripOnTheWay,
+        inAppBanner,
+        dismissInAppBanner: () => setInAppBanner(null),
       }}
     >
       {children}

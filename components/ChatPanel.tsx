@@ -3,7 +3,7 @@ import { Input } from '@/components/Input';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
 import { useAuth } from '@/context/AuthContext';
-import { clearDriverNotification } from '@/lib/driverNotifications';
+import { clearChatNotification } from '@/lib/driverNotifications';
 import {
   loadChatHistory,
   sendChatToDispatch,
@@ -65,7 +65,7 @@ export function ChatPanel() {
 
     const unsub = subscribeChat(driver.id, (msg) => {
       mergeMessage(msg);
-      void clearDriverNotification(driver.id);
+      void clearChatNotification(driver.id);
     });
 
     return () => {

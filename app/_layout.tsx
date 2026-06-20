@@ -7,7 +7,7 @@ import { Colors } from '@/constants/theme';
 import { JobOfferModal } from '@/components/JobOfferModal';
 import { PaymentModal } from '@/components/PaymentModal';
 import { PaymentModalFallback } from '@/components/PaymentModalFallback';
-import { EndShiftFlow } from '@/components/EndShiftFlow';
+import { DriverInAppBanner } from '@/components/DriverInAppBanner';
 import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -66,6 +66,9 @@ export default function RootLayout() {
         </ErrorBoundary>
         <ErrorBoundary name="EndShiftFlow">
           <EndShiftFlow />
+        </ErrorBoundary>
+        <ErrorBoundary name="DriverInAppBanner">
+          <DriverInAppBanner />
         </ErrorBoundary>
       </DriverProvider>
     </AuthProvider>

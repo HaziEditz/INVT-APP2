@@ -24,7 +24,7 @@ export function chatPayloadToMessage(
       id,
       sender: 'dispatcher',
       text: parseChatBookingId(bookingid).text || content,
-      timestamp: Date.now(),
+      timestamp: parseInt(String(val.timestamp ?? ''), 10) || Date.now(),
     };
   }
   if (bookingid.endsWith(',Driver') || content) {
@@ -34,11 +34,16 @@ export function chatPayloadToMessage(
       id,
       sender: fromSelf ? 'driver' : 'dispatcher',
       text: fromSelf ? parsed.text || content : parsed.text || content,
-      timestamp: Date.now(),
+      timestamp: parseInt(String(val.timestamp ?? ''), 10) || Date.now(),
     };
   }
   if (content && content !== 'You have New Message') {
-    return { id, sender: 'dispatcher', text: content, timestamp: Date.now() };
+    return {
+      id,
+      sender: 'dispatcher',
+      text: content,
+      timestamp: parseInt(String(val.timestamp ?? ''), 10) || Date.now(),
+    };
   }
   return null;
 }
@@ -69,25 +74,18 @@ export async function loadChatHistory(companyId: string, driverId: string): Prom
 
 export function subscribeChat(driverId: string, onMessage: (msg: ChatMessage) => void): () => void {
   const chatRef = ref(getDatabaseInstance(), `chat/${driverId}`);
-  let skipInitial = true;
-  const handler = (snap: DataSnapshot) => {
-    if (skipInitial) return;
+  let lastStamp = 0;
+  const handleSnap = (snap: DataSnapshot) => {
     const val = snap.val() as Record<string, unknown> | null;
     if (!val) return;
-    const msg = chatPayloadToMessage('live', val, driverId);
+    const ts = parseInt(String(val.timestamp ?? ''), 10) || Date.now();
+    if (ts <= lastStamp) return;
+    lastStamp = ts;
+    const msgId = String(val.messageId ?? ts);
+    const msg = chatPayloadToMessage(msgId, val, driverId);
     if (msg && msg.sender === 'dispatcher') onMessage(msg);
   };
-  const unsub = onValue(chatRef, (snap) => {
-    if (skipInitial) {
-      skipInitial = false;
-      return;
-    }
-    handler(snap);
-  });
-  setTimeout(() => {
-    skipInitial = false;
-  }, 2500);
-  return unsub;
+  return onValue(chatRef, handleSnap);
 }
 
 export async function sendChatToDispatch(message: string): Promise<void> {

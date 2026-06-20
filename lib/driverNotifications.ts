@@ -42,3 +42,21 @@ export async function clearDriverNotification(driverId: string): Promise<void> {
     // non-fatal
   }
 }
+
+export async function clearChatNotification(driverId: string): Promise<void> {
+  if (!driverId) return;
+  try {
+    await remove(ref(getDatabaseInstance(), `notificationChat/${driverId}`));
+  } catch {
+    // non-fatal
+  }
+}
+
+export async function clearSosNotification(driverId: string): Promise<void> {
+  if (!driverId) return;
+  try {
+    await remove(ref(getDatabaseInstance(), `notificationSos/${driverId}`));
+  } catch {
+    // non-fatal
+  }
+}
