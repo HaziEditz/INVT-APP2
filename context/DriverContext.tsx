@@ -1382,7 +1382,43 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (!patch.notes) patch.notes = syncedNotes.map((n) => n.text).join('\n\n');
       }
 
-      if (changes.length === 0 && !syncedNotes.length) return;
+      const dispatchTariffId = allowed.tariffId?.trim();
+      const dispatchTariffName = allowed.tariffName?.trim();
+      if (dispatchTariffId || dispatchTariffName) {
+        const match =
+          tariffsListRef.current.find((t) => dispatchTariffId && t.id === dispatchTariffId) ??
+          tariffsListRef.current.find((t) => dispatchTariffName && t.name === dispatchTariffName);
+        if (match && match.id !== selectedTariff.id) {
+          setSelectedTariffState(match);
+          storeData(STORAGE_KEYS.selectedTariffId, match.id).catch(() => undefined);
+          if (meterRef.current?.running) {
+            const change: TariffChangeRecord = {
+              tariffId: match.id,
+              tariffName: match.name,
+              at: Date.now(),
+            };
+            setMeter((prev) => {
+              if (!prev) return prev;
+              const waitMin = prev.waitingMs / 60000;
+              const breakdown = calcMeterBreakdown(match, prev.distanceKm, waitMin);
+              const next = {
+                ...prev,
+                tariffId: match.id,
+                tariffName: match.name,
+                tariffChanges: [...prev.tariffChanges, change],
+                breakdown,
+                fare: breakdown.total,
+              };
+              meterRef.current = next;
+              storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
+              return next;
+            });
+            startMeterWatch();
+          }
+        }
+      }
+
+      if (changes.length === 0 && !syncedNotes.length && !dispatchTariffId && !dispatchTariffName) return;
 
       if (Object.keys(patch).length > 0) {
         setActiveJob((prev) => {

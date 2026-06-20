@@ -14,6 +14,8 @@ export type BookingUpdate = {
   passengerPhone?: string;
   notes?: string;
   paymentType?: string;
+  tariffId?: string;
+  tariffName?: string;
   raw: Record<string, unknown>;
 };
 
@@ -114,6 +116,19 @@ export function diffBookingChanges(
     if (oldPay !== newPay && newPay) {
       changes.push(`Payment: ${newPay}`);
       allowed.paymentType = newPay;
+    }
+
+    const oldTariffId = String(prev.TariffId ?? prev.TarriffId ?? prev.tariffId ?? '');
+    const newTariffId = String(next.TariffId ?? next.TarriffId ?? next.tariffId ?? '');
+    const oldTariffName = String(prev.TarriffType ?? prev.TariffName ?? prev.tariffName ?? '');
+    const newTariffName = String(next.TarriffType ?? next.TariffName ?? next.tariffName ?? '');
+    if (oldTariffId !== newTariffId && newTariffId) {
+      changes.push(`Tariff: ${newTariffName || newTariffId}`);
+      allowed.tariffId = newTariffId;
+      if (newTariffName) allowed.tariffName = newTariffName;
+    } else if (oldTariffName !== newTariffName && newTariffName) {
+      changes.push(`Tariff: ${newTariffName}`);
+      allowed.tariffName = newTariffName;
     }
   }
 
