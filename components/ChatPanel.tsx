@@ -13,6 +13,7 @@ import { ChatMessage } from '@/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -91,6 +92,10 @@ export function ChatPanel() {
     } catch (e) {
       setText(body);
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      Alert.alert(
+        'Send failed',
+        e instanceof Error ? e.message : 'Could not reach dispatch. Check your connection and try again.',
+      );
     } finally {
       setSending(false);
     }

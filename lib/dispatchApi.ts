@@ -3,6 +3,8 @@ import { getAuthInstance, getDatabaseInstance, ensureAuthUserForRtdbWrite } from
 import { getDispatchConfig } from '@/lib/dispatchConfig';
 import { isPresenceSessionEnded } from '@/lib/presenceGuards';
 import { loadLiveMeterPresenceFields } from '@/lib/liveMeterPresence';
+import { getData, STORAGE_KEYS } from '@/lib/storage';
+import type { DriverProfile } from '@/types';
 import { update, ref } from 'firebase/database';
 
 export class DispatchApiError extends Error {
@@ -50,16 +52,44 @@ async function refreshAuthToken(): Promise<string | undefined> {
   }
 }
 
+async function loadDriverSession(): Promise<DriverProfile | null> {
+  try {
+    return await getData<DriverProfile>(STORAGE_KEYS.driverSession);
+  } catch {
+    return null;
+  }
+}
+
+/** Per-driver passforlink from profile session; falls back to global links node. */
+async function resolveDriverUserKey(): Promise<string | undefined> {
+  const session = await loadDriverSession();
+  const fromProfile = String(session?.passforlink ?? '').trim();
+  if (fromProfile) return fromProfile;
+  try {
+    const config = await getDispatchConfig();
+    const fromLinks = String(config.passforlink ?? '').trim();
+    return fromLinks || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function withDriverIdentity(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const session = await loadDriverSession();
+  const out = { ...body };
+  if (!out.driverId && session?.id) out.driverId = session.id;
+  if (!out.companyId && session?.companyId) out.companyId = session.companyId;
+  if (!out.driverName && session?.name) out.driverName = session.name;
+  if (!out.phone && session?.phone) out.phone = session.phone;
+  return out;
+}
+
 async function driverApiHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = await refreshAuthToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  try {
-    const config = await getDispatchConfig();
-    if (config.passforlink) headers['X-User-Key'] = config.passforlink;
-  } catch {
-    // non-fatal — some endpoints resolve driver via body driverId
-  }
+  const userKey = await resolveDriverUserKey();
+  if (userKey) headers['X-User-Key'] = userKey;
   return headers;
 }
 
@@ -74,12 +104,14 @@ async function parseJsonBody(res: Response): Promise<Record<string, unknown>> {
 export async function driverApiPost<T extends Record<string, unknown>>(
   path: string,
   body: Record<string, unknown>,
+  opts?: { includeDriverIdentity?: boolean },
 ): Promise<T> {
   const headers = await driverApiHeaders();
+  const payload = opts?.includeDriverIdentity === false ? body : await withDriverIdentity(body);
   const res = await fetch(`${DISPATCH_API_URL}${path}`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
   const data = await parseJsonBody(res);
   if (!res.ok || data.ok === false) {
