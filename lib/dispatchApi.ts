@@ -457,3 +457,23 @@ export async function cancelJobAsDriver(
     reason: terminalKind === 'No Show' ? 'No Show' : 'Cancelled by driver',
   });
 }
+
+/** Trigger emergency SOS — requires X-User-Key (driver passforlink). */
+export async function triggerDriverSos(payload: {
+  lat: number;
+  lng: number;
+  phone?: string;
+  driverName?: string;
+}) {
+  return driverApiPost<{ ok: boolean; sosId?: string; status?: string }>('/api/driver/sos', payload);
+}
+
+/** Cancel an active SOS signal. */
+export async function cancelDriverSos() {
+  return driverApiPost<{ ok: boolean; cleared?: boolean }>('/api/driver/sos/cancel', {});
+}
+
+/** Send a chat message to dispatch. */
+export async function sendDriverMessage(message: string) {
+  return driverApiPost<{ ok: boolean; messageId?: number }>('/api/driver/message', { message });
+}

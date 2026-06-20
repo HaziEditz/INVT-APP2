@@ -1097,6 +1097,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (type === 'driver_sos' || eventType === 'driver_sos') {
+      void playInAppNotificationSound('alert');
+      Alert.alert(
+        'Driver emergency nearby',
+        String(val.content ?? `${val.driverName ?? 'A driver'} has triggered SOS`),
+      );
+      await clearDriverNotification(driver.id);
+      return;
+    }
+
+    if (type === 'chat_message' || eventType === 'chat_message') {
+      void playInAppNotificationSound('general');
+      const body = String(val.content ?? val.message ?? 'New message from dispatch');
+      Alert.alert('Message from dispatch', body);
+      await clearDriverNotification(driver.id);
+      return;
+    }
+
     if (type === 'job_removed') {
       void playInAppNotificationSound('alert');
       Alert.alert('Job taken back', 'Job has been taken back by dispatcher');

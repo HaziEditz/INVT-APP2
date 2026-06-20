@@ -12,6 +12,7 @@ import {
   NZTA_MAX_WORK_HOURS,
 } from '@/constants/theme';
 import { NztaHoursBar } from '@/components/home/NztaHoursBar';
+import { SosButton } from '@/components/SosButton';
 import { loadVehicleBodyType } from '@/lib/vehicles';
 import {
   confirmBreakTaken,
@@ -258,6 +259,13 @@ export default function ProfileScreen() {
         <Text style={sharedStyles.cardTitle}>Push notifications</Text>
         <Switch value={notifications} onValueChange={setNotifications} trackColor={{ true: Colors.accent }} />
       </View>
+
+      {shiftActive ? (
+        <View style={sharedStyles.card}>
+          <Text style={sharedStyles.cardTitle}>Emergency SOS</Text>
+          <SosButton disabled={endShiftInProgress || hasTripInProgress} />
+        </View>
+      ) : null}
 
       <Button
         title={endShiftInProgress ? 'Ending shift…' : 'End Shift'}
