@@ -7,6 +7,7 @@ import { Colors } from '@/constants/theme';
 import { JobOfferModal } from '@/components/JobOfferModal';
 import { PaymentModal } from '@/components/PaymentModal';
 import { PaymentModalFallback } from '@/components/PaymentModalFallback';
+import { EndShiftFlow } from '@/components/EndShiftFlow';
 import { DriverInAppBanner } from '@/components/DriverInAppBanner';
 import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
 import { Stack } from 'expo-router';
