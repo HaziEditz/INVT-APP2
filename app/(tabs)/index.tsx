@@ -81,10 +81,11 @@ export default function MainScreen() {
   }, [shiftActive], 'MainScreen-shiftStartTab');
 
   useSafeEffect(() => {
-    if (hasCurrent && !prevHasCurrentRef.current) {
-      setMainTab('current');
+    if (hasCurrent) {
+      if (!prevHasCurrentRef.current || mainTab === 'queue') {
+        setMainTab('current');
+      }
     } else if (
-      !hasCurrent &&
       queuedOffers.length > 0 &&
       prevQueueLenRef.current === 0
     ) {
@@ -92,7 +93,7 @@ export default function MainScreen() {
     }
     prevHasCurrentRef.current = hasCurrent;
     prevQueueLenRef.current = queuedOffers.length;
-  }, [hasCurrent, queuedOffers.length], 'MainScreen-autoTab');
+  }, [hasCurrent, queuedOffers.length, mainTab], 'MainScreen-autoTab');
 
   if (profileLoading && !driver) {
     return (

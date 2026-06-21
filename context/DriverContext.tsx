@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, promoteQueuedJob, recallJobOnDispatch, reportNoShow, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, promoteQueuedJob, recallJobOnDispatch, reportNoShow, StageTransportError, syncJobStageOnDispatch } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -63,8 +63,10 @@ import * as Location from 'expo-location';
 import {
   diffBookingChanges,
   isReturnedToDispatchPool,
+  parseBookingNode,
   stageAllowsMeter,
   subscribeBooking,
+  verifyJobStageOnFirebase,
 } from '@/lib/bookingSync';
 import { initializeNztaOnLogin } from '@/services/nztaService';
 import type { EndShiftSummary } from '@/services/nztaService';
@@ -426,6 +428,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const activeJobIdRef = useRef<string | null>(null);
   const activeJobRef = useRef<ActiveJob | null>(null);
   const presenceWriteStatusRef = useRef<FirebaseDriverStatus>('Available');
+  const lastStagePresenceWriteRef = useRef<{ status: FirebaseDriverStatus; at: number } | null>(null);
+  const prevQueuedOfferIdsRef = useRef<Set<string>>(new Set());
   const repairPresenceRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const refreshActiveJobRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
@@ -731,10 +735,36 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     if (!shiftActive || !driver?.companyId || !driver.id) {
       setQueuedOffers([]);
+      prevQueuedOfferIdsRef.current = new Set();
       return;
     }
+    const companyId = driver.companyId;
     try {
-      return subscribeDriverQueue(driver.companyId, driver.id, activeVehicle, (offers) => {
+      return subscribeDriverQueue(companyId, driver.id, activeVehicle, (offers) => {
+        const nextIds = new Set(offers.map((o) => o.id));
+        const prevIds = prevQueuedOfferIdsRef.current;
+        for (const id of prevIds) {
+          if (nextIds.has(id)) continue;
+          void (async () => {
+            try {
+              const snap = await get(ref(getDatabaseInstance(), `allbookings/${companyId}/${id}`));
+              if (!snap.exists()) {
+                Alert.alert('Queued job cancelled', 'A queued booking was cancelled or removed.');
+                return;
+              }
+              const parsed = parseBookingNode(snap.val());
+              if (!parsed) return;
+              if (parsed.cancelled || (parsed.terminal && !parsed.status.includes('complete'))) {
+                Alert.alert('Queued job cancelled', 'A queued booking was cancelled or removed.');
+              } else if (isReturnedToDispatchPool(parsed.status)) {
+                Alert.alert('Queued job taken back', 'A queued job was returned to dispatch.');
+              }
+            } catch {
+              // non-fatal — queue node removal is enough to drop from UI
+            }
+          })();
+        }
+        prevQueuedOfferIdsRef.current = nextIds;
         setQueuedOffers(
           offers.map((o) => ({
             ...o,
@@ -1471,50 +1501,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.companyId, jobOffer?.id], 'Driver-offerBookingSync');
 
-  useSafeEffect(() => {
-    if (!driver?.companyId || queuedOffers.length === 0) return;
-    const prevRaw: Record<string, Record<string, unknown>> = {};
-    const unsubs = queuedOffers.map((o) =>
-      subscribeBooking(driver.companyId!, o.id, (update) => {
-        if (update.cancelled || (update.status === 'removed' && update.terminal && !update.status.includes('complete'))) {
-          Alert.alert('Queued job cancelled', 'A queued booking was cancelled or removed.');
-          setQueuedOffers((prev) => prev.filter((q) => q.id !== o.id));
-          return;
-        }
-        if (update.terminal && !update.cancelled) {
-          setQueuedOffers((prev) => prev.filter((q) => q.id !== o.id));
-          return;
-        }
-        if (isReturnedToDispatchPool(update.status)) {
-          Alert.alert('Queued job taken back', 'A queued job was returned to dispatch.');
-          setQueuedOffers((prev) => prev.filter((q) => q.id !== o.id));
-          return;
-        }
-        const prev = prevRaw[o.id] ?? null;
-        const { changes, allowed } = diffBookingChanges(prev, update.raw, false);
-        if (prev && changes.length > 0) {
-          void playInAppNotificationSound('update');
-          Alert.alert('Queued job updated', changes.join('\n'));
-          setQueuedOffers((prev) =>
-            prev.map((q) =>
-              q.id !== o.id
-                ? q
-                : {
-                    ...q,
-                    pickup: allowed.pickup ?? q.pickup,
-                    dropoff: allowed.dropoff ?? q.dropoff,
-                    passengerName: allowed.passengerName ?? q.passengerName,
-                    passengerPhone: allowed.passengerPhone ?? q.passengerPhone,
-                    notes: allowed.notes ?? q.notes,
-                  },
-            ),
-          );
-        }
-        prevRaw[o.id] = update.raw;
-      }),
-    );
-    return () => unsubs.forEach((u) => u());
-  }, [driver?.companyId, queuedOffers], 'Driver-queuedBookingSync');
+  const writeStagePresenceDebounced = async (
+    presStatus: FirebaseDriverStatus,
+    vehicleId: string,
+  ) => {
+    const now = Date.now();
+    const last = lastStagePresenceWriteRef.current;
+    if (last && last.status === presStatus && now - last.at < 2500) return;
+    lastStagePresenceWriteRef.current = { status: presStatus, at: now };
+    await writeOnlinePresence(driver!, vehicleId, presStatus).catch(() => undefined);
+    void syncBgLocationFirebaseStatus(presStatus);
+  };
 
   const setSelectedVehicleId = async (id: string) => {
     const normalized = id.trim().toUpperCase();
@@ -1986,10 +1983,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     const vehicleId = await resolveVehicleId();
-    if (vehicleId && shiftActiveRef.current) {
-      writeOnlinePresence(driver, vehicleId, statusMap[stage]).catch(() => undefined);
-      void syncBgLocationFirebaseStatus(statusMap[stage]);
-    }
 
     const { version } = await syncJobStageOnDispatch(
       jobRef.id,
@@ -2004,6 +1997,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
         return merged;
       });
+    }
+
+    if (vehicleId && shiftActiveRef.current) {
+      await writeStagePresenceDebounced(statusMap[stage], vehicleId);
     }
   };
 
@@ -2297,14 +2294,48 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       };
       setActiveJob(updated);
       persistActiveJobAsync(updated);
-
-      const vehicleId = await resolveVehicleId();
-      if (vehicleId && shiftActiveRef.current) {
-        const pres: FirebaseDriverStatus = nextStage === 'onboard' ? 'Active' : nextStage === 'arrived' ? 'Arrived' : 'Assigned';
-        writeOnlinePresence(driver, vehicleId, pres).catch(() => undefined);
-      }
     } catch (err) {
       console.error('[Driver] advanceStage failed:', err);
+      const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
+      const idx = order.indexOf(activeJob.stage);
+      const nextStage = order[Math.min(idx + 1, order.length - 1)];
+      const expectedBookingStatus =
+        nextStage === 'arrived' ? 'Arrived' : nextStage === 'onboard' ? 'Active' : '';
+
+      if (
+        driver.companyId &&
+        expectedBookingStatus &&
+        (err instanceof StageTransportError || err instanceof DispatchApiError)
+      ) {
+        const verified = await verifyJobStageOnFirebase(
+          driver.companyId,
+          activeJob.id,
+          expectedBookingStatus,
+          activeJob.updateSeq,
+        );
+        if (verified.verified) {
+          const now = Date.now();
+          const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
+          if (nextStage === 'arrived') stepTimes.arrivedAt = now;
+          if (nextStage === 'onboard') {
+            stepTimes.onboardAt = now;
+            startMeterForJob();
+          }
+          const recovered: ActiveJob = {
+            ...activeJob,
+            stage: nextStage,
+            stepTimes,
+            meterSnapshot: activeJob.meterSnapshot,
+            fare: activeJob.fare,
+            distanceKm: activeJob.distanceKm,
+            ...(verified.updateSeq != null ? { updateSeq: verified.updateSeq } : {}),
+          };
+          setActiveJob(recovered);
+          persistActiveJobAsync(recovered);
+          return;
+        }
+      }
+
       const msg =
         err instanceof DispatchApiError
           ? `${err.message}${err.errorCode ? ` (${err.errorCode})` : ''}`

@@ -21,6 +21,19 @@ export class DispatchApiError extends Error {
   }
 }
 
+/** Thrown when the stage POST fails at the transport layer (timeout, abort, network). */
+export class StageTransportError extends Error {
+  cause: unknown;
+
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = 'StageTransportError';
+    this.cause = cause;
+  }
+}
+
+const STAGE_FETCH_TIMEOUT_MS = 20_000;
+
 /** True when a failed accept should be queued for offline retry (network/5xx only). */
 export function isDispatchAcceptRetryable(err: unknown): boolean {
   if (err instanceof DispatchApiError) {
@@ -98,6 +111,26 @@ async function parseJsonBody(res: Response): Promise<Record<string, unknown>> {
     return (await res.json()) as Record<string, unknown>;
   } catch {
     return {};
+  }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === 'AbortError';
+    throw new StageTransportError(
+      aborted ? `Request timed out after ${timeoutMs}ms` : 'Network request failed',
+      err,
+    );
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -395,49 +428,40 @@ export async function syncJobStageOnDispatch(
   status: string,
   driverId: string,
   ifVersion?: number,
-): Promise<{ version?: number }> {
+): Promise<{ version?: number; idempotent?: boolean }> {
   const bid = parseInt(String(bookingId), 10);
   if (!bid || !driverId) {
     throw new Error('syncJobStageOnDispatch: bookingId and driverId required');
   }
 
-  const post = async (ver?: number) => {
-    const body: Record<string, unknown> = { bookingId: bid, driverId, status };
-    if (ver != null && !Number.isNaN(ver)) body.ifVersion = ver;
-    const headers = await driverApiHeaders();
-    const res = await fetch(`${DISPATCH_API_URL}/api/job/stage`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    const data = await parseJsonBody(res);
-    const retryVer =
+  const body: Record<string, unknown> = {
+    bookingId: bid,
+    driverId,
+    status,
+    clientRequestId: `stage-${bid}-${status}-${ifVersion ?? 0}`,
+  };
+  if (ifVersion != null && !Number.isNaN(ifVersion)) body.ifVersion = ifVersion;
+
+  const headers = await driverApiHeaders();
+  const res = await fetchWithTimeout(
+    `${DISPATCH_API_URL}/api/job/stage`,
+    { method: 'POST', headers, body: JSON.stringify(body) },
+    STAGE_FETCH_TIMEOUT_MS,
+  );
+  const data = await parseJsonBody(res);
+  if (res.ok && data.ok !== false) {
+    const version =
       parseInt(String(data.version ?? data.currentVersion ?? data.currentSeq ?? ''), 10) || undefined;
     return {
-      ...data,
-      httpOk: res.ok,
-      status: res.status,
-      retryVer: Number.isNaN(retryVer!) ? undefined : retryVer,
+      version: version != null && !Number.isNaN(version) ? version : undefined,
+      idempotent: data.idempotent === true,
     };
-  };
-
-  let result = await post(ifVersion);
-  if ((!result.ok || !result.httpOk) && result.retryVer != null) {
-    result = await post(result.retryVer);
   }
-  if ((!result.ok || !result.httpOk) && ifVersion != null) {
-    result = await post(undefined);
-  }
-  if (!result.ok || !result.httpOk) {
-    throw new DispatchApiError(
-      String(result.error || `Dispatch stage sync failed for #${bid} → ${status}`),
-      result.status as number,
-      result as Record<string, unknown>,
-    );
-  }
-  const version =
-    parseInt(String(result.version ?? result.retryVer ?? ''), 10) || undefined;
-  return { version: Number.isNaN(version!) ? undefined : version };
+  throw new DispatchApiError(
+    String(data.error || `Dispatch stage sync failed for #${bid} → ${status}`),
+    res.status,
+    data,
+  );
 }
 
 export async function promoteQueuedJob(bookingId: string, driverId: string) {

@@ -1,4 +1,4 @@
-import { onValue, ref } from 'firebase/database';
+import { get, onValue, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { JobOffer, JobStage } from '@/types';
 
@@ -137,4 +137,46 @@ export function diffBookingChanges(
 
 export function stageAllowsMeter(stage: JobStage): boolean {
   return stage === 'onboard';
+}
+
+function bookingStatusFromRecord(b: Record<string, unknown>): string {
+  return String(b.BookingStatus ?? b.Status ?? b.status ?? '').trim();
+}
+
+function updateSeqFromRecord(b: Record<string, unknown>): number | undefined {
+  const n = parseInt(String(b.updateSeq ?? b._seq ?? b.version ?? ''), 10);
+  return Number.isNaN(n) ? undefined : n;
+}
+
+function statusesMatchStage(expectedStatus: string, actual: string): boolean {
+  const e = expectedStatus.toLowerCase().replace(/\s+/g, '');
+  const a = actual.toLowerCase().replace(/\s+/g, '');
+  if (e === a) return true;
+  if (e === 'active' && (a === 'active' || a === 'ontrip')) return true;
+  return false;
+}
+
+/** Confirm dispatch stage advanced on Firebase after a transport-layer failure. */
+export async function verifyJobStageOnFirebase(
+  companyId: string,
+  bookingId: string,
+  expectedStatus: string,
+  minUpdateSeq?: number,
+): Promise<{ verified: boolean; updateSeq?: number; status?: string }> {
+  try {
+    const snap = await get(ref(getDatabaseInstance(), `allbookings/${companyId}/${bookingId}`));
+    if (!snap.exists()) return { verified: false };
+    const raw = snap.val() as Record<string, unknown>;
+    const status = bookingStatusFromRecord(raw);
+    const updateSeq = updateSeqFromRecord(raw);
+    if (statusesMatchStage(expectedStatus, status)) {
+      return { verified: true, updateSeq, status };
+    }
+    if (minUpdateSeq != null && updateSeq != null && updateSeq > minUpdateSeq) {
+      return { verified: true, updateSeq, status };
+    }
+    return { verified: false, updateSeq, status };
+  } catch {
+    return { verified: false };
+  }
 }
