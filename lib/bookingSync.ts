@@ -34,7 +34,7 @@ export function parseBookingNode(val: unknown): Partial<BookingUpdate> | null {
   const terminal = cancelled || completed || noShow;
   return {
     bookingId: String(b.BookingId ?? b.bookingId ?? b.id ?? ''),
-    cancelled: cancelled || completed || noShow,
+    cancelled,
     terminal,
     status,
     pickup: String(b.PickAddress ?? b.pickup ?? b.pickAddress ?? ''),

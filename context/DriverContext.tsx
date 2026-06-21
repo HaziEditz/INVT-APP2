@@ -1442,9 +1442,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     if (!driver?.companyId || !jobOffer?.id) return;
     return subscribeBooking(driver.companyId, jobOffer.id, (update) => {
-      if (update.cancelled) {
+      if (update.cancelled || (update.terminal && update.status.includes('cancel'))) {
         void playInAppNotificationSound('cancel');
         Alert.alert('Offer cancelled', 'This booking was cancelled by dispatch.');
+        setJobOffer(null);
+        removeBroadcastOffer(jobOffer.id);
+        return;
+      }
+      if (update.terminal) {
         setJobOffer(null);
         removeBroadcastOffer(jobOffer.id);
         return;
@@ -1471,8 +1476,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const prevRaw: Record<string, Record<string, unknown>> = {};
     const unsubs = queuedOffers.map((o) =>
       subscribeBooking(driver.companyId!, o.id, (update) => {
-        if (update.cancelled || update.status === 'removed') {
+        if (update.cancelled || (update.status === 'removed' && update.terminal && !update.status.includes('complete'))) {
           Alert.alert('Queued job cancelled', 'A queued booking was cancelled or removed.');
+          setQueuedOffers((prev) => prev.filter((q) => q.id !== o.id));
+          return;
+        }
+        if (update.terminal && !update.cancelled) {
           setQueuedOffers((prev) => prev.filter((q) => q.id !== o.id));
           return;
         }
