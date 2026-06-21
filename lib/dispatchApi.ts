@@ -464,6 +464,10 @@ export async function syncJobStageOnDispatch(
   );
 }
 
+export async function pruneDriverQueueOnDispatch(opts?: { dryRun?: boolean }): Promise<{ removed?: unknown[] }> {
+  return driverApiPost('/api/driver/prune-queue', { dryRun: !!opts?.dryRun });
+}
+
 export async function promoteQueuedJob(bookingId: string, driverId: string) {
   const bid = parseInt(bookingId, 10);
   if (!bid) throw new Error('promoteQueuedJob: invalid bookingId');

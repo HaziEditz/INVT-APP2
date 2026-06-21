@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, promoteQueuedJob, recallJobOnDispatch, reportNoShow, StageTransportError, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, StageTransportError, syncJobStageOnDispatch } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -35,7 +35,7 @@ import {
   readNotificationType,
 } from '@/lib/driverNotifications';
 import { playInAppNotificationSound, alertDriverToOffer } from '@/lib/notificationSound';
-import { subscribeDriverQueue } from '@/lib/driverQueue';
+import { subscribeDriverQueue, filterLiveDriverQueueOffers } from '@/lib/driverQueue';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import { tickWorkedMinutes } from '@/services/nztaService';
@@ -733,14 +733,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [queuedOffers], 'Driver-queuedOffersRef');
 
   useSafeEffect(() => {
+    if (shiftActive && driver?.companyId && driver.id) {
+      pruneDriverQueueOnDispatch().catch(() => undefined);
+    }
+  }, [shiftActive, driver?.companyId, driver?.id], 'Driver-pruneQueueOnShift');
+
+  useSafeEffect(() => {
     if (!shiftActive || !driver?.companyId || !driver.id) {
       setQueuedOffers([]);
       prevQueuedOfferIdsRef.current = new Set();
       return;
     }
     const companyId = driver.companyId;
+    const driverId = driver.id;
     try {
-      return subscribeDriverQueue(companyId, driver.id, activeVehicle, (offers) => {
+      return subscribeDriverQueue(companyId, driverId, activeVehicle, (offers) => {
         const nextIds = new Set(offers.map((o) => o.id));
         const prevIds = prevQueuedOfferIdsRef.current;
         for (const id of prevIds) {
@@ -765,12 +772,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           })();
         }
         prevQueuedOfferIdsRef.current = nextIds;
-        setQueuedOffers(
-          offers.map((o) => ({
+        void (async () => {
+          const mapped = offers.map((o) => ({
             ...o,
             queuedAt: o.queuedAt ?? Date.now(),
-          })),
-        );
+          }));
+          const live = await filterLiveDriverQueueOffers(companyId, driverId, mapped);
+          if (live.length < mapped.length) {
+            pruneDriverQueueOnDispatch().catch(() => undefined);
+          }
+          setQueuedOffers(live);
+        })();
       });
     } catch (err) {
       console.error('[Driver] driverQueue subscribe failed', err);

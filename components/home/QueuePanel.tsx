@@ -27,7 +27,7 @@ export function QueuePanel() {
     <ScrollView style={styles.list} nestedScrollEnabled showsVerticalScrollIndicator={false}>
       {queuedOffers.map((o, i) => (
         <View key={o.id} style={styles.card}>
-          <Text style={styles.queuePos}>#{i + 1} in queue</Text>
+          <Text style={styles.queuePos}>#{i + 1} in queue · Job #{o.id}</Text>
           <JobTypeBadge type={o.type} />
           <Text style={styles.addr} numberOfLines={2}>
             {o.pickup}

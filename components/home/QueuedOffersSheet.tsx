@@ -22,7 +22,7 @@ export function QueuedOffersSheet({ visible, onClose }: Props) {
             ) : (
               queuedOffers.map((o) => (
                 <View key={o.id} style={styles.card}>
-                  <Text style={styles.type}>{o.type}</Text>
+                  <Text style={styles.type}>{o.type} · #{o.id}</Text>
                   <Text style={styles.addr} numberOfLines={2}>{o.pickup}</Text>
                   <Text style={styles.addr} numberOfLines={1}>→ {o.dropoff}</Text>
                   <Button
