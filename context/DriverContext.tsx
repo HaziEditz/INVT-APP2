@@ -1074,12 +1074,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const restoreAvailableAfterJobClear = async () => {
     if (!driver || !shiftActive) return;
     const vehicleId = await resolveVehicleId();
-    if (vehicleId) {
-      writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
-      setPresenceStatus('Online');
-      setReadyForJobs(true);
-      readyForJobsRef.current = true;
+    if (!vehicleId) return;
+    if (queuedOffersRef.current.length > 0) {
+      writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+      setPresenceStatus('Busy');
+      readyForJobsRef.current = false;
+      return;
     }
+    writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
+    setPresenceStatus('Online');
+    setReadyForJobs(true);
+    readyForJobsRef.current = true;
   };
 
   const clearActiveJobInternal = async (opts?: { skipReleaseQueue?: boolean }) => {
@@ -1126,6 +1131,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     upsertBroadcastOffer(offer);
 
     if (hailActiveRef.current || activeJobIdRef.current) {
+      return;
+    }
+
+    const pendingQueue = queuedOffersRef.current[0];
+    if (pendingQueue && !jobIdsMatch(pendingQueue.id, offer.id)) {
+      console.log('[Driver] ignoring competing offer during queue promotion window:', offer.id);
       return;
     }
 
@@ -2044,6 +2055,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         const vehicleId = await resolveVehicleId();
         if (vehicleId) {
           writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+          setPresenceStatus('Busy');
+          readyForJobsRef.current = true;
         }
         await clearDriverNotification(driver.id);
         return;
@@ -2557,10 +2570,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (driver && shiftActive) {
       const vehicleId = await resolveVehicleId();
       if (vehicleId) {
-        writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
-        setPresenceStatus('Online');
-        setReadyForJobs(true);
-        readyForJobsRef.current = true;
+        if (queuedOffersRef.current.length > 0) {
+          writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+          setPresenceStatus('Busy');
+          readyForJobsRef.current = false;
+        } else {
+          writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
+          setPresenceStatus('Online');
+          setReadyForJobs(true);
+          readyForJobsRef.current = true;
+        }
       }
     }
     releaseQueuedOffersAfterTrip();
@@ -2578,10 +2597,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (shiftActive) {
       const vehicleId = await resolveVehicleId();
       if (vehicleId) {
-        writeOnlinePresence(driver!, vehicleId, 'Available').catch(() => undefined);
-        setPresenceStatus('Online');
-        setReadyForJobs(true);
-        readyForJobsRef.current = true;
+        if (queuedOffersRef.current.length > 0) {
+          writeOnlinePresence(driver!, vehicleId, 'Busy').catch(() => undefined);
+          setPresenceStatus('Busy');
+          readyForJobsRef.current = false;
+        } else {
+          writeOnlinePresence(driver!, vehicleId, 'Available').catch(() => undefined);
+          setPresenceStatus('Online');
+          setReadyForJobs(true);
+          readyForJobsRef.current = true;
+        }
       }
     }
     releaseQueuedOffersAfterTrip();
