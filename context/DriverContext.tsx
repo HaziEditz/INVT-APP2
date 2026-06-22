@@ -1071,11 +1071,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     void alertDriverToOffer({ ...q, silent: false, fromQueue: true });
   };
 
-  const restoreAvailableAfterJobClear = async () => {
+  const driverHasConfirmedActiveTrip = () =>
+    !!(activeJobIdRef.current || hailActiveRef.current || paymentJobRef.current);
+
+  const syncPresenceAfterTripClear = async () => {
     if (!driver || !shiftActive) return;
     const vehicleId = await resolveVehicleId();
     if (!vehicleId) return;
-    if (queuedOffersRef.current.length > 0) {
+    if (driverHasConfirmedActiveTrip()) {
       writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
       setPresenceStatus('Busy');
       readyForJobsRef.current = false;
@@ -1085,6 +1088,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setPresenceStatus('Online');
     setReadyForJobs(true);
     readyForJobsRef.current = true;
+  };
+
+  const restoreAvailableAfterJobClear = async () => {
+    await syncPresenceAfterTripClear();
   };
 
   const clearActiveJobInternal = async (opts?: { skipReleaseQueue?: boolean }) => {
@@ -2568,19 +2575,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     refreshJobHistory().catch(() => undefined);
 
     if (driver && shiftActive) {
-      const vehicleId = await resolveVehicleId();
-      if (vehicleId) {
-        if (queuedOffersRef.current.length > 0) {
-          writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
-          setPresenceStatus('Busy');
-          readyForJobsRef.current = false;
-        } else {
-          writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
-          setPresenceStatus('Online');
-          setReadyForJobs(true);
-          readyForJobsRef.current = true;
-        }
-      }
+      await syncPresenceAfterTripClear();
     }
     releaseQueuedOffersAfterTrip();
   };
@@ -2595,19 +2590,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await storeData(STORAGE_KEYS.activeJob, null);
     await storeData(STORAGE_KEYS.meterState, null);
     if (shiftActive) {
-      const vehicleId = await resolveVehicleId();
-      if (vehicleId) {
-        if (queuedOffersRef.current.length > 0) {
-          writeOnlinePresence(driver!, vehicleId, 'Busy').catch(() => undefined);
-          setPresenceStatus('Busy');
-          readyForJobsRef.current = false;
-        } else {
-          writeOnlinePresence(driver!, vehicleId, 'Available').catch(() => undefined);
-          setPresenceStatus('Online');
-          setReadyForJobs(true);
-          readyForJobsRef.current = true;
-        }
-      }
+      await syncPresenceAfterTripClear();
     }
     releaseQueuedOffersAfterTrip();
   };
