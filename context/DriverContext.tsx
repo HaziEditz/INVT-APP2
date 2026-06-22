@@ -366,7 +366,9 @@ function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unkn
   if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
   if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
   if (val.jobname) patch.passengerName = String(val.jobname);
-  if (val.JobphoneNo) patch.passengerPhone = String(val.JobphoneNo);
+  if (val.JobphoneNo || val.PhoneNo || val.passengerPhone) {
+    patch.passengerPhone = String(val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone);
+  }
   return { ...offer, ...patch };
 }
 
@@ -376,7 +378,9 @@ function patchActiveJobFromNotification(job: ActiveJob, val: Record<string, unkn
   if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
   if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
   if (val.jobname) patch.passengerName = String(val.jobname);
-  if (val.JobphoneNo) patch.passengerPhone = String(val.JobphoneNo);
+  if (val.JobphoneNo || val.PhoneNo || val.passengerPhone) {
+    patch.passengerPhone = String(val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone);
+  }
   return { ...job, ...patch };
 }
 

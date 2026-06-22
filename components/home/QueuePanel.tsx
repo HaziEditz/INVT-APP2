@@ -36,8 +36,10 @@ export function QueuePanel() {
             → {o.dropoff}
           </Text>
           <JobDispatchMetaSection job={o} compact />
-          {o.passengerName ? (
-            <Text style={styles.meta}>{o.passengerName}{o.passengerPhone ? ` · ${o.passengerPhone}` : ''}</Text>
+          {o.passengerName || o.passengerPhone ? (
+            <Text style={styles.meta}>
+              {[o.passengerName, o.passengerPhone].filter(Boolean).join(' · ')}
+            </Text>
           ) : null}
           <Text style={styles.meta}>{waitLabel(o.queuedAt)}</Text>
           <Button title="Recall" variant="secondary" onPress={() => recallQueuedOffer(o.id)} style={{ marginTop: 10 }} />
