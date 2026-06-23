@@ -35,6 +35,7 @@ import {
   readNotificationType,
 } from '@/lib/driverNotifications';
 import { playInAppNotificationSound, alertDriverToOffer } from '@/lib/notificationSound';
+import { enableWakeLock } from '@/services/wakeLock';
 import { subscribeDriverQueue, filterLiveDriverQueueOffers } from '@/lib/driverQueue';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
@@ -99,7 +100,8 @@ import { router } from 'expo-router';
 
 export type DriverInAppBannerState =
   | { kind: 'chat'; message: string }
-  | { kind: 'sos'; message: string };
+  | { kind: 'sos'; message: string }
+  | { kind: 'pool_offer'; jobId: string; message: string };
 
 interface DriverContextValue {
   presenceStatus: PresenceDisplayStatus;
@@ -130,6 +132,7 @@ interface DriverContextValue {
   offersBadgeCount: number;
   preferredPanelTab: MainPanelTab | null;
   clearPreferredPanelTab: () => void;
+  requestPanelTab: (tab: MainPanelTab) => void;
   activeVehicle: Vehicle | undefined;
   jobEditNotice: string | null;
   completedJobs: CompletedJob[];
@@ -437,6 +440,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const meterStopRef = useRef<(() => void) | null>(null);
   const tariffInitialPickDoneRef = useRef(false);
   const prevTariffRatesRef = useRef({ id: '', flagFall: 0, ratePerKm: 0, waitingPerMin: 0 });
+  const selectedTariffRef = useRef<Tariff>(NO_TARIFF_CONFIGURED);
+  const seenPoolOfferIdsRef = useRef<Set<string>>(new Set());
+  const poolOffersInitializedRef = useRef(false);
   const tariffsListRef = useRef<Tariff[]>([]);
   const paymentJobRef = useRef(false);
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
@@ -453,6 +459,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     tripOnTheWayRef.current = false;
     setTripOnTheWay(false);
     setNearPickup(false);
+  };
+
+  const ensureTripWakeLock = () => {
+    void enableWakeLock();
   };
 
   const captureAcceptLocation = async (jobId: string) => {
@@ -533,6 +543,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               stepTimes: j.stepTimes ?? EMPTY_STEP_TIMES,
               tariffChanges: j.tariffChanges ?? [],
             });
+            activeJobIdRef.current = j.id;
+            ensureTripWakeLock();
           } else {
             console.warn('[Driver] cleared stored active job with invalid booking id:', j.id);
             await storeData(STORAGE_KEYS.activeJob, null);
@@ -824,6 +836,46 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     return Array.from(map.values());
   }, [poolOffers, broadcastOffers, offersLockedForEnrouteDispatch]);
+
+  useSafeEffect(() => {
+    selectedTariffRef.current = selectedTariff;
+  }, [selectedTariff], 'Driver-selectedTariffRef');
+
+  useSafeEffect(() => {
+    if (!shiftActive) {
+      seenPoolOfferIdsRef.current = new Set();
+      poolOffersInitializedRef.current = false;
+      return;
+    }
+    const onTrip =
+      hailActiveRef.current || !!activeJobIdRef.current || !!paymentJobRef.current;
+    if (!onTrip) {
+      seenPoolOfferIdsRef.current = new Set(visibleOffers.map((o) => o.id));
+      poolOffersInitializedRef.current = true;
+      return;
+    }
+    if (!poolOffersInitializedRef.current) {
+      seenPoolOfferIdsRef.current = new Set(visibleOffers.map((o) => o.id));
+      poolOffersInitializedRef.current = true;
+      return;
+    }
+    for (const offer of visibleOffers) {
+      if (seenPoolOfferIdsRef.current.has(offer.id)) continue;
+      seenPoolOfferIdsRef.current.add(offer.id);
+      const pickup = offer.pickup?.trim() || 'Tap Offers to view';
+      setInAppBanner({
+        kind: 'pool_offer',
+        jobId: offer.id,
+        message: `#${offer.id} · ${pickup}`,
+      });
+      void playInAppNotificationSound('offer');
+      break;
+    }
+  }, [shiftActive, visibleOffers, activeJob?.id, hailActive, paymentJob], 'Driver-busyPoolOfferBanner');
+
+  useSafeEffect(() => {
+    poolOffersInitializedRef.current = false;
+  }, [activeJob?.id, hailActive], 'Driver-resetPoolOfferSeed');
 
   const upsertBroadcastOffer = (offer: JobOffer) => {
     broadcastOffersRef.current.set(offer.id, offer);
@@ -2055,6 +2107,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         job.updateSeq = result.version;
         setActiveJob(job);
         activeJobIdRef.current = job.id;
+        ensureTripWakeLock();
         await storeData(STORAGE_KEYS.activeJob, job);
         setQueuedOffers((prev) => prev.filter((o) => o.id !== offerSnapshot.id));
         setPreferredPanelTab('current');
@@ -2119,6 +2172,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     job.updateSeq = acceptResult?.version ?? acceptResult?.booking?.version;
     setActiveJob(job);
     activeJobIdRef.current = job.id;
+    ensureTripWakeLock();
     await storeData(STORAGE_KEYS.activeJob, job);
     setPreferredPanelTab('current');
     await captureAcceptLocation(job.id);
@@ -2212,6 +2266,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     job.originalStatus = offer.originalStatus ?? 'pending';
     setActiveJob(job);
     activeJobIdRef.current = job.id;
+    ensureTripWakeLock();
     await storeData(STORAGE_KEYS.activeJob, job);
     setPreferredPanelTab('current');
     await captureAcceptLocation(job.id);
@@ -2231,6 +2286,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('No tariff', 'Select a tariff before starting the meter.');
       return;
     }
+    ensureTripWakeLock();
     const m = createInitialMeter(selectedTariff);
     setMeter(m);
     meterRef.current = m;
@@ -2254,7 +2310,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const startMeterWatch = () => {
     if (meterStopRef.current) meterStopRef.current();
     void watchMeter(
-      selectedTariff,
+      () => selectedTariffRef.current,
       () => meterRef.current,
       (result) => {
         setMeter(result.meter);
@@ -2807,6 +2863,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setActiveJob(hailJob);
       activeJobIdRef.current = jobId;
       activeJobRef.current = hailJob;
+      ensureTripWakeLock();
       persistActiveJobAsync(hailJob);
 
       const m = createInitialMeter(selectedTariff);
@@ -3119,6 +3176,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         offersBadgeCount,
         preferredPanelTab,
         clearPreferredPanelTab: () => setPreferredPanelTab(null),
+        requestPanelTab: (tab: MainPanelTab) => setPreferredPanelTab(tab),
         activeVehicle,
         jobEditNotice,
         completedJobs,

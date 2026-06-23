@@ -5,31 +5,46 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function bannerTitle(banner: DriverInAppBannerState): string {
-  return banner.kind === 'chat' ? 'Message from dispatch' : 'Driver emergency nearby';
+  if (banner.kind === 'chat') return 'Message from dispatch';
+  if (banner.kind === 'pool_offer') return 'New job available';
+  return 'Driver emergency nearby';
 }
 
 export function DriverInAppBanner() {
-  const { inAppBanner, dismissInAppBanner } = useDriver();
+  const { inAppBanner, dismissInAppBanner, requestPanelTab } = useDriver();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   if (!inAppBanner) return null;
 
   const onOpen = () => {
-    dismissInAppBanner();
     if (inAppBanner.kind === 'chat') {
+      dismissInAppBanner();
       router.push('/(tabs)/chat');
+      return;
+    }
+    if (inAppBanner.kind === 'pool_offer') {
+      dismissInAppBanner();
+      requestPanelTab('offers');
     }
   };
+
+  const canOpen = inAppBanner.kind === 'chat' || inAppBanner.kind === 'pool_offer';
 
   return (
     <View style={[styles.wrap, { top: insets.top + 8 }]} pointerEvents="box-none">
       <View style={[styles.card, inAppBanner.kind === 'sos' && styles.cardSos]}>
         <Pressable
           style={styles.body}
-          onPress={inAppBanner.kind === 'chat' ? onOpen : undefined}
+          onPress={canOpen ? onOpen : undefined}
           accessibilityRole="button"
-          accessibilityLabel={inAppBanner.kind === 'chat' ? 'Open chat' : undefined}
+          accessibilityLabel={
+            inAppBanner.kind === 'chat'
+              ? 'Open chat'
+              : inAppBanner.kind === 'pool_offer'
+                ? 'Open offers'
+                : undefined
+          }
         >
           <Text style={styles.title}>{bannerTitle(inAppBanner)}</Text>
           <Text style={styles.message} numberOfLines={3}>
@@ -37,6 +52,8 @@ export function DriverInAppBanner() {
           </Text>
           {inAppBanner.kind === 'chat' ? (
             <Text style={styles.hint}>Tap to open chat</Text>
+          ) : inAppBanner.kind === 'pool_offer' ? (
+            <Text style={styles.hint}>Tap to view in Offers</Text>
           ) : null}
         </Pressable>
         <Pressable
