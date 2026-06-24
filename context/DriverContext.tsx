@@ -439,7 +439,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const prevTariffRatesRef = useRef({ id: '', flagFall: 0, ratePerKm: 0, waitingPerMin: 0 });
   const selectedTariffRef = useRef<Tariff>(NO_TARIFF_CONFIGURED);
   const tariffsListRef = useRef<Tariff[]>([]);
-  const paymentJobRef = useRef(false);
+  const paymentJobRef = useRef<ActiveJob | null>(null);
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
   /** Suppress false "taken back" alerts when we initiated completion (allbookings node deleted). */
   const localCompletionRef = useRef(false);
@@ -507,8 +507,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [activeJob], 'Driver-activeJobFullRef');
 
   useSafeEffect(() => {
-    paymentJobRef.current = !!paymentJob;
+    paymentJobRef.current = paymentJob;
   }, [paymentJob], 'Driver-paymentRef');
+
+  const clearPaymentJobRef = () => {
+    paymentJobRef.current = null;
+  };
 
   useSafeEffect(() => {
     meterRef.current = meter;
@@ -1133,6 +1137,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const hadJob = !!activeJobRef.current?.id;
     await clearActiveJobInternal();
     setPaymentJob(null);
+    clearPaymentJobRef();
     setCompletionError(null);
     if (shiftActiveRef.current) {
       await restoreAvailableAfterJobClear();
@@ -1902,6 +1907,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setActiveJob(null);
     activeJobIdRef.current = null;
     setPaymentJob(null);
+    clearPaymentJobRef();
     void storeData(STORAGE_KEYS.activeJob, null);
   };
 
@@ -2461,6 +2467,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const dismissPayment = () => {
     setPaymentJob(null);
+    clearPaymentJobRef();
     setCompletionError(null);
   };
 
@@ -2604,6 +2611,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setCompletedJobs((prev) => [done, ...prev]);
     setActiveJob(null);
     setPaymentJob(null);
+    clearPaymentJobRef();
     setPreferredPanelTab('current');
     setHailActive(false);
     hailActiveRef.current = false;
@@ -2630,6 +2638,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setMeter(null);
     meterRef.current = null;
     setActiveJob(null);
+    setPaymentJob(null);
+    clearPaymentJobRef();
     activeJobIdRef.current = null;
     bookingRawRef.current = null;
     await storeData(STORAGE_KEYS.activeJob, null);
