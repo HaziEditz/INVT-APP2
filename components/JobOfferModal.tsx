@@ -21,11 +21,25 @@ export function JobOfferModal() {
     }
     const tick = () => {
       try {
-        if (hailActive || activeJob || paymentJob) return;
+        if (hailActive || activeJob || paymentJob) {
+          console.log('[away-debug] JobOfferModal timer suppressed', {
+            jobId: jobOffer.id,
+            hailActive: !!hailActive,
+            activeJob: !!activeJob,
+            paymentJob: !!paymentJob,
+            secondsLeft: Math.ceil((jobOffer.expiresAt - Date.now()) / 1000),
+          });
+          return;
+        }
         const left = Math.max(0, Math.ceil((jobOffer.expiresAt - Date.now()) / 1000));
         setSecondsLeft(left);
         if (left <= 0 && !timedOutRef.current) {
           timedOutRef.current = true;
+          console.log('[away-debug] JobOfferModal timer → declineOffer timedOut', {
+            jobId: jobOffer.id,
+            fromQueue: !!jobOffer.fromQueue,
+            expiresAt: jobOffer.expiresAt,
+          });
           declineOffer({ timedOut: true }).catch((err) => console.error('[JobOfferModal] decline', err));
         }
       } catch (err) {

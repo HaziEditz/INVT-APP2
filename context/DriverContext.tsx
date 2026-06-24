@@ -1076,16 +1076,33 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     !!(activeJobIdRef.current || hailActiveRef.current || paymentJobRef.current);
 
   const syncPresenceAfterTripClear = async () => {
-    if (!driver || !shiftActive) return;
+    const snap = {
+      shiftActive,
+      hailActive: hailActiveRef.current,
+      activeJobId: activeJobIdRef.current,
+      paymentJobId: paymentJobRef.current?.id ?? null,
+      awayIntent: awayIntentRef.current,
+      hasConfirmedTrip: driverHasConfirmedActiveTrip(),
+    };
+    console.log('[away-debug] syncPresenceAfterTripClear enter', snap);
+    if (!driver || !shiftActive) {
+      console.log('[away-debug] syncPresenceAfterTripClear skip — no driver or shift');
+      return;
+    }
     const vehicleId = await resolveVehicleId();
-    if (!vehicleId) return;
+    if (!vehicleId) {
+      console.log('[away-debug] syncPresenceAfterTripClear skip — no vehicleId');
+      return;
+    }
     if (driverHasConfirmedActiveTrip()) {
+      console.log('[away-debug] syncPresenceAfterTripClear → Busy (trip/payment still active)', snap);
       writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
       setPresenceStatus('Busy');
       readyForJobsRef.current = false;
       return;
     }
     awayIntentRef.current = 'none';
+    console.log('[away-debug] syncPresenceAfterTripClear → Available');
     writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
     setPresenceStatus('Online');
     setReadyForJobs(true);
@@ -1833,6 +1850,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const setAwayAfterMissedOffer = async () => {
+    console.log('[away-debug] setAwayAfterMissedOffer', {
+      shiftActive,
+      driverId: driver?.id,
+      hailActive: hailActiveRef.current,
+      activeJobId: activeJobIdRef.current,
+      paymentJobId: paymentJobRef.current?.id ?? null,
+      stack: new Error().stack?.split('\n').slice(1, 5).join(' | '),
+    });
     if (!driver || !shiftActive) return;
     const vehicleId = await resolveVehicleId();
     if (!vehicleId) return;
@@ -2139,6 +2164,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!jobOffer || !driver) return;
     const offerSnapshot = jobOffer;
     const timedOut = !!opts?.timedOut;
+    console.log('[away-debug] declineOffer', {
+      jobId: offerSnapshot.id,
+      timedOut,
+      fromQueue: !!offerSnapshot.fromQueue,
+      hailActive: hailActiveRef.current,
+      activeJobId: activeJobIdRef.current,
+      paymentJobId: paymentJobRef.current?.id ?? null,
+      awayIntentBefore: awayIntentRef.current,
+    });
 
     if (offerSnapshot.fromQueue) {
       try {
@@ -2166,7 +2200,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
       removeBroadcastOffer(offerSnapshot.id);
       if (shiftActive && timedOut && !driverHasConfirmedActiveTrip()) {
+        console.log('[away-debug] declineOffer → setAwayAfterMissedOffer (timed-out broadcast offer)');
         await setAwayAfterMissedOffer();
+      } else {
+        console.log('[away-debug] declineOffer skip Away', {
+          shiftActive,
+          timedOut,
+          hasTrip: driverHasConfirmedActiveTrip(),
+        });
       }
     }
 
