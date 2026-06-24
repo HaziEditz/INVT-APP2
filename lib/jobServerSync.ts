@@ -74,13 +74,24 @@ export async function catchUpJobStagesOnDispatch(
   driverId: string,
   localStage: JobStage,
   updateSeq?: number,
+  opts?: { companyId?: string },
 ): Promise<{ version?: number; synced: string[] }> {
   const localIdx = STAGE_ORDER.indexOf(localStage);
   if (localIdx <= 0) return { version: updateSeq, synced: [] };
 
+  let serverIdx = 0;
   let ver = updateSeq;
+  if (opts?.companyId) {
+    const fb = await fetchBookingFromFirebase(opts.companyId, bookingId);
+    if (fb?.status) {
+      serverIdx = serverStatusIndex(fb.status);
+      if (fb.updateSeq != null) ver = fb.updateSeq;
+    }
+  }
+
   const synced: string[] = [];
   for (let i = 1; i <= localIdx; i++) {
+    if (i <= serverIdx) continue;
     const stage = STAGE_ORDER[i];
     const serverStatus = STAGE_SERVER_STATUSES[stage];
     if (!serverStatus) continue;

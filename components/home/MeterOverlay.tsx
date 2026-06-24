@@ -1,4 +1,5 @@
 import { Colors } from '@/constants/theme';
+import { formatFareAmount } from '@/lib/tariffs';
 import { MeterState } from '@/types';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -31,13 +32,16 @@ export function MeterOverlay({ meter, onPause, layout = 'overlay' }: Props) {
   const modeLabel = meter.mode === 'moving' ? 'Moving' : 'Waiting';
   const trip = layout === 'trip';
   const strip = layout === 'strip';
+  const fareText = formatFareAmount(meter.fare);
+  const tariffLabel = meter.tariffName?.trim();
 
   if (trip) {
     return (
       <View style={styles.tripBox}>
         <View style={styles.tripTop}>
           <View style={styles.tripFareCol}>
-            <Text style={styles.tripFare}>${meter.fare.toFixed(2)}</Text>
+            <Text style={styles.tripFare}>${fareText}</Text>
+            {tariffLabel ? <Text style={styles.tripTariff}>{tariffLabel}</Text> : null}
             <Text style={[styles.tripMode, meter.mode === 'moving' ? styles.modeMoving : styles.modeWaiting]}>
               {modeLabel}
             </Text>
@@ -57,11 +61,11 @@ export function MeterOverlay({ meter, onPause, layout = 'overlay' }: Props) {
           <Text style={styles.tripStat}>trip {formatClock(tripMs)}</Text>
         </View>
         <View style={styles.tripStatsRow}>
-          <Text style={styles.tripBreakdown}>Flag ${breakdown.flagFall.toFixed(2)}</Text>
+          <Text style={styles.tripBreakdown}>Flag ${formatFareAmount(breakdown.flagFall)}</Text>
           <Text style={styles.tripSep}>·</Text>
-          <Text style={styles.tripBreakdown}>Dist ${breakdown.distanceCharge.toFixed(2)}</Text>
+          <Text style={styles.tripBreakdown}>Dist ${formatFareAmount(breakdown.distanceCharge)}</Text>
           <Text style={styles.tripSep}>·</Text>
-          <Text style={styles.tripBreakdown}>Wait ${breakdown.waitingCharge.toFixed(2)}</Text>
+          <Text style={styles.tripBreakdown}>Wait ${formatFareAmount(breakdown.waitingCharge)}</Text>
         </View>
       </View>
     );
@@ -71,7 +75,8 @@ export function MeterOverlay({ meter, onPause, layout = 'overlay' }: Props) {
     <View style={[styles.box, strip && styles.boxStrip]}>
       <View style={[styles.mainRow, strip && styles.mainRowStrip]}>
         <View style={styles.fareBlock}>
-          <Text style={[styles.fare, strip && styles.fareStrip]}>${meter.fare.toFixed(2)}</Text>
+          <Text style={[styles.fare, strip && styles.fareStrip]}>${fareText}</Text>
+          {tariffLabel ? <Text style={styles.tariffName}>{tariffLabel}</Text> : null}
           <Text style={[styles.mode, meter.mode === 'moving' ? styles.modeMoving : styles.modeWaiting]}>
             {modeLabel}
           </Text>
@@ -128,6 +133,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     lineHeight: 40,
     letterSpacing: -0.5,
+  },
+  tripTariff: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 2,
   },
   tripMode: {
     fontSize: 13,
@@ -213,6 +224,12 @@ const styles = StyleSheet.create({
   fareStrip: {
     fontSize: 22,
     lineHeight: 26,
+  },
+  tariffName: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 1,
   },
   mode: {
     fontSize: 12,

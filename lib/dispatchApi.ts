@@ -33,6 +33,7 @@ export class StageTransportError extends Error {
 }
 
 const STAGE_FETCH_TIMEOUT_MS = 20_000;
+const COMPLETE_FETCH_TIMEOUT_MS = 30_000;
 
 /** True when a failed accept should be queued for offline retry (network/5xx only). */
 export function isDispatchAcceptRetryable(err: unknown): boolean {
@@ -395,7 +396,22 @@ export async function createHailJobOnDispatch(params: {
 }
 
 export async function completeJobPayment(payload: Record<string, unknown>) {
-  return driverApiPost('/api/job/complete', payload);
+  const headers = await driverApiHeaders();
+  const body = await withDriverIdentity(payload);
+  const res = await fetchWithTimeout(
+    `${DISPATCH_API_URL}/api/job/complete`,
+    { method: 'POST', headers, body: JSON.stringify(body) },
+    COMPLETE_FETCH_TIMEOUT_MS,
+  );
+  const data = await parseJsonBody(res);
+  if (!res.ok || data.ok === false) {
+    throw new DispatchApiError(
+      String(data.error || `Dispatch complete failed: ${res.status}`),
+      res.status,
+      data,
+    );
+  }
+  return data;
 }
 
 export interface ActiveBookingRow {

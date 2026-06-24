@@ -71,7 +71,7 @@ import {
 import { initializeNztaOnLogin } from '@/services/nztaService';
 import type { EndShiftSummary } from '@/services/nztaService';
 import { createInitialMeter, watchMeter } from '@/services/meterEngine';
-import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
+import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED, parseFiniteFare } from '@/lib/tariffs';
 import {
   completionErrorMessage,
   persistActiveJobAsync,
@@ -280,16 +280,12 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     passengerEmail: val.passengerEmail ? String(val.passengerEmail) : undefined,
     fixedFare:
       val.fixedFare != null
-        ? Number(val.fixedFare)
-        : rawFare != null && rawFare !== ''
-          ? Number(rawFare)
-          : undefined,
+        ? parseFiniteFare(val.fixedFare)
+        : parseFiniteFare(rawFare),
     estimatedFare:
       val.estimatedFare != null
-        ? Number(val.estimatedFare)
-        : rawFare != null && rawFare !== ''
-          ? Number(rawFare)
-          : undefined,
+        ? parseFiniteFare(val.estimatedFare)
+        : parseFiniteFare(rawFare),
     estimatedDistanceKm:
       val.estimatedDistanceKm != null
         ? Number(val.estimatedDistanceKm)
@@ -354,7 +350,7 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
     startedAt: now,
     distanceKm: 0,
     durationMin: 0,
-    fare: offer.fixedFare ?? offer.estimatedFare ?? 0,
+    fare: parseFiniteFare(offer.fixedFare) ?? parseFiniteFare(offer.estimatedFare) ?? 0,
     stepTimes: { acceptedAt: now },
     tariffChanges: [],
   };
@@ -441,6 +437,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const meterStopRef = useRef<(() => void) | null>(null);
   const tariffInitialPickDoneRef = useRef(false);
   const prevTariffRatesRef = useRef({ id: '', flagFall: 0, ratePerKm: 0, waitingPerMin: 0 });
+  const selectedTariffRef = useRef<Tariff>(NO_TARIFF_CONFIGURED);
   const tariffsListRef = useRef<Tariff[]>([]);
   const paymentJobRef = useRef(false);
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
@@ -1155,7 +1152,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setPreferredPanelTab('offers');
     setJobOffer(offer);
     void alertDriverToOffer(offer);
   };
@@ -1452,7 +1448,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         const match =
           tariffsListRef.current.find((t) => dispatchTariffId && t.id === dispatchTariffId) ??
           tariffsListRef.current.find((t) => dispatchTariffName && t.name === dispatchTariffName);
-        if (match && match.id !== selectedTariff.id) {
+        if (match) {
           setSelectedTariffState(match);
           storeData(STORAGE_KEYS.selectedTariffId, match.id).catch(() => undefined);
           if (meterRef.current?.running) {
@@ -2258,7 +2254,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const startMeterWatch = () => {
     if (meterStopRef.current) meterStopRef.current();
     void watchMeter(
-      selectedTariff,
+      () => selectedTariffRef.current,
       () => meterRef.current,
       (result) => {
         setMeter(result.meter);
@@ -2455,108 +2451,93 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setCompletionError(null);
     localCompletionRef.current = true;
 
-    try {
-      await writeClosedJob(
-        driver.companyId,
-        driver.id,
-        closed,
-        paymentType,
-        extras,
-        totalFare,
-        tmDetails,
-        { driverName: driver.name, vehicleId: await resolveVehicleId() },
-      );
-    } catch (err) {
-      console.warn('[Driver] writeClosedJob failed:', err);
-    }
-
-    if (job.id && !String(job.id).startsWith('hail_')) {
-      try {
-        await markBookingCompleted(driver.companyId, job.id, {
-          fare: totalFare,
-          paymentType,
-          driverId: driver.id,
-          completedAt,
-          distanceKm: closed.distanceKm,
-        });
-      } catch (err) {
-        console.warn('[Driver] markBookingCompleted failed:', err);
-      }
-    }
-
-    if (job.id && !String(job.id).startsWith('hail_')) {
-      try {
-        const catchUpStage = job.stage === 'complete' ? 'onboard' : job.stage;
-        await catchUpJobStagesOnDispatch(job.id, driver.id, catchUpStage, job.updateSeq);
-      } catch (catchUpErr) {
-        console.warn('[Driver] stage catch-up before complete failed:', catchUpErr);
-      }
-    }
-
-    try {
-      await completeJobPayment({
-        jobId: job.id,
-        bookingId: job.id,
-        driverId: driver.id,
-        companyId: driver.companyId,
-        paymentType,
+    const completePayload = {
+      jobId: job.id,
+      bookingId: job.id,
+      driverId: driver.id,
+      companyId: driver.companyId,
+      paymentType,
+      fare: totalFare,
+      totalFare,
+      distanceKm: closed.distanceKm,
+      distance: closed.distanceKm,
+      extras,
+      ...(tmDetails ?? {}),
+      payload: {
         fare: totalFare,
         totalFare,
         distanceKm: closed.distanceKm,
         distance: closed.distanceKm,
+        paymentType,
         extras,
-        ...(tmDetails ?? {}),
-        payload: {
-          fare: totalFare,
-          totalFare,
-          distanceKm: closed.distanceKm,
-          distance: closed.distanceKm,
-          paymentType,
-          extras,
-        },
-      });
+      },
+    };
+
+    const persistClosedJobToFirebase = () => {
+      void (async () => {
+        try {
+          const vehicleId = await resolveVehicleId();
+          await writeClosedJob(
+            driver.companyId,
+            driver.id,
+            closed,
+            paymentType,
+            extras,
+            totalFare,
+            tmDetails,
+            { driverName: driver.name, vehicleId },
+          );
+        } catch (err) {
+          console.warn('[Driver] writeClosedJob failed:', err);
+        }
+        if (job.id && !String(job.id).startsWith('hail_')) {
+          try {
+            await markBookingCompleted(driver.companyId, job.id, {
+              fare: totalFare,
+              paymentType,
+              driverId: driver.id,
+              completedAt,
+              distanceKm: closed.distanceKm,
+            });
+          } catch (err) {
+            console.warn('[Driver] markBookingCompleted failed:', err);
+          }
+        }
+      })();
+    };
+
+    try {
+      await completeJobPayment(completePayload);
     } catch (err) {
       console.error('[Driver] completeJobPayment failed:', err);
+      let completeFailed = true;
       if (err instanceof DispatchApiError && err.status === 409 && job.id && driver.id) {
         try {
-          await catchUpJobStagesOnDispatch(job.id, driver.id, 'onboard', job.updateSeq);
-          await completeJobPayment({
-            jobId: job.id,
-            bookingId: job.id,
-            driverId: driver.id,
+          const catchUpStage = job.stage === 'complete' ? 'onboard' : job.stage;
+          await catchUpJobStagesOnDispatch(job.id, driver.id, catchUpStage, job.updateSeq, {
             companyId: driver.companyId,
-            paymentType,
-            fare: totalFare,
-            totalFare,
-            distanceKm: closed.distanceKm,
-            distance: closed.distanceKm,
-            extras,
-            ...(tmDetails ?? {}),
-            payload: {
-              fare: totalFare,
-              totalFare,
-              distanceKm: closed.distanceKm,
-              distance: closed.distanceKm,
-              paymentType,
-              extras,
-            },
           });
-          // success on retry — fall through to completion below
+          await completeJobPayment(completePayload);
+          completeFailed = false;
         } catch (retryErr) {
           err = retryErr;
         }
       }
-      await enqueueOfflineItem({
-        type: 'job_update',
-        payload: { action: 'complete', jobId: job.id, paymentType, fare: totalFare, extras },
-      });
-      const msg =
-        `Dispatch server did not confirm completion (${completionErrorMessage(err)}). ` +
-        'Job saved locally — tap Retry when back online.';
-      setCompletionError(msg);
-      localCompletionRef.current = false;
-      throw new Error(msg);
+      if (completeFailed) {
+        await enqueueOfflineItem({
+          type: 'job_update',
+          payload: { action: 'complete', jobId: job.id, paymentType, fare: totalFare, extras },
+        });
+        const msg =
+          `Dispatch server did not confirm completion (${completionErrorMessage(err)}). ` +
+          'Job saved locally — tap Retry when back online.';
+        setCompletionError(msg);
+        localCompletionRef.current = false;
+        throw new Error(msg);
+      }
     }
+
+    persistClosedJobToFirebase();
 
     void playInAppNotificationSound('general');
 
@@ -2564,6 +2545,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setCompletedJobs((prev) => [done, ...prev]);
     setActiveJob(null);
     setPaymentJob(null);
+    setPreferredPanelTab('current');
     setHailActive(false);
     hailActiveRef.current = false;
     setHailPickupAddress(null);
@@ -2783,7 +2765,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         vehicleId,
         tariffId: selectedTariff.id,
         pickup,
-        dropoff: pickup,
       });
 
       const now = Date.now();
@@ -2791,7 +2772,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         id: jobId,
         type: 'Taxi',
         pickup: pickup.address,
-        dropoff: pickup.address,
+        dropoff: '',
         pickupLat: pickup.lat,
         pickupLng: pickup.lng,
         stage: 'onboard',
@@ -3052,6 +3033,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
     startMeterWatch();
   }, [selectedTariff.id, selectedTariff.flagFall, selectedTariff.ratePerKm, selectedTariff.waitingPerMin], 'Driver-tariffMeterRefresh');
+
+  useSafeEffect(() => {
+    selectedTariffRef.current = selectedTariff;
+  }, [selectedTariff], 'Driver-selectedTariffRef');
 
   useSafeEffect(() => {
     if (activeJob?.stage !== 'pickup') {

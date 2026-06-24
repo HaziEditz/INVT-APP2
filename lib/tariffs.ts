@@ -39,3 +39,15 @@ export function calcMeterFare(
 ): number {
   return calcMeterBreakdown(tariff, distanceKm, waitingMinutes).total;
 }
+
+/** Parse a fare field from Firebase/API — returns undefined for blank or non-finite values. */
+export function parseFiniteFare(raw: unknown): number | undefined {
+  if (raw == null || raw === '') return undefined;
+  const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+export function formatFareAmount(amount: number | undefined | null): string {
+  if (amount == null || !Number.isFinite(amount)) return '0.00';
+  return amount.toFixed(2);
+}
