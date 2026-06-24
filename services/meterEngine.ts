@@ -173,17 +173,17 @@ function runMeterTick(
 }
 
 export async function watchMeter(
-  getTariff: () => Tariff,
+  tariff: Tariff,
   getMeter: () => MeterState | null,
   onUpdate: (result: MeterTickResult) => void,
 ): Promise<() => void> {
   let sub: Location.LocationSubscription | null = null;
   let lastGps: GpsSample | null = null;
 
-  runMeterTick(getMeter, getTariff(), lastGps, onUpdate);
+  runMeterTick(getMeter, tariff, null, onUpdate);
 
   const intervalId = setInterval(() => {
-    runMeterTick(getMeter, getTariff(), lastGps, onUpdate);
+    runMeterTick(getMeter, tariff, lastGps, onUpdate);
   }, TICK_MS);
 
   void (async () => {
@@ -199,7 +199,7 @@ export async function watchMeter(
           speedMs: cached.coords.speed ?? null,
           accuracyM: cached.coords.accuracy ?? null,
         };
-        runMeterTick(getMeter, getTariff(), lastGps, onUpdate);
+        runMeterTick(getMeter, tariff, lastGps, onUpdate);
       }
 
       sub = await Location.watchPositionAsync(
@@ -215,7 +215,7 @@ export async function watchMeter(
             speedMs: loc.coords.speed ?? null,
             accuracyM: loc.coords.accuracy ?? null,
           };
-          runMeterTick(getMeter, getTariff(), lastGps, onUpdate);
+          runMeterTick(getMeter, tariff, lastGps, onUpdate);
         },
       );
     } catch (err) {
