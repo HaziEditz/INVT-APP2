@@ -33,7 +33,8 @@ export class StageTransportError extends Error {
 }
 
 const STAGE_FETCH_TIMEOUT_MS = 20_000;
-const COMPLETE_FETCH_TIMEOUT_MS = 30_000;
+/** Complete can wait on server Firebase cleanup — allow generous client timeout. */
+const COMPLETE_FETCH_TIMEOUT_MS = 45_000;
 
 /** True when a failed accept should be queued for offline retry (network/5xx only). */
 export function isDispatchAcceptRetryable(err: unknown): boolean {

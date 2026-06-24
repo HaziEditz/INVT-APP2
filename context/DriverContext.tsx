@@ -1085,6 +1085,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       readyForJobsRef.current = false;
       return;
     }
+    awayIntentRef.current = 'none';
     writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
     setPresenceStatus('Online');
     setReadyForJobs(true);
@@ -2164,7 +2165,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         await enqueueOfflineItem({ type: 'job_update', payload: { action: 'decline', jobId: offerSnapshot.id } });
       }
       removeBroadcastOffer(offerSnapshot.id);
-      if (shiftActive && timedOut) {
+      if (shiftActive && timedOut && !driverHasConfirmedActiveTrip()) {
         await setAwayAfterMissedOffer();
       }
     }
@@ -2450,6 +2451,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const completedAt = Date.now();
     setCompletionError(null);
     localCompletionRef.current = true;
+    setJobOffer(null);
+    lastOfferSeenRef.current = null;
 
     const completePayload = {
       jobId: job.id,
@@ -2507,7 +2510,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
 
     try {
-      await completeJobPayment(completePayload);
+      let completeErr: unknown;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await completeJobPayment(completePayload);
+          completeErr = null;
+          break;
+        } catch (err) {
+          completeErr = err;
+          const retryableTransport =
+            err instanceof StageTransportError && attempt === 0;
+          if (!retryableTransport) break;
+          console.warn('[Driver] completeJobPayment transport retry after timeout');
+          await new Promise((r) => setTimeout(r, 600));
+        }
+      }
+      if (completeErr) throw completeErr;
     } catch (err) {
       console.error('[Driver] completeJobPayment failed:', err);
       let completeFailed = true;
@@ -2885,6 +2903,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     setPaymentJob(hailJob);
+    setJobOffer(null);
+    lastOfferSeenRef.current = null;
     setActiveJob(null);
     activeJobIdRef.current = null;
     activeJobRef.current = null;
@@ -2930,6 +2950,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         };
         setActiveJob(updated);
         setPaymentJob(updated);
+        setJobOffer(null);
+        lastOfferSeenRef.current = null;
         setMeter(null);
         meterRef.current = null;
         persistActiveJobAsync(updated);

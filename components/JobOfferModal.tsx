@@ -21,6 +21,7 @@ export function JobOfferModal() {
     }
     const tick = () => {
       try {
+        if (hailActive || activeJob || paymentJob) return;
         const left = Math.max(0, Math.ceil((jobOffer.expiresAt - Date.now()) / 1000));
         setSecondsLeft(left);
         if (left <= 0 && !timedOutRef.current) {
@@ -34,7 +35,7 @@ export function JobOfferModal() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [jobOffer, declineOffer], 'JobOfferModal-timer');
+  }, [jobOffer, declineOffer, hailActive, activeJob, paymentJob], 'JobOfferModal-timer');
 
   if (!jobOffer || hailActive || !!activeJob || !!paymentJob) return null;
 
