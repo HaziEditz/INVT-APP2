@@ -5,7 +5,6 @@ import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
-import { formatFareAmount, parseFiniteFare } from '@/lib/tariffs';
 import { STAGE_LABELS, JobStage } from '@/types';
 import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useRef } from 'react';
@@ -115,11 +114,7 @@ export function CurrentTripPanel() {
         };
   const canNavigate = canOpenNavigation(navTarget);
   const navTitle = activeJob.stage === 'onboard' ? 'Navigate to drop-off' : 'Navigate to pickup';
-  const estFare =
-    parseFiniteFare(activeJob.fixedFare) ??
-    parseFiniteFare(activeJob.estimatedFare) ??
-    (activeJob.fare > 0 ? parseFiniteFare(activeJob.fare) : undefined);
-  const showDropoff = !!activeJob.dropoff?.trim() && activeJob.dropoff.trim() !== activeJob.pickup?.trim();
+  const estFare = activeJob.fixedFare ?? activeJob.estimatedFare ?? (activeJob.fare > 0 ? activeJob.fare : undefined);
 
   const onAdvance = async () => {
     if (nextStage === 'complete') {
@@ -169,7 +164,7 @@ export function CurrentTripPanel() {
         ) : null}
 
         {estFare != null ? (
-          <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
+          <Text style={styles.fareEst}>Est. fare ${estFare.toFixed(2)}</Text>
         ) : null}
         {activeJob.estimatedDistanceKm != null ? (
           <Text style={styles.metaLine}>Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km</Text>
@@ -186,14 +181,12 @@ export function CurrentTripPanel() {
             {activeJob.pickup}
           </Text>
         </View>
-        {showDropoff ? (
-          <View style={styles.addrBlock}>
-            <Text style={styles.addrLabel}>Dropoff</Text>
-            <Text style={styles.addr} numberOfLines={3}>
-              {activeJob.dropoff}
-            </Text>
-          </View>
-        ) : null}
+        <View style={styles.addrBlock}>
+          <Text style={styles.addrLabel}>Dropoff</Text>
+          <Text style={styles.addr} numberOfLines={3}>
+            {activeJob.dropoff}
+          </Text>
+        </View>
 
         {activeJob.passengerName ? (
           <Text style={styles.metaLine} numberOfLines={2}>

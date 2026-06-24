@@ -32,7 +32,7 @@ export class StageTransportError extends Error {
   }
 }
 
-const STAGE_FETCH_TIMEOUT_MS = 45_000;
+const STAGE_FETCH_TIMEOUT_MS = 20_000;
 
 /** True when a failed accept should be queued for offline retry (network/5xx only). */
 export function isDispatchAcceptRetryable(err: unknown): boolean {
@@ -364,13 +364,11 @@ export async function createHailJobOnDispatch(params: {
       lat: params.pickup.lat ?? 0,
       lng: params.pickup.lng ?? 0,
     },
-    dropoff: params.dropoff
-      ? {
-          address: params.dropoff.address,
-          lat: params.dropoff.lat ?? 0,
-          lng: params.dropoff.lng ?? 0,
-        }
-      : { address: '', lat: 0, lng: 0 },
+    dropoff: {
+      address: (params.dropoff ?? params.pickup).address,
+      lat: (params.dropoff ?? params.pickup).lat ?? 0,
+      lng: (params.dropoff ?? params.pickup).lng ?? 0,
+    },
     passengers: 1,
   };
 

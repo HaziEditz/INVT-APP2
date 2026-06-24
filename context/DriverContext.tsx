@@ -71,7 +71,7 @@ import {
 import { initializeNztaOnLogin } from '@/services/nztaService';
 import type { EndShiftSummary } from '@/services/nztaService';
 import { createInitialMeter, watchMeter } from '@/services/meterEngine';
-import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED, parseFiniteFare } from '@/lib/tariffs';
+import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
 import {
   completionErrorMessage,
   persistActiveJobAsync,
@@ -280,12 +280,16 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     passengerEmail: val.passengerEmail ? String(val.passengerEmail) : undefined,
     fixedFare:
       val.fixedFare != null
-        ? parseFiniteFare(val.fixedFare)
-        : parseFiniteFare(rawFare),
+        ? Number(val.fixedFare)
+        : rawFare != null && rawFare !== ''
+          ? Number(rawFare)
+          : undefined,
     estimatedFare:
       val.estimatedFare != null
-        ? parseFiniteFare(val.estimatedFare)
-        : parseFiniteFare(rawFare),
+        ? Number(val.estimatedFare)
+        : rawFare != null && rawFare !== ''
+          ? Number(rawFare)
+          : undefined,
     estimatedDistanceKm:
       val.estimatedDistanceKm != null
         ? Number(val.estimatedDistanceKm)
@@ -350,7 +354,7 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
     startedAt: now,
     distanceKm: 0,
     durationMin: 0,
-    fare: parseFiniteFare(offer.fixedFare) ?? parseFiniteFare(offer.estimatedFare) ?? 0,
+    fare: offer.fixedFare ?? offer.estimatedFare ?? 0,
     stepTimes: { acceptedAt: now },
     tariffChanges: [],
   };
@@ -1448,7 +1452,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         const match =
           tariffsListRef.current.find((t) => dispatchTariffId && t.id === dispatchTariffId) ??
           tariffsListRef.current.find((t) => dispatchTariffName && t.name === dispatchTariffName);
-        if (match) {
+        if (match && match.id !== selectedTariff.id) {
           setSelectedTariffState(match);
           storeData(STORAGE_KEYS.selectedTariffId, match.id).catch(() => undefined);
           if (meterRef.current?.running) {
@@ -2305,67 +2309,69 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       if (nextStage === 'arrived' || nextStage === 'onboard') {
-        const now = Date.now();
-        const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
-        if (nextStage === 'arrived') stepTimes.arrivedAt = now;
-        if (nextStage === 'onboard') {
-          stepTimes.onboardAt = now;
-          startMeterForJob();
-        }
-
-        const updated: ActiveJob = {
-          ...activeJob,
-          stage: nextStage,
-          stepTimes,
-          meterSnapshot: activeJob.meterSnapshot,
-          fare: activeJob.fare,
-          distanceKm: activeJob.distanceKm,
-        };
-        setActiveJob(updated);
-        persistActiveJobAsync(updated);
-        setCompletionBusy(false);
-
-        try {
-          await syncJobStageToDispatch(nextStage, { id: activeJob.id, updateSeq: activeJob.updateSeq });
-        } catch (syncErr) {
-          console.warn('[Driver] advanceStage sync lagged:', syncErr);
-          const expectedBookingStatus = nextStage === 'arrived' ? 'Arrived' : 'Active';
-          if (
-            driver.companyId &&
-            (syncErr instanceof StageTransportError || syncErr instanceof DispatchApiError)
-          ) {
-            const verified = await verifyJobStageOnFirebase(
-              driver.companyId,
-              activeJob.id,
-              expectedBookingStatus,
-              activeJob.updateSeq,
-            );
-            if (verified.verified) {
-              if (verified.updateSeq != null) {
-                setActiveJob((prev) => {
-                  if (!prev || prev.id !== activeJob.id) return prev;
-                  const merged = { ...prev, updateSeq: verified.updateSeq };
-                  persistActiveJobAsync(merged);
-                  return merged;
-                });
-              }
-              return;
-            }
-          }
-          const msg =
-            syncErr instanceof DispatchApiError
-              ? `${syncErr.message}${syncErr.errorCode ? ` (${syncErr.errorCode})` : ''}`
-              : completionErrorMessage(syncErr);
-          setCompletionError(msg);
-          Alert.alert(
-            'Could not update trip',
-            `${msg}\n\nThe app shows your latest stage — retry if dispatch does not catch up.`,
-          );
-        }
-        return;
+        await syncJobStageToDispatch(nextStage, { id: activeJob.id, updateSeq: activeJob.updateSeq });
       }
+
+      const now = Date.now();
+      const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
+      if (nextStage === 'arrived') stepTimes.arrivedAt = now;
+      if (nextStage === 'onboard') {
+        stepTimes.onboardAt = now;
+        startMeterForJob();
+      }
+
+      const updated: ActiveJob = {
+        ...activeJob,
+        stage: nextStage,
+        stepTimes,
+        meterSnapshot: activeJob.meterSnapshot,
+        fare: activeJob.fare,
+        distanceKm: activeJob.distanceKm,
+      };
+      setActiveJob(updated);
+      persistActiveJobAsync(updated);
     } catch (err) {
       console.error('[Driver] advanceStage failed:', err);
+      const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
+      const idx = order.indexOf(activeJob.stage);
+      const nextStage = order[Math.min(idx + 1, order.length - 1)];
+      const expectedBookingStatus =
+        nextStage === 'arrived' ? 'Arrived' : nextStage === 'onboard' ? 'Active' : '';
+
+      if (
+        driver.companyId &&
+        expectedBookingStatus &&
+        (err instanceof StageTransportError || err instanceof DispatchApiError)
+      ) {
+        const verified = await verifyJobStageOnFirebase(
+          driver.companyId,
+          activeJob.id,
+          expectedBookingStatus,
+          activeJob.updateSeq,
+        );
+        if (verified.verified) {
+          const now = Date.now();
+          const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
+          if (nextStage === 'arrived') stepTimes.arrivedAt = now;
+          if (nextStage === 'onboard') {
+            stepTimes.onboardAt = now;
+            startMeterForJob();
+          }
+          const recovered: ActiveJob = {
+            ...activeJob,
+            stage: nextStage,
+            stepTimes,
+            meterSnapshot: activeJob.meterSnapshot,
+            fare: activeJob.fare,
+            distanceKm: activeJob.distanceKm,
+            ...(verified.updateSeq != null ? { updateSeq: verified.updateSeq } : {}),
+          };
+          setActiveJob(recovered);
+          persistActiveJobAsync(recovered);
+          return;
+        }
+      }
+
       const msg =
         err instanceof DispatchApiError
           ? `${err.message}${err.errorCode ? ` (${err.errorCode})` : ''}`
@@ -2777,6 +2783,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         vehicleId,
         tariffId: selectedTariff.id,
         pickup,
+        dropoff: pickup,
       });
 
       const now = Date.now();
@@ -2784,7 +2791,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         id: jobId,
         type: 'Taxi',
         pickup: pickup.address,
-        dropoff: '',
+        dropoff: pickup.address,
         pickupLat: pickup.lat,
         pickupLng: pickup.lng,
         stage: 'onboard',
@@ -2987,7 +2994,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setSelectedTariffState(t);
     storeData(STORAGE_KEYS.selectedTariffId, t.id).catch(() => undefined);
 
-    if (meterRef.current?.running) {
+    if (meterRef.current?.running && prevId !== t.id) {
       const change: TariffChangeRecord = { tariffId: t.id, tariffName: t.name, at: Date.now() };
       setMeter((prev) => {
         if (!prev) return prev;
@@ -2997,8 +3004,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           ...prev,
           tariffId: t.id,
           tariffName: t.name,
-          tariffChanges:
-            prevId !== t.id ? [...prev.tariffChanges, change] : prev.tariffChanges,
+          tariffChanges: [...prev.tariffChanges, change],
           breakdown,
           fare: breakdown.total,
         };
@@ -3006,8 +3012,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         return next;
       });
       if (activeJob) {
-        const changes =
-          prevId !== t.id ? [...(activeJob.tariffChanges ?? []), change] : activeJob.tariffChanges ?? [];
+        const changes = [...(activeJob.tariffChanges ?? []), change];
         const updated = { ...activeJob, tariffChanges: changes };
         setActiveJob(updated);
         storeData(STORAGE_KEYS.activeJob, updated).catch(() => undefined);
