@@ -4,6 +4,7 @@ import { collectJobNotes } from '@/lib/jobNotes';
 import { parseSchedulingMetaFromRecord } from '@/lib/jobDisplayMeta';
 import { isDispatchWindowOpen } from '@/lib/dispatchWindow';
 import { jobMatchesDriverVehicle, serviceTypeToJobType } from '@/lib/jobMatching';
+import { parseFiniteFare } from '@/lib/tariffs';
 import { JobOffer, Vehicle } from '@/types';
 
 function parseLatLng(raw?: string): { lat?: number; lng?: number } {
@@ -50,8 +51,8 @@ export function parseJobOfferRecord(
     dropoff,
     passengerName: String(val.PassengerName ?? val.Name ?? val.passengername ?? val.passengerName ?? '').trim() || undefined,
     passengerPhone: String(val.PhoneNo ?? val.passengerPhone ?? '').trim() || undefined,
-    fixedFare: val.Fare != null ? parseFloat(String(val.Fare)) : undefined,
-    estimatedFare: val.Fare != null ? parseFloat(String(val.Fare)) : undefined,
+    fixedFare: parseFiniteFare(val.Fare ?? val.fixedFare ?? val.estimatedFare),
+    estimatedFare: parseFiniteFare(val.Fare ?? val.estimatedFare ?? val.fixedFare),
     vehicleTypeRequired: String(val.VehicleType ?? val.vehicleType ?? ''),
     passengers: Number(val.Passengers ?? val.passengers ?? 1) || 1,
     serviceTypeRaw: serviceRaw,

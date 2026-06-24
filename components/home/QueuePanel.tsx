@@ -3,6 +3,7 @@ import { JobDispatchMetaSection } from '@/components/JobDispatchMetaSection';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
+import { formatFareAmount, parseFiniteFare } from '@/lib/tariffs';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function QueuePanel() {
@@ -25,7 +26,10 @@ export function QueuePanel() {
 
   return (
     <ScrollView style={styles.list} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-      {queuedOffers.map((o, i) => (
+      {queuedOffers.map((o, i) => {
+        const estFare =
+          parseFiniteFare(o.fixedFare) ?? parseFiniteFare(o.estimatedFare);
+        return (
         <View key={o.id} style={styles.card}>
           <Text style={styles.queuePos}>#{i + 1} in queue · Job #{o.id}</Text>
           <JobTypeBadge type={o.type} />
@@ -41,10 +45,14 @@ export function QueuePanel() {
               {[o.passengerName, o.passengerPhone].filter(Boolean).join(' · ')}
             </Text>
           ) : null}
+          {estFare != null ? (
+            <Text style={styles.fare}>Est. fare ${formatFareAmount(estFare)}</Text>
+          ) : null}
           <Text style={styles.meta}>{waitLabel(o.queuedAt)}</Text>
           <Button title="Recall" variant="secondary" onPress={() => recallQueuedOffer(o.id)} style={{ marginTop: 10 }} />
         </View>
-      ))}
+        );
+      })}
     </ScrollView>
   );
 }
@@ -65,4 +73,5 @@ const styles = StyleSheet.create({
   queuePos: { color: Colors.accent, fontWeight: '800', marginBottom: 6 },
   addr: { color: Colors.text, fontSize: 14, marginTop: 4 },
   meta: { color: Colors.textMuted, fontSize: 12, marginTop: 4 },
+  fare: { color: Colors.success, fontSize: 15, fontWeight: '800', marginTop: 6 },
 });
