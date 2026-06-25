@@ -10,11 +10,16 @@ function KeepAwakeGate() {
 }
 
 /**
- * Prevents screen sleep for the whole shift (and while a job offer is pending).
- * Uses the hook API — more reliable on Android than imperative activate/deactivate alone.
+ * Prevents screen sleep during shift, offers, and active trips (including hail + meter).
  */
 export function ShiftKeepAwake() {
-  const { shiftActive, jobOffer } = useDriver();
-  if (!shiftActive && !jobOffer) return null;
+  const { shiftActive, jobOffer, activeJob, hailActive, meter } = useDriver();
+  const keepAwake =
+    shiftActive ||
+    !!jobOffer ||
+    !!activeJob ||
+    hailActive ||
+    !!meter?.running;
+  if (!keepAwake) return null;
   return <KeepAwakeGate />;
 }

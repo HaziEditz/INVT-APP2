@@ -55,6 +55,7 @@ export default function MainScreen() {
   const hasCurrent = !!activeJob || hailActive;
   const meterRunning = !!meter?.running;
   const mapShowsRoute = !!activeJob || hailActive;
+  const workloadCount = (hasCurrent ? 1 : 0) + queuedOffers.length;
 
   useSafeEffect(() => {
     if (offersLockedForEnrouteDispatch && mainTab === 'offers') {
@@ -172,6 +173,7 @@ export default function MainScreen() {
             offersLocked={offersLockedForEnrouteDispatch}
             hasCurrent={hasCurrent}
             queueCount={queuedOffers.length}
+            workloadCount={workloadCount}
             onChange={setMainTab}
           />
 

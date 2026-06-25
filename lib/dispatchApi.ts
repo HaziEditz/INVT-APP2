@@ -32,7 +32,7 @@ export class StageTransportError extends Error {
   }
 }
 
-const STAGE_FETCH_TIMEOUT_MS = 20_000;
+const STAGE_FETCH_TIMEOUT_MS = 45_000;
 /** Complete can wait on server Firebase cleanup — allow generous client timeout. */
 const COMPLETE_FETCH_TIMEOUT_MS = 45_000;
 
@@ -399,20 +399,31 @@ export async function createHailJobOnDispatch(params: {
 export async function completeJobPayment(payload: Record<string, unknown>) {
   const headers = await driverApiHeaders();
   const body = await withDriverIdentity(payload);
-  const res = await fetchWithTimeout(
-    `${DISPATCH_API_URL}/api/job/complete`,
-    { method: 'POST', headers, body: JSON.stringify(body) },
-    COMPLETE_FETCH_TIMEOUT_MS,
-  );
-  const data = await parseJsonBody(res);
-  if (!res.ok || data.ok === false) {
-    throw new DispatchApiError(
-      String(data.error || `Dispatch complete failed: ${res.status}`),
-      res.status,
-      data,
-    );
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchWithTimeout(
+        `${DISPATCH_API_URL}/api/job/complete`,
+        { method: 'POST', headers, body: JSON.stringify(body) },
+        COMPLETE_FETCH_TIMEOUT_MS,
+      );
+      const data = await parseJsonBody(res);
+      if (!res.ok || data.ok === false) {
+        throw new DispatchApiError(
+          String(data.error || `Dispatch complete failed: ${res.status}`),
+          res.status,
+          data,
+        );
+      }
+      return data;
+    } catch (err) {
+      lastErr = err;
+      const retryableTransport = err instanceof StageTransportError && attempt === 0;
+      if (!retryableTransport) break;
+      await new Promise((r) => setTimeout(r, 600));
+    }
   }
-  return data;
+  throw lastErr instanceof Error ? lastErr : new Error('Dispatch complete failed');
 }
 
 export interface ActiveBookingRow {
@@ -460,25 +471,36 @@ export async function syncJobStageOnDispatch(
   if (ifVersion != null && !Number.isNaN(ifVersion)) body.ifVersion = ifVersion;
 
   const headers = await driverApiHeaders();
-  const res = await fetchWithTimeout(
-    `${DISPATCH_API_URL}/api/job/stage`,
-    { method: 'POST', headers, body: JSON.stringify(body) },
-    STAGE_FETCH_TIMEOUT_MS,
-  );
-  const data = await parseJsonBody(res);
-  if (res.ok && data.ok !== false) {
-    const version =
-      parseInt(String(data.version ?? data.currentVersion ?? data.currentSeq ?? ''), 10) || undefined;
-    return {
-      version: version != null && !Number.isNaN(version) ? version : undefined,
-      idempotent: data.idempotent === true,
-    };
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchWithTimeout(
+        `${DISPATCH_API_URL}/api/job/stage`,
+        { method: 'POST', headers, body: JSON.stringify(body) },
+        STAGE_FETCH_TIMEOUT_MS,
+      );
+      const data = await parseJsonBody(res);
+      if (res.ok && data.ok !== false) {
+        const version =
+          parseInt(String(data.version ?? data.currentVersion ?? data.currentSeq ?? ''), 10) || undefined;
+        return {
+          version: version != null && !Number.isNaN(version) ? version : undefined,
+          idempotent: data.idempotent === true,
+        };
+      }
+      throw new DispatchApiError(
+        String(data.error || `Dispatch stage sync failed for #${bid} → ${status}`),
+        res.status,
+        data,
+      );
+    } catch (err) {
+      lastErr = err;
+      const retryableTransport = err instanceof StageTransportError && attempt === 0;
+      if (!retryableTransport) break;
+      await new Promise((r) => setTimeout(r, 600));
+    }
   }
-  throw new DispatchApiError(
-    String(data.error || `Dispatch stage sync failed for #${bid} → ${status}`),
-    res.status,
-    data,
-  );
+  throw lastErr instanceof Error ? lastErr : new Error(`Dispatch stage sync failed for #${bid}`);
 }
 
 export async function pruneDriverQueueOnDispatch(opts?: { dryRun?: boolean }): Promise<{ removed?: unknown[] }> {

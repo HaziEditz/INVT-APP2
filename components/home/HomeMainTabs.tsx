@@ -8,6 +8,7 @@ type Props = {
   offersLocked?: boolean;
   hasCurrent: boolean;
   queueCount: number;
+  workloadCount: number;
   onChange: (tab: MainPanelTab) => void;
 };
 
@@ -17,11 +18,12 @@ export function HomeMainTabs({
   offersLocked = false,
   hasCurrent,
   queueCount,
+  workloadCount,
   onChange,
 }: Props) {
   const tabs: { id: MainPanelTab; label: string; badge?: number; disabled?: boolean }[] = [
     { id: 'offers', label: 'Offers', badge: offersCount, disabled: offersLocked },
-    { id: 'current', label: 'Current' },
+    { id: 'current', label: 'Current', badge: workloadCount > 0 ? workloadCount : undefined },
     { id: 'queue', label: 'Queue', badge: queueCount },
   ];
 
@@ -29,7 +31,7 @@ export function HomeMainTabs({
     <View style={styles.row}>
       {tabs.map((t) => {
         const isActive = active === t.id;
-        const showDot = t.id === 'current' && hasCurrent;
+        const showDot = t.id === 'current' && hasCurrent && !(t.badge != null && t.badge > 0);
         const disabled = t.disabled === true;
         return (
           <Pressable
