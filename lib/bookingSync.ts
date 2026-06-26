@@ -2,6 +2,8 @@ import { get, onValue, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { JobOffer, JobStage } from '@/types';
 
+import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
+
 export type BookingUpdate = {
   bookingId: string;
   cancelled: boolean;
@@ -130,7 +132,8 @@ export function diffBookingChanges(
     const oldTariffId = String(prev.TariffId ?? prev.TarriffId ?? prev.tariffId ?? '');
     const newTariffId = String(next.TariffId ?? next.TarriffId ?? next.tariffId ?? '');
     const oldTariffName = String(prev.TarriffType ?? prev.TariffName ?? prev.tariffName ?? '');
-    const newTariffName = String(next.TarriffType ?? next.TariffName ?? next.tariffName ?? '');
+    const newTariffNameRaw = String(next.TarriffType ?? next.TariffName ?? next.tariffName ?? '');
+    const newTariffName = isForbiddenPlaceholderTariffName(newTariffNameRaw) ? '' : newTariffNameRaw;
     if (oldTariffId !== newTariffId && newTariffId) {
       changes.push(`Tariff: ${newTariffName || newTariffId}`);
       allowed.tariffId = newTariffId;

@@ -55,6 +55,13 @@ import {
   FirebaseDriverStatus,
 } from '@/services/presenceService';
 import { subscribeCompanyTariffs } from '@/lib/companyTariffs';
+import {
+  readBookingTariffHints,
+  resolveTariffFromList,
+  sanitizeMeterTariff,
+  sanitizeSelectedTariff,
+} from '@/lib/tariffResolve';
+import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
 import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
@@ -356,6 +363,17 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
     stepTimes: { acceptedAt: now },
     tariffChanges: [],
   };
+}
+
+function resolveTariffForDriver(
+  tariffs: Tariff[],
+  hints?: { id?: string; name?: string } | null,
+  fallback?: Tariff,
+): Tariff | null {
+  const resolved = resolveTariffFromList(tariffs, hints);
+  if (resolved) return resolved;
+  if (fallback && !isForbiddenPlaceholderTariffName(fallback.name)) return fallback;
+  return tariffs[0] ?? null;
 }
 
 function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unknown>): JobOffer {
@@ -679,22 +697,39 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      setMeter((prev) => {
+        if (!prev) return prev;
+        const next = sanitizeMeterTariff(prev, list);
+        if (next !== prev) {
+          meterRef.current = next;
+          storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
+        }
+        return next;
+      });
+
       if (!tariffInitialPickDoneRef.current) {
         tariffInitialPickDoneRef.current = true;
         void (async () => {
           const savedId = await getData<string>(STORAGE_KEYS.selectedTariffId);
           const latest = tariffsListRef.current;
           if (latest.length === 0) return;
-          const match = savedId ? latest.find((t) => t.id === savedId) : null;
-          setSelectedTariffState(match ?? latest[0]);
+          const saved = savedId ? latest.find((t) => t.id === savedId) : null;
+          const pick = sanitizeSelectedTariff(latest, saved ?? latest[0]);
+          setSelectedTariffState(pick);
+          if (bookingRawRef.current) {
+            const fromBooking = resolveTariffFromList(latest, readBookingTariffHints(bookingRawRef.current));
+            if (fromBooking) setSelectedTariffState(fromBooking);
+          }
         })();
         return;
       }
 
       setSelectedTariffState((prev) => {
-        if (prev.id === NO_TARIFF_CONFIGURED.id) return list[0];
-        const refreshed = list.find((t) => t.id === prev.id);
-        return refreshed ?? list[0];
+        const sanitized = sanitizeSelectedTariff(list, prev);
+        const fromBooking = bookingRawRef.current
+          ? resolveTariffFromList(list, readBookingTariffHints(bookingRawRef.current))
+          : null;
+        return fromBooking ?? sanitized;
       });
     });
   }, [driver?.companyId], 'Driver-tariffs');
@@ -1488,14 +1523,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       const dispatchTariffId = allowed.tariffId?.trim();
       const dispatchTariffName = allowed.tariffName?.trim();
-      if (dispatchTariffId || dispatchTariffName) {
-        const match =
-          tariffsListRef.current.find((t) => dispatchTariffId && t.id === dispatchTariffId) ??
-          tariffsListRef.current.find((t) => dispatchTariffName && t.name === dispatchTariffName);
-        if (match) {
-          setSelectedTariffState(match);
-          storeData(STORAGE_KEYS.selectedTariffId, match.id).catch(() => undefined);
-          if (meterRef.current?.running) {
+      const match = resolveTariffFromList(tariffsListRef.current, {
+        id: dispatchTariffId,
+        name: dispatchTariffName,
+      });
+      if (match) {
+        setSelectedTariffState(match);
+        storeData(STORAGE_KEYS.selectedTariffId, match.id).catch(() => undefined);
+        if (meterRef.current?.running) {
             const change: TariffChangeRecord = {
               tariffId: match.id,
               tariffName: match.name,
@@ -1518,8 +1553,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               return next;
             });
             startMeterWatch();
-          }
         }
+      }
+      const fromBooking = resolveTariffFromList(
+        tariffsListRef.current,
+        readBookingTariffHints(update.raw),
+      );
+      if (fromBooking && !meterRef.current?.running) {
+        setSelectedTariffState(fromBooking);
+        storeData(STORAGE_KEYS.selectedTariffId, fromBooking.id).catch(() => undefined);
       }
 
       if (changes.length === 0 && !syncedNotes.length && !dispatchTariffId && !dispatchTariffName) return;
@@ -2320,11 +2362,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const startMeterForJob = () => {
-    if (!isTariffConfigured(selectedTariff)) {
+    const tariffs = tariffsListRef.current;
+    const fromBooking = bookingRawRef.current
+      ? resolveTariffFromList(tariffs, readBookingTariffHints(bookingRawRef.current))
+      : null;
+    const tariff =
+      fromBooking ??
+      resolveTariffForDriver(tariffs, null, selectedTariffRef.current) ??
+      selectedTariffRef.current;
+    if (!isTariffConfigured(tariff)) {
       Alert.alert('No tariff', 'Select a tariff before starting the meter.');
       return;
     }
-    const m = createInitialMeter(selectedTariff);
+    if (tariff.id !== selectedTariffRef.current.id) {
+      setSelectedTariffState(tariff);
+      storeData(STORAGE_KEYS.selectedTariffId, tariff.id).catch(() => undefined);
+    }
+    const m = createInitialMeter(tariff);
     setMeter(m);
     meterRef.current = m;
     storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
@@ -3089,6 +3143,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('Tariff locked', 'Tariff cannot be changed during payment.');
       return;
     }
+    if (isForbiddenPlaceholderTariffName(t.name)) return;
     const prevId = selectedTariff.id;
     setSelectedTariffState(t);
     storeData(STORAGE_KEYS.selectedTariffId, t.id).catch(() => undefined);
