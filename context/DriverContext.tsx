@@ -71,6 +71,7 @@ import {
 import { initializeNztaOnLogin } from '@/services/nztaService';
 import type { EndShiftSummary } from '@/services/nztaService';
 import { createInitialMeter, watchMeter } from '@/services/meterEngine';
+import { disableWakeLock, enableWakeLock } from '@/services/wakeLock';
 import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED, parseFiniteFare } from '@/lib/tariffs';
 import {
   completionErrorMessage,
@@ -517,6 +518,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     meterRef.current = meter;
   }, [meter], 'Driver-meterRef');
+
+  useSafeEffect(() => {
+    const keepAwake =
+      shiftActive ||
+      !!jobOffer ||
+      !!activeJob ||
+      hailActive ||
+      !!meter?.running;
+    if (keepAwake) {
+      void enableWakeLock();
+      return () => disableWakeLock();
+    }
+    disableWakeLock();
+    return undefined;
+  }, [shiftActive, jobOffer, activeJob, hailActive, meter?.running], 'Driver-wakeLock');
 
   useSafeEffect(() => {
     if (!driver?.companyId || !driver.uid) return;
