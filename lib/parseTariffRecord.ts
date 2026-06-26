@@ -1,3 +1,4 @@
+import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
 import { Tariff } from '@/types';
 
 /**
@@ -9,7 +10,7 @@ export function parseTariffRecord(key: string, rec: Record<string, unknown>): Ta
   const name = String(
     rec.TariffName ?? rec.tariffName ?? rec.name ?? rec.zoneName ?? rec.label ?? '',
   ).trim();
-  if (!name) return null;
+  if (!name || isForbiddenPlaceholderTariffName(name)) return null;
 
   const id = String(rec.Id ?? rec.id ?? key);
   const flagFall = parseFloat(
