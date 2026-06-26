@@ -68,6 +68,7 @@ import {
   subscribeBooking,
   verifyJobStageOnFirebase,
 } from '@/lib/bookingSync';
+import { subscribeActiveJobFirebaseWatch } from '@/lib/activeJobPresenceWatch';
 import { initializeNztaOnLogin } from '@/services/nztaService';
 import type { EndShiftSummary } from '@/services/nztaService';
 import { createInitialMeter, watchMeter } from '@/services/meterEngine';
@@ -1405,13 +1406,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const prevStatus = bookingRawRef.current
         ? String(bookingRawRef.current.Status ?? bookingRawRef.current.status ?? bookingRawRef.current.BookingStatus ?? '')
         : '';
+      const poolReturn =
+        isReturnedToDispatchPool(update.status) &&
+        !(prevStatus && isReturnedToDispatchPool(prevStatus));
       if (
         update.terminal ||
         update.cancelled ||
+        update.status === 'removed' ||
         isTerminalBookingStatus(
           String(update.raw.BookingStatus ?? update.raw.Status ?? update.raw.status ?? update.status),
         ) ||
-        (bookingRawRef.current && isReturnedToDispatchPool(update.status) && !isReturnedToDispatchPool(prevStatus))
+        poolReturn
       ) {
         const expectedLocalComplete =
           localCompletionRef.current ||
@@ -1654,7 +1659,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       const server = await resolveServerBookingState(driver.companyId, driver.id, job.id);
       if (!server?.status) {
-        console.warn(`[Driver] ${reason}: job #${job.id} not found on server`);
+        console.log(`[Driver] ${reason}: clearing stale local job #${job.id} — absent from server`);
+        await clearStaleActiveJobLocal('This booking is no longer assigned to you.');
+        return;
+      }
+
+      if (isReturnedToDispatchPool(server.status)) {
+        console.log(`[Driver] ${reason}: clearing stale local job #${job.id} — server=${server.status}`);
+        await clearStaleActiveJobLocal('This booking was returned to dispatch.');
         return;
       }
 
@@ -1705,6 +1717,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     void refreshActiveJobFromServer('active-job-resume');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.companyId, activeJob?.id], 'Driver-reconcile-active-job');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !driver.id || !selectedVehicleId || !activeJob?.id) return;
+    return subscribeActiveJobFirebaseWatch(
+      driver.companyId,
+      selectedVehicleId,
+      driver.id,
+      activeJob.id,
+      (reason) => {
+        if (!activeJobIdRef.current || !jobIdsMatch(activeJobIdRef.current, activeJob.id)) return;
+        console.log(`[Driver] active job withdrawn via Firebase (${reason}) — clearing #${activeJob.id}`);
+        void playInAppNotificationSound('cancel');
+        void clearStaleActiveJobLocal('This booking was returned to dispatch.', { silent: true });
+      },
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.companyId, driver?.id, selectedVehicleId, activeJob?.id], 'Driver-activeJobFirebaseWatch');
 
   useSafeEffect(() => {
     if (!driver || !shiftActive || !selectedVehicleId) {

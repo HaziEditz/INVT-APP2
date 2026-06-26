@@ -74,7 +74,16 @@ export function subscribeBooking(
     }
     const parsed = parseBookingNode(snap.val());
     if (!parsed?.bookingId) return;
-    onUpdate({ ...parsed, bookingId: parsed.bookingId || bookingId } as BookingUpdate);
+    const update = { ...parsed, bookingId: parsed.bookingId || bookingId } as BookingUpdate;
+    if (isReturnedToDispatchPool(update.status)) {
+      onUpdate({
+        ...update,
+        terminal: true,
+        status: 'removed',
+      });
+      return;
+    }
+    onUpdate(update);
   });
 }
 
