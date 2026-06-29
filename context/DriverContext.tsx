@@ -1603,6 +1603,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     if (!driver?.companyId || !jobOffer?.id) return;
     return subscribeBooking(driver.companyId, jobOffer.id, (update) => {
+      const rawOfferedAt = update.raw.offeredAt ?? update.raw.OfferedAt;
+      const isStalePoolSnapshot =
+        update.terminal &&
+        update.status === 'removed' &&
+        (rawOfferedAt == null || rawOfferedAt === '');
+      if (isStalePoolSnapshot) {
+        console.log('[Driver-offerBookingSync] ignoring stale pool snapshot', {
+          status: update.status,
+          updateSeq: update.raw.updateSeq,
+          version: update.raw.version,
+          offeredAt: rawOfferedAt,
+          Status: update.raw.Status,
+          BookingStatus: update.raw.BookingStatus,
+        });
+        return;
+      }
       if (update.terminal) {
         console.log('[Driver-offerBookingSync] terminal update', {
           status: update.status,
