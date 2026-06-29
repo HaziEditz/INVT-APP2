@@ -1588,6 +1588,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     if (!driver?.companyId || !jobOffer?.id) return;
     return subscribeBooking(driver.companyId, jobOffer.id, (update) => {
+      if (update.terminal) {
+        console.log('[Driver-offerBookingSync] terminal update', {
+          status: update.status,
+          updateSeq: update.raw.updateSeq,
+          version: update.raw.version,
+          offeredAt: update.raw.offeredAt,
+          completedAt: update.raw.completedAt,
+          Status: update.raw.Status,
+          BookingStatus: update.raw.BookingStatus,
+        });
+      }
       if (update.cancelled || (update.terminal && update.status.includes('cancel'))) {
         void playInAppNotificationSound('cancel');
         Alert.alert('Offer cancelled', 'This booking was cancelled by dispatch.');
