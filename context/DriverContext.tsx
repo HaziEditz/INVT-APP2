@@ -446,6 +446,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const readyForJobsRef = useRef(false);
   const hailActiveRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
+  const jobOfferIdRef = useRef<string | null>(null);
   const activeJobRef = useRef<ActiveJob | null>(null);
   const presenceWriteStatusRef = useRef<FirebaseDriverStatus>('Available');
   const lastStagePresenceWriteRef = useRef<{ status: FirebaseDriverStatus; at: number } | null>(null);
@@ -521,6 +522,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     activeJobIdRef.current = activeJob?.id ?? null;
   }, [activeJob?.id], 'Driver-activeJobRef');
+
+  useSafeEffect(() => {
+    jobOfferIdRef.current = jobOffer?.id ?? null;
+  }, [jobOffer?.id], 'Driver-jobOfferRef');
 
   useSafeEffect(() => {
     activeJobRef.current = activeJob;
@@ -1587,24 +1592,28 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (!driver?.companyId || !jobOffer?.id) return;
-    return subscribeBooking(driver.companyId, jobOffer.id, (update) => {
+    const offerId = jobOffer.id;
+    return subscribeBooking(driver.companyId, offerId, (update) => {
       if (update.cancelled || (update.terminal && update.status.includes('cancel'))) {
         void playInAppNotificationSound('cancel');
         Alert.alert('Offer cancelled', 'This booking was cancelled by dispatch.');
         setJobOffer(null);
-        removeBroadcastOffer(jobOffer.id);
+        removeBroadcastOffer(offerId);
         return;
       }
       if (update.terminal) {
+        if (!jobOfferIdRef.current || !jobIdsMatch(jobOfferIdRef.current, offerId)) return;
+        void playInAppNotificationSound('cancel');
+        Alert.alert('Offer unavailable', 'This offer is no longer available.');
         setJobOffer(null);
-        removeBroadcastOffer(jobOffer.id);
+        removeBroadcastOffer(offerId);
         return;
       }
       const { allowed, changes } = diffBookingChanges(null, update.raw, false);
       if (changes.length === 0) return;
       void playInAppNotificationSound('update');
       setJobOffer((prev) => {
-        if (!prev || !jobIdsMatch(prev.id, jobOffer.id)) return prev;
+        if (!prev || !jobIdsMatch(prev.id, offerId)) return prev;
         const patch: Partial<JobOffer> = {};
         if (allowed.pickup) patch.pickup = allowed.pickup;
         if (allowed.dropoff) patch.dropoff = allowed.dropoff;
@@ -1616,6 +1625,26 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.companyId, jobOffer?.id], 'Driver-offerBookingSync');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !driver.id || !selectedVehicleId || !jobOffer?.id) return;
+    const offerId = jobOffer.id;
+    return subscribeActiveJobFirebaseWatch(
+      driver.companyId,
+      selectedVehicleId,
+      driver.id,
+      offerId,
+      (reason) => {
+        if (!jobOfferIdRef.current || !jobIdsMatch(jobOfferIdRef.current, offerId)) return;
+        console.log(`[Driver] offer withdrawn via Firebase (${reason}) — clearing #${offerId}`);
+        void playInAppNotificationSound('cancel');
+        Alert.alert('Job returned to pool', 'This job was returned to the dispatch pool.');
+        setJobOffer(null);
+        removeBroadcastOffer(offerId);
+      },
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.companyId, driver?.id, selectedVehicleId, jobOffer?.id], 'Driver-offerFirebaseWatch');
 
   const writeStagePresenceDebounced = async (
     presStatus: FirebaseDriverStatus,
