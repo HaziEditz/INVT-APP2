@@ -1084,6 +1084,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (canListenForOffers) return;
+    console.log('[OFFER-DISMISS] clearOffersWhenOffline', {
+      canListenForOffers,
+      shiftActive,
+      paymentJob: !!paymentJob,
+      offersLockedForEnrouteDispatch,
+    });
     setJobOffer(null);
     if (!shiftActive) {
       clearBroadcastOffers();
@@ -1251,6 +1257,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (type === 'job_removed') {
+      console.log('[OFFER-DISMISS] notification', { type, eventType });
       void playInAppNotificationSound('alert');
       Alert.alert('Job taken back', 'Job has been taken back by dispatcher');
       if (jobId && activeJobIdRef.current && jobIdsMatch(activeJobIdRef.current, jobId)) {
@@ -1268,6 +1275,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (type === 'no_show') {
+      console.log('[OFFER-DISMISS] notification', { type, eventType });
       if (jobId && activeJobIdRef.current === jobId) {
         await clearActiveJobInternal();
         await restoreAvailableAfterJobClear();
@@ -1278,6 +1286,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (type === 'job_cancelled') {
+      console.log('[OFFER-DISMISS] notification', { type, eventType });
       void playInAppNotificationSound('cancel');
       Alert.alert('Job cancelled', 'Job has been cancelled');
       if (jobId && activeJobIdRef.current === jobId) {
@@ -1295,6 +1304,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (type === 'job_updated' || val.editNotice) {
+      console.log('[OFFER-DISMISS] notification', { type, eventType });
       const changes: string[] = [];
       if (val.pickup || val.jobpickup) changes.push(`Pickup: ${val.pickup ?? val.jobpickup}`);
       if (val.dropoff || val.jobdropoff) changes.push(`Dropoff: ${val.dropoff ?? val.jobdropoff}`);
@@ -1337,6 +1347,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (type === 'job_offer' || (isOfferPayload(val) && eventType !== 'assigned' && eventType !== 'accepted' && eventType !== 'queued')) {
+      console.log('[OFFER-DISMISS] notification', { type, eventType });
       await handleIncomingOffer(val);
       return;
     }
@@ -1349,6 +1360,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (hailActiveRef.current || activeJobIdRef.current) {
+      console.log('[OFFER-DISMISS] clearOfferModalOnTrip', {
+        activeJobId: activeJob?.id,
+        hailActive,
+      });
       setJobOffer(null);
     }
   }, [hailActive, activeJob?.id], 'Driver-clearOfferModalOnTrip');

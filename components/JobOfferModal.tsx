@@ -51,7 +51,15 @@ export function JobOfferModal() {
     return () => clearInterval(id);
   }, [jobOffer, declineOffer, hailActive, activeJob, paymentJob], 'JobOfferModal-timer');
 
-  if (!jobOffer || hailActive || !!activeJob || !!paymentJob) return null;
+  if (!jobOffer) return null;
+  if (hailActive || !!activeJob || !!paymentJob) {
+    console.log('[OFFER-DISMISS] JobOfferModal hidden', {
+      hailActive,
+      activeJobId: activeJob?.id,
+      paymentJob: !!paymentJob,
+    });
+    return null;
+  }
 
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
 
