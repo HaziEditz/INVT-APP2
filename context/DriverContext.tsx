@@ -68,7 +68,9 @@ import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/comp
 import { getCurrentCoords, refreshHailPickupLocation } from '@/services/locationService';
 import * as Location from 'expo-location';
 import {
+  activeJobPatchFromBookingRaw,
   diffBookingChanges,
+  fetchBookingRaw,
   isReturnedToDispatchPool,
   parseBookingNode,
   stageAllowsMeter,
@@ -390,13 +392,30 @@ function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unkn
 
 function patchActiveJobFromNotification(job: ActiveJob, val: Record<string, unknown>): ActiveJob {
   const patch: Partial<ActiveJob> = { ...parseSchedulingMetaFromRecord(val) };
-  if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
-  if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
-  if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
-  if (val.jobname) patch.passengerName = String(val.jobname);
-  if (val.JobphoneNo || val.PhoneNo || val.passengerPhone) {
-    patch.passengerPhone = String(val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone);
+  const pickup = val.pickup ?? val.jobpickup ?? val.PickAddress ?? val.pickAddress;
+  const dropoff = val.dropoff ?? val.jobdropoff ?? val.DropAddress ?? val.dropAddress;
+  if (pickup) patch.pickup = String(pickup);
+  if (dropoff) patch.dropoff = String(dropoff);
+  if (val.notes || val.jobinfo || val.Notes) {
+    patch.notes = String(val.notes ?? val.jobinfo ?? val.Notes);
   }
+  const passengerName = val.jobname ?? val.Name ?? val.PassengerName ?? val.passengerName;
+  if (passengerName) patch.passengerName = String(passengerName);
+  const passengerPhone = val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone;
+  if (passengerPhone) patch.passengerPhone = String(passengerPhone);
+  const paymentType = val.paymentType ?? val.PaymentType ?? val.paymentMethod ?? val.PaymentMethod;
+  if (paymentType) patch.paymentType = String(paymentType) as ActiveJob['paymentType'];
+  const estimatedFare = val.EstimatedFare ?? val.RideCost ?? val.CustomeRate ?? val.fixedFare;
+  if (estimatedFare != null && String(estimatedFare).trim()) {
+    const fare = parseFiniteFare(estimatedFare);
+    if (fare != null) {
+      patch.estimatedFare = fare;
+      patch.fixedFare = fare;
+    }
+  }
+  const rawSeq = val.updateSeq ?? val._seq ?? val.version ?? val.seq;
+  const parsedSeq = rawSeq != null ? parseInt(String(rawSeq), 10) : NaN;
+  if (!Number.isNaN(parsedSeq) && parsedSeq > 0) patch.updateSeq = parsedSeq;
   return { ...job, ...patch };
 }
 
@@ -1311,6 +1330,62 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
             return merged;
           });
+
+          void (async () => {
+            const cid = driver.companyId;
+            if (!cid) return;
+            const raw = await fetchBookingRaw(cid, jobId);
+            if (!raw) return;
+            bookingRawRef.current = raw;
+            const patch = activeJobPatchFromBookingRaw(raw);
+            const dispatchTariffId = patch.tariffId?.trim();
+            const dispatchTariffName = patch.tariffName?.trim();
+            const match = resolveTariffFromList(tariffsListRef.current, {
+              id: dispatchTariffId,
+              name: dispatchTariffName,
+            });
+            if (match) {
+              setSelectedTariffState(match);
+              storeData(STORAGE_KEYS.selectedTariffId, match.id).catch(() => undefined);
+              if (meterRef.current?.running) {
+                const change: TariffChangeRecord = {
+                  tariffId: match.id,
+                  tariffName: match.name,
+                  at: Date.now(),
+                };
+                setMeter((prev) => {
+                  if (!prev) return prev;
+                  const waitMin = prev.waitingMs / 60000;
+                  const breakdown = calcMeterBreakdown(match, prev.distanceKm, waitMin);
+                  const next = {
+                    ...prev,
+                    tariffId: match.id,
+                    tariffName: match.name,
+                    tariffChanges: [...prev.tariffChanges, change],
+                    breakdown,
+                    fare: breakdown.total,
+                  };
+                  meterRef.current = next;
+                  storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
+                  return next;
+                });
+                startMeterWatch();
+              }
+            }
+            setActiveJob((prev) => {
+              if (!prev || !jobIdsMatch(prev.id, jobId)) return prev;
+              const merged = {
+                ...prev,
+                ...patch,
+                updateSeq:
+                  patch.updateSeq != null
+                    ? Math.max(prev.updateSeq ?? 0, patch.updateSeq)
+                    : prev.updateSeq,
+              };
+              storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+              return merged;
+            });
+          })();
         }
 
         setJobOffer((prev) =>

@@ -151,6 +151,47 @@ export function stageAllowsMeter(stage: JobStage): boolean {
   return stage === 'onboard';
 }
 
+/** Map an allbookings/jobs Firebase row → display fields for the active-job screen. */
+export function activeJobPatchFromBookingRaw(
+  rec: Record<string, unknown>,
+): Partial<Pick<BookingUpdate, 'pickup' | 'dropoff' | 'passengerName' | 'passengerPhone' | 'notes' | 'paymentType' | 'tariffId' | 'tariffName'>> & {
+  updateSeq?: number;
+} {
+  const parsed = parseBookingNode(rec);
+  if (!parsed) return {};
+  const patch: Partial<BookingUpdate> & { updateSeq?: number } = {};
+  if (parsed.pickup) patch.pickup = parsed.pickup;
+  if (parsed.dropoff) patch.dropoff = parsed.dropoff;
+  if (parsed.passengerName) patch.passengerName = parsed.passengerName;
+  if (parsed.passengerPhone) patch.passengerPhone = parsed.passengerPhone;
+  if (parsed.notes) patch.notes = parsed.notes;
+  if (parsed.paymentType) patch.paymentType = parsed.paymentType;
+
+  const tariffId = String(rec.TariffId ?? rec.TarriffId ?? rec.tariffId ?? '').trim();
+  const tariffNameRaw = String(rec.TarriffType ?? rec.TariffName ?? rec.tariffName ?? '').trim();
+  const tariffName = isForbiddenPlaceholderTariffName(tariffNameRaw) ? '' : tariffNameRaw;
+  if (tariffId) patch.tariffId = tariffId;
+  if (tariffName) patch.tariffName = tariffName;
+
+  const seq = updateSeqFromRecord(rec);
+  if (seq != null) patch.updateSeq = seq;
+  return patch;
+}
+
+export async function fetchBookingRaw(
+  companyId: string,
+  bookingId: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const snap = await get(ref(getDatabaseInstance(), `allbookings/${companyId}/${bookingId}`));
+    if (!snap.exists()) return null;
+    const val = snap.val();
+    return val && typeof val === 'object' ? (val as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 function bookingStatusFromRecord(b: Record<string, unknown>): string {
   return String(b.BookingStatus ?? b.Status ?? b.status ?? '').trim();
 }
