@@ -245,6 +245,16 @@ function isOfferPayload(val: Record<string, unknown>): boolean {
   );
 }
 
+/** Edit/lifecycle notifications must reach drivers during enroute active jobs (offer gate off). */
+function notificationBypassesOfferGate(val: Record<string, unknown>): boolean {
+  const type = readNotificationType(val);
+  const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
+  if (type === 'job_updated' || val.editNotice) return true;
+  if (type === 'job_removed' || type === 'job_cancelled' || type === 'no_show') return true;
+  if (eventType === 'assigned' || eventType === 'accepted' || eventType === 'queued') return true;
+  return false;
+}
+
 function extractOfferPayloads(val: unknown): Record<string, unknown>[] {
   if (!val || typeof val !== 'object') return [];
   if (Array.isArray(val)) {
@@ -1354,7 +1364,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [hailActive, activeJob?.id], 'Driver-clearOfferModalOnTrip');
 
   useSafeEffect(() => {
-    if (!canListenForOffers || !isFirebaseReady || !driver?.id) return;
+    if (!shiftActive || !isFirebaseReady || !driver?.id) return;
     try {
       const notifyRef = ref(getDatabaseInstance(), `notification/${driver.id}`);
       return onValue(notifyRef, async (snap) => {
@@ -1362,9 +1372,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           const val = snap.val();
           if (!val) return;
           if (typeof val === 'object' && !Array.isArray(val) && (val.type || val.eventType || isOfferPayload(val as Record<string, unknown>))) {
-            await handleDriverNotification(val as Record<string, unknown>);
+            const payload = val as Record<string, unknown>;
+            if (!canListenForOffers && !notificationBypassesOfferGate(payload)) return;
+            await handleDriverNotification(payload);
             return;
           }
+          if (!canListenForOffers) return;
           const payloads = extractOfferPayloads(val);
           for (const payload of payloads) {
             await processOfferPayload(payload);
@@ -1377,7 +1390,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] notification subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canListenForOffers, driver?.id], 'Driver-notification');
+  }, [shiftActive, canListenForOffers, driver?.id], 'Driver-notification');
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.id) return;
