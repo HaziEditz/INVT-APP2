@@ -79,6 +79,17 @@ export function CurrentTripPanel() {
             Picked up from: {hailPickupAddress || 'Locating address…'}
           </Text>
         </ScrollView>
+        {meterRunning ? (
+          <View style={styles.actionBar}>
+            <Button
+              title={completionBusy ? 'Ending…' : 'End Trip'}
+              variant="danger"
+              disabled={completionBusy}
+              compact
+              onPress={() => confirmEndTrip(() => void endTrip())}
+            />
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -94,7 +105,11 @@ export function CurrentTripPanel() {
   const nextLabel = STAGE_LABELS[nextStage];
   const st = activeJob.stepTimes;
   const showEndTrip =
-    meterRunning || (isHailTrip && (activeJob.stage === 'onboard' || !!st.onboardAt || !!st.hailStartedAt));
+    isHailTrip ||
+    meterRunning ||
+    activeJob.stage === 'onboard' ||
+    !!st.onboardAt ||
+    !!st.hailStartedAt;
   const preArrival =
     activeJob.stage === 'pickup' ||
     (!st.arrivedAt && !st.onboardAt && activeJob.stage !== 'onboard' && activeJob.stage !== 'complete');

@@ -66,6 +66,7 @@ import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
 import { getCurrentCoords, refreshHailPickupLocation } from '@/services/locationService';
+import { patchOnlineCurrentJobId } from '@/lib/liveMeterPresence';
 import * as Location from 'expo-location';
 import {
   diffBookingChanges,
@@ -396,6 +397,10 @@ function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unkn
     patch.passengerPhone = String(val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone);
   }
   return { ...offer, ...patch };
+}
+
+function isHailTripJob(job: ActiveJob | null | undefined, hailActive: boolean): boolean {
+  return hailActive || job?.source === 'hail';
 }
 
 function patchActiveJobFromNotification(job: ActiveJob, val: Record<string, unknown>): ActiveJob {
@@ -1179,7 +1184,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await syncPresenceAfterTripClear();
   };
 
+  const clearHailTripState = () => {
+    setHailActive(false);
+    hailActiveRef.current = false;
+    setHailPickupAddress(null);
+    setHailPickupLat(undefined);
+    setHailPickupLng(undefined);
+  };
+
   const clearActiveJobInternal = async (opts?: { skipReleaseQueue?: boolean }) => {
+    const wasHail = isHailTripJob(activeJobRef.current, hailActiveRef.current);
     stopMeterForJob();
     setMeter(null);
     meterRef.current = null;
@@ -1189,6 +1203,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     bookingRawRef.current = null;
     await storeData(STORAGE_KEYS.activeJob, null);
     await storeData(STORAGE_KEYS.meterState, null);
+    if (wasHail) {
+      clearHailTripState();
+    }
     if (!opts?.skipReleaseQueue) {
       releaseQueuedOffersAfterTrip();
     }
@@ -1311,7 +1328,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (val.notes || val.jobinfo) changes.push(`Notes updated`);
       if (val.Pickingtime || val.pickupTime) changes.push(`Time updated`);
       void playInAppNotificationSound('update');
-      Alert.alert('Job updated', changes.length ? changes.join('\n') : String(val.editNotice ?? 'Details changed'));
+      const hailTripNow = isHailTripJob(activeJobRef.current, hailActiveRef.current);
+      if (!hailTripNow) {
+        Alert.alert('Job updated', changes.length ? changes.join('\n') : String(val.editNotice ?? 'Details changed'));
+      } else {
+        console.log('[Driver] job_updated during hail — applied silently');
+      }
 
       if (jobId) {
         if (activeJobIdRef.current && jobIdsMatch(activeJobIdRef.current, jobId)) {
@@ -1515,7 +1537,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
       const syncedNotes = collectJobNotes(update.raw);
 
-      if (blocked.length > 0) {
+      if (blocked.length > 0 && !isHailTripJob(activeJobRef.current, hailActiveRef.current)) {
         Alert.alert(
           'Job update blocked',
           `Changes to ${blocked.join(', ')} cannot be applied while passenger is on board. Notes and payment type can still change.`,
@@ -1719,15 +1741,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!driver?.companyId || !driver.id) return;
     const job = activeJobRef.current;
     if (!job?.id || !isValidBookingId(job.id)) return;
+    const hailTrip = isHailTripJob(job, hailActiveRef.current);
     try {
       const server = await resolveServerBookingState(driver.companyId, driver.id, job.id);
       if (!server?.status) {
+        if (hailTrip) {
+          console.log(`[Driver] ${reason}: skipping stale clear for hail #${job.id} — server row not ready`);
+          return;
+        }
         console.log(`[Driver] ${reason}: clearing stale local job #${job.id} — absent from server`);
         await clearStaleActiveJobLocal('This booking is no longer assigned to you.');
         return;
       }
 
       if (isReturnedToDispatchPool(server.status)) {
+        if (hailTrip) {
+          console.log(`[Driver] ${reason}: hail #${job.id} returned on dispatch — clearing hail trip`);
+        }
         console.log(`[Driver] ${reason}: clearing stale local job #${job.id} — server=${server.status}`);
         await clearStaleActiveJobLocal('This booking was returned to dispatch.');
         return;
@@ -1744,6 +1774,26 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const serverIdx = serverStatusIndex(server.status);
       const localIdx = ['pickup', 'arrived', 'onboard', 'complete'].indexOf(job.stage);
       let ver = server.version || job.updateSeq;
+
+      if (hailTrip) {
+        if (localIdx > serverIdx) {
+          const caught = await catchUpJobStagesOnDispatch(job.id, driver.id, job.stage, ver, {
+            companyId: driver.companyId,
+          });
+          ver = caught.version ?? ver;
+          if (caught.synced.length > 0) {
+            console.log(`[Driver] ${reason}: hail caught up stages → ${caught.synced.join(', ')}`);
+          }
+        } else if (ver != null && ver !== job.updateSeq) {
+          setActiveJob((prev) => {
+            if (!prev || prev.id !== job.id) return prev;
+            const merged = { ...prev, updateSeq: ver };
+            storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+            return merged;
+          });
+        }
+        return;
+      }
 
       if (localIdx > serverIdx) {
         const caught = await catchUpJobStagesOnDispatch(job.id, driver.id, job.stage, ver);
@@ -1790,6 +1840,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       activeJob.id,
       (reason) => {
         if (!activeJobIdRef.current || !jobIdsMatch(activeJobIdRef.current, activeJob.id)) return;
+        // Hail trips stamp currentJobId on the GPS heartbeat (~15s). Until then, or when
+        // liveMeterPresence briefly clears the field, ignore this false withdraw only.
+        // Real cancellations still arrive via allbookings subscribe, job_cancelled notification,
+        // refreshActiveJobFromServer terminal status, and jobs-node-deleted below.
+        if (reason === 'currentJobId-cleared' && isHailTripJob(activeJobRef.current, hailActiveRef.current)) {
+          console.log(`[Driver] ignoring stale currentJobId withdraw during hail #${activeJob.id}`);
+          return;
+        }
         console.log(`[Driver] active job withdrawn via Firebase (${reason}) — clearing #${activeJob.id}`);
         void playInAppNotificationSound('cancel');
         void clearStaleActiveJobLocal('This booking was returned to dispatch.', { silent: true });
@@ -2754,6 +2812,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const clearJobLocallyAfterTerminal = async () => {
+    const wasHail = isHailTripJob(activeJobRef.current, hailActiveRef.current);
     stopMeterForJob();
     setMeter(null);
     meterRef.current = null;
@@ -2764,6 +2823,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     bookingRawRef.current = null;
     await storeData(STORAGE_KEYS.activeJob, null);
     await storeData(STORAGE_KEYS.meterState, null);
+    if (wasHail) {
+      clearHailTripState();
+    }
     if (shiftActive) {
       await syncPresenceAfterTripClear();
     }
@@ -2993,6 +3055,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       startMeterWatch();
 
       writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+      void patchOnlineCurrentJobId(driver.companyId, vehicleId, jobId).catch((err) => {
+        console.warn('[Driver] patchOnlineCurrentJobId after hail start failed:', err);
+      });
     } catch (err) {
       setHailPickupAddress(null);
       setHailPickupLat(undefined);

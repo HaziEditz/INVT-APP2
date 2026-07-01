@@ -1,3 +1,5 @@
+import { get, ref, update } from 'firebase/database';
+import { getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { getData, STORAGE_KEYS } from '@/lib/storage';
 import type { ActiveJob, MeterState } from '@/types';
 
@@ -52,4 +54,27 @@ export async function loadLiveMeterPresenceFields(): Promise<Record<string, unkn
     currentJobId: jobId,
     bookingId: jobId,
   };
+}
+
+/** Stamp currentJobId on online/current immediately after hail/dispatch assigns a booking. */
+export async function patchOnlineCurrentJobId(
+  companyId: string,
+  vehicleId: string,
+  jobId: string,
+): Promise<void> {
+  const cid = String(companyId || '').trim();
+  const vid = String(vehicleId || '').trim();
+  const bid = String(jobId || '').trim();
+  if (!cid || !vid || !bid) return;
+  const onlinePath = `online/${cid}/${vid}`;
+  await ensureAuthUserForRtdbWrite(`patchOnlineCurrentJobId → ${onlinePath}/current`);
+  const curRef = ref(getDatabaseInstance(), `${onlinePath}/current`);
+  const snap = await get(curRef);
+  if (!snap.exists()) return;
+  await update(curRef, {
+    currentJobId: bid,
+    bookingId: bid,
+    jobId: bid,
+    lastSeen: Date.now(),
+  });
 }
