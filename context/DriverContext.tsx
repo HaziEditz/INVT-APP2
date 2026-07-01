@@ -387,16 +387,49 @@ function resolveTariffForDriver(
   return tariffs[0] ?? null;
 }
 
-function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unknown>): JobOffer {
+function readFareFromRecord(val: Record<string, unknown>): number | undefined {
+  return parseFiniteFare(
+    val.EstimatedFare ??
+      val.RideCost ??
+      val.CustomeRate ??
+      val.Fare ??
+      val.fixedFare ??
+      val.estimatedFare ??
+      val.jobFare,
+  );
+}
+
+function readPaymentFromRecord(val: Record<string, unknown>): string | undefined {
+  const pay =
+    val.paymentType ?? val.PaymentType ?? val.PaymentMethod ?? val.Recieve_payment ?? val.payment;
+  const s = pay != null ? String(pay).trim() : '';
+  return s || undefined;
+}
+
+function buildNotificationFieldPatch(val: Record<string, unknown>): Partial<JobOffer> {
   const patch: Partial<JobOffer> = { ...parseSchedulingMetaFromRecord(val) };
-  if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
-  if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
-  if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
-  if (val.jobname) patch.passengerName = String(val.jobname);
-  if (val.JobphoneNo || val.PhoneNo || val.passengerPhone) {
-    patch.passengerPhone = String(val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone);
+  const pickup = val.pickup ?? val.jobpickup ?? val.PickAddress;
+  if (pickup) patch.pickup = String(pickup);
+  const dropoff = val.dropoff ?? val.jobdropoff ?? val.DropAddress;
+  if (dropoff) patch.dropoff = String(dropoff);
+  const notes = val.notes ?? val.jobinfo ?? val.Notes;
+  if (notes) patch.notes = String(notes);
+  const name = val.jobname ?? val.Name ?? val.PassengerName ?? val.passengerName;
+  if (name) patch.passengerName = String(name);
+  const phone = val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone ?? val.phone;
+  if (phone) patch.passengerPhone = String(phone);
+  const fare = readFareFromRecord(val);
+  if (fare != null) {
+    patch.fixedFare = fare;
+    patch.estimatedFare = fare;
   }
-  return { ...offer, ...patch };
+  const pay = readPaymentFromRecord(val);
+  if (pay) patch.paymentType = pay as PaymentType;
+  return patch;
+}
+
+function patchJobOfferFromNotification(offer: JobOffer, val: Record<string, unknown>): JobOffer {
+  return { ...offer, ...buildNotificationFieldPatch(val) };
 }
 
 function isHailTripJob(job: ActiveJob | null | undefined, hailActive: boolean): boolean {
@@ -404,14 +437,9 @@ function isHailTripJob(job: ActiveJob | null | undefined, hailActive: boolean): 
 }
 
 function patchActiveJobFromNotification(job: ActiveJob, val: Record<string, unknown>): ActiveJob {
-  const patch: Partial<ActiveJob> = { ...parseSchedulingMetaFromRecord(val) };
-  if (val.pickup || val.jobpickup) patch.pickup = String(val.pickup ?? val.jobpickup);
-  if (val.dropoff || val.jobdropoff) patch.dropoff = String(val.dropoff ?? val.jobdropoff);
-  if (val.notes || val.jobinfo) patch.notes = String(val.notes ?? val.jobinfo);
-  if (val.jobname) patch.passengerName = String(val.jobname);
-  if (val.JobphoneNo || val.PhoneNo || val.passengerPhone) {
-    patch.passengerPhone = String(val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone);
-  }
+  const patch = buildNotificationFieldPatch(val) as Partial<ActiveJob>;
+  if (patch.fixedFare != null) patch.fare = patch.fixedFare;
+  else if (patch.estimatedFare != null) patch.fare = patch.estimatedFare;
   return { ...job, ...patch };
 }
 
@@ -1323,10 +1351,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     if (type === 'job_updated' || val.editNotice) {
       const changes: string[] = [];
-      if (val.pickup || val.jobpickup) changes.push(`Pickup: ${val.pickup ?? val.jobpickup}`);
-      if (val.dropoff || val.jobdropoff) changes.push(`Dropoff: ${val.dropoff ?? val.jobdropoff}`);
-      if (val.notes || val.jobinfo) changes.push(`Notes updated`);
+      if (val.pickup || val.jobpickup || val.PickAddress) {
+        changes.push(`Pickup: ${val.pickup ?? val.jobpickup ?? val.PickAddress}`);
+      }
+      if (val.dropoff || val.jobdropoff || val.DropAddress) {
+        changes.push(`Dropoff: ${val.dropoff ?? val.jobdropoff ?? val.DropAddress}`);
+      }
+      if (val.notes || val.jobinfo || val.Notes) changes.push(`Notes updated`);
       if (val.Pickingtime || val.pickupTime) changes.push(`Time updated`);
+      const name = val.jobname ?? val.Name ?? val.PassengerName ?? val.passengerName;
+      if (name) changes.push(`Passenger: ${name}`);
+      const phone = val.JobphoneNo ?? val.PhoneNo ?? val.passengerPhone ?? val.phone;
+      if (phone) changes.push(`Phone: ${phone}`);
+      const fare = readFareFromRecord(val);
+      if (fare != null) changes.push(`Fare: $${fare.toFixed(2)}`);
+      const tariffName = val.TarriffType ?? val.TariffName ?? val.tariffName;
+      if (tariffName) changes.push(`Tariff: ${tariffName}`);
+      const pay = readPaymentFromRecord(val);
+      if (pay) changes.push(`Payment: ${pay}`);
       void playInAppNotificationSound('update');
       const hailTripNow = isHailTripJob(activeJobRef.current, hailActiveRef.current);
       if (!hailTripNow) {
@@ -1336,6 +1378,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       if (jobId) {
+        const tariffHints = readBookingTariffHints(val);
+        const tariffMatch = resolveTariffFromList(tariffsListRef.current, tariffHints);
+        if (tariffMatch) {
+          setSelectedTariffState(tariffMatch);
+          storeData(STORAGE_KEYS.selectedTariffId, tariffMatch.id).catch(() => undefined);
+        }
+
         if (activeJobIdRef.current && jobIdsMatch(activeJobIdRef.current, jobId)) {
           setActiveJob((prev) => {
             if (!prev) return prev;
@@ -1518,8 +1567,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         return;
       }
       const meterStarted = stageAllowsMeter(activeJob?.stage ?? 'pickup');
+      const prevRaw = bookingRawRef.current;
       const { allowed, blocked, changes } = diffBookingChanges(
-        bookingRawRef.current,
+        prevRaw,
         update.raw,
         meterStarted,
       );
@@ -1554,6 +1604,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (syncedNotes.length) {
         patch.allNotes = syncedNotes;
         if (!patch.notes) patch.notes = syncedNotes.map((n) => n.text).join('\n\n');
+      }
+
+      const fareFromRaw = readFareFromRecord(update.raw);
+      if (fareFromRaw != null && !meterStarted) {
+        patch.fixedFare = fareFromRaw;
+        patch.estimatedFare = fareFromRaw;
+        patch.fare = fareFromRaw;
+      }
+      if (!patch.paymentType && prevRaw) {
+        const payFromRaw = readPaymentFromRecord(update.raw);
+        const prevPay = readPaymentFromRecord(prevRaw);
+        if (payFromRaw && payFromRaw !== prevPay) {
+          patch.paymentType = payFromRaw as ActiveJob['paymentType'];
+        }
       }
 
       const dispatchTariffId = allowed.tariffId?.trim();
@@ -1599,7 +1663,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         storeData(STORAGE_KEYS.selectedTariffId, fromBooking.id).catch(() => undefined);
       }
 
-      if (changes.length === 0 && !syncedNotes.length && !dispatchTariffId && !dispatchTariffName) return;
+      if (changes.length === 0 && !syncedNotes.length && !dispatchTariffId && !dispatchTariffName && fareFromRaw == null && !patch.paymentType) return;
 
       if (Object.keys(patch).length > 0) {
         setActiveJob((prev) => {
@@ -1644,7 +1708,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         return;
       }
       const { allowed, changes } = diffBookingChanges(null, update.raw, false);
-      if (changes.length === 0) return;
+      const offerFare = readFareFromRecord(update.raw);
+      if (changes.length === 0 && offerFare == null) return;
       void playInAppNotificationSound('update');
       setJobOffer((prev) => {
         if (!prev || !jobIdsMatch(prev.id, jobOffer.id)) return prev;
@@ -1654,6 +1719,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (allowed.passengerName) patch.passengerName = allowed.passengerName;
         if (allowed.passengerPhone) patch.passengerPhone = allowed.passengerPhone;
         if (allowed.notes) patch.notes = allowed.notes;
+        if (offerFare != null) {
+          patch.fixedFare = offerFare;
+          patch.estimatedFare = offerFare;
+        }
+        const pay = readPaymentFromRecord(update.raw);
+        if (pay) patch.paymentType = pay as PaymentType;
         return { ...prev, ...patch };
       });
     });
