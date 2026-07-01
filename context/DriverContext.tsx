@@ -443,6 +443,26 @@ function patchActiveJobFromNotification(job: ActiveJob, val: Record<string, unkn
   return { ...job, ...patch };
 }
 
+function summarizeJobOfferEdits(prev: JobOffer, next: JobOffer): string[] {
+  const changes: string[] = [];
+  if (prev.pickup !== next.pickup && next.pickup) changes.push(`Pickup: ${next.pickup}`);
+  if (prev.dropoff !== next.dropoff && next.dropoff) changes.push(`Dropoff: ${next.dropoff}`);
+  if (prev.passengerName !== next.passengerName && next.passengerName) {
+    changes.push(`Passenger: ${next.passengerName}`);
+  }
+  if (prev.passengerPhone !== next.passengerPhone && next.passengerPhone) {
+    changes.push(`Phone: ${next.passengerPhone}`);
+  }
+  if (prev.notes !== next.notes && next.notes) changes.push('Notes updated');
+  if (prev.paymentType !== next.paymentType && next.paymentType) {
+    changes.push(`Payment: ${next.paymentType}`);
+  }
+  const prevFare = parseFiniteFare(prev.fixedFare) ?? parseFiniteFare(prev.estimatedFare);
+  const nextFare = parseFiniteFare(next.fixedFare) ?? parseFiniteFare(next.estimatedFare);
+  if (nextFare != null && prevFare !== nextFare) changes.push(`Fare: $${nextFare.toFixed(2)}`);
+  return changes;
+}
+
 export function DriverProvider({ children }: { children: ReactNode }) {
   const { driver, signOut } = useAuth();
   const [presenceStatus, setPresenceStatus] = useState<PresenceDisplayStatus>('Offline');
@@ -496,6 +516,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const repairPresenceRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const refreshActiveJobRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
+  const lastJobEditAlertRef = useRef<{ key: string; at: number } | null>(null);
   const meterRef = useRef<MeterState | null>(null);
   const meterStopRef = useRef<(() => void) | null>(null);
   const tariffInitialPickDoneRef = useRef(false);
@@ -828,6 +849,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const activeVehicleBodyType = activeVehicle?.displayType ?? activeVehicle?.bodyType ?? '—';
   const tariffLocked = !!paymentJob;
 
+  const shouldShowJobEditAlert = (jobId: string, summary: string): boolean => {
+    const key = `${jobId}:${summary}`;
+    const last = lastJobEditAlertRef.current;
+    if (last && last.key === key && Date.now() - last.at < 4000) return false;
+    return true;
+  };
+
+  const alertJobEditToDriver = (jobId: string, summary: string) => {
+    const hailTripNow = isHailTripJob(activeJobRef.current, hailActiveRef.current);
+    if (hailTripNow) {
+      console.log('[Driver] job edit during hail — applied silently');
+      return;
+    }
+    const body = summary.trim() || 'Details changed';
+    if (!shouldShowJobEditAlert(jobId, body)) return;
+    lastJobEditAlertRef.current = { key: `${jobId}:${body}`, at: Date.now() };
+    void playInAppNotificationSound('update');
+    Alert.alert('Job updated', body);
+    setJobEditNotice(`Job updated:\n${body}`);
+  };
+
   useSafeEffect(() => {
     queuedOffersRef.current = queuedOffers;
   }, [queuedOffers], 'Driver-queuedOffersRef');
@@ -880,6 +922,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           const live = await filterLiveDriverQueueOffers(companyId, driverId, mapped);
           if (live.length < mapped.length) {
             pruneDriverQueueOnDispatch().catch(() => undefined);
+          }
+          const prevQueued = queuedOffersRef.current;
+          const editLines: string[] = [];
+          let editedId: string | undefined;
+          for (const next of live) {
+            const prev = prevQueued.find((o) => o.id === next.id);
+            if (!prev) continue;
+            const lines = summarizeJobOfferEdits(prev, next);
+            if (lines.length === 0) continue;
+            if (!editedId) editedId = next.id;
+            editLines.push(...lines);
+          }
+          if (editLines.length > 0 && editedId) {
+            alertJobEditToDriver(editedId, editLines.join('\n'));
           }
           setQueuedOffers(live);
         })();
@@ -1291,8 +1347,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const type = readNotificationType(val);
     const jobId = readNotificationJobId(val);
     const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
+    const isEditNotification = type === 'job_updated' || !!val.editNotice;
 
-    if (eventType === 'assigned' || eventType === 'accepted' || eventType === 'queued') {
+    if (
+      !isEditNotification &&
+      (eventType === 'assigned' || eventType === 'accepted' || eventType === 'queued')
+    ) {
       await clearDriverNotification(driver.id);
       return;
     }
@@ -1369,12 +1429,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (tariffName) changes.push(`Tariff: ${tariffName}`);
       const pay = readPaymentFromRecord(val);
       if (pay) changes.push(`Payment: ${pay}`);
-      void playInAppNotificationSound('update');
-      const hailTripNow = isHailTripJob(activeJobRef.current, hailActiveRef.current);
-      if (!hailTripNow) {
-        Alert.alert('Job updated', changes.length ? changes.join('\n') : String(val.editNotice ?? 'Details changed'));
+      const summary = changes.length ? changes.join('\n') : String(val.editNotice ?? 'Details changed');
+      if (jobId) {
+        alertJobEditToDriver(jobId, summary);
       } else {
-        console.log('[Driver] job_updated during hail — applied silently');
+        const hailTripNow = isHailTripJob(activeJobRef.current, hailActiveRef.current);
+        if (!hailTripNow) {
+          void playInAppNotificationSound('update');
+          Alert.alert('Job updated', summary);
+        }
       }
 
       if (jobId) {
