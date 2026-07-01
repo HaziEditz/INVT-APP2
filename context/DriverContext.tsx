@@ -1832,7 +1832,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [driver?.companyId, activeJob?.id], 'Driver-reconcile-active-job');
 
   useSafeEffect(() => {
-    if (!driver?.companyId || !driver.id || !selectedVehicleId || !activeJob?.id) return;
+    if (!driver?.companyId || !driver.id || !selectedVehicleId || !activeJob?.id || activeJob.source === 'hail') return;
     return subscribeActiveJobFirebaseWatch(
       driver.companyId,
       selectedVehicleId,
