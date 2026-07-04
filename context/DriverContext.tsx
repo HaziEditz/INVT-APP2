@@ -41,6 +41,7 @@ import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/
 import { tickWorkedMinutes } from '@/services/nztaService';
 import {
   clearOnlinePresence,
+  isPresenceSessionEnded,
   isVehicleStatusAvailable,
   markPresenceSessionEnded,
   moveDriverToEndOfQueue,
@@ -1058,7 +1059,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return onValue(presenceRef, (snap) => {
         try {
           if (!snap.exists()) {
-            if (shiftActiveRef.current) {
+            // Never repair while ending shift or after session lock — server DELETE
+            // would otherwise be undone by heartbeat/listener rewrite.
+            if (
+              shiftActiveRef.current &&
+              !endShiftInProgressRef.current &&
+              driver?.companyId &&
+              selectedVehicleId &&
+              !isPresenceSessionEnded(driver.companyId, selectedVehicleId)
+            ) {
               console.warn('[Driver] presence node missing during shift — repairing');
               void repairPresenceRef.current?.('listener-missing-node');
             } else {
@@ -2152,10 +2161,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     driverSnapshot: typeof driver,
     vehicleId: string | null,
   ): Promise<EndShiftSummary | null> => {
-    // Synchronous lock before any await — blocks in-flight GPS/status-only writes.
+    // 1) Synchronous lock + stop all writers BEFORE any await / server DELETE.
+    //    Heartbeat, GPS keep-alive, and listener repair must not recreate
+    //    online/{cid}/{vid} after the server clears presence.
     if (driverSnapshot?.companyId && vehicleId) {
       markPresenceSessionEnded(driverSnapshot.companyId, vehicleId);
     }
+    stopPresenceHeartbeat();
+    shiftActiveRef.current = false;
+    setShiftActive(false);
+    setPresenceStatus('Offline');
+    setReadyForJobs(false);
+    readyForJobsRef.current = false;
+
+    const { stopBackgroundTracking } = await import('@/services/locationService');
+    await stopBackgroundTracking();
 
     let summary: EndShiftSummary | null = null;
 
@@ -2163,12 +2183,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const { captureEndShiftSummary } = await import('@/services/nztaService');
       summary = await captureEndShiftSummary();
     }
-
-    // Stop heartbeat + GPS before Firebase delete — otherwise a final location
-    // tick can recreate online/{cid}/{vid} as Available after sign-out.
-    stopPresenceHeartbeat();
-    const { stopBackgroundTracking } = await import('@/services/locationService');
-    await stopBackgroundTracking();
 
     if (driverSnapshot && vehicleId) {
       try {
