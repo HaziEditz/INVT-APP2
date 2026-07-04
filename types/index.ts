@@ -181,17 +181,30 @@ export interface Tariff {
   holidayMultiplier?: number;
 }
 
+export type NztaLockoutReason = 'shift_rest' | 'weekly_rest' | null;
+export type NztaLimitSignOutReason = 'shift14h' | 'weekly70h';
+
 export interface NztaHoursState {
   shiftStartedAt: number | null;
   shiftWindowEndsAt: number | null;
   workedMinutes: number;
   weeklyWorkedMinutes: number;
+  /** Monday 00:00 local ms for the active weekly bucket */
+  weekStartedAt: number | null;
   breakMinutes: number;
   lastBreakAt: number | null;
   breakReminderShown: boolean;
   breakDeferredUntil: number | null;
   lastShiftEndAt: number | null;
+  /** Prior shift start — used to resume the same 14h clock after a short rest */
+  lastShiftStartAt: number | null;
+  lastWorkedMinutes: number;
   continuedWindow: boolean;
+  /** Hard lockout after 14h or 70h auto sign-out */
+  lockoutUntil: number | null;
+  lockoutReason: NztaLockoutReason;
+  /** Limit hit while on a job — sign out when Free */
+  pendingLimitSignOut: NztaLimitSignOutReason | null;
 }
 
 export interface ChatMessage {

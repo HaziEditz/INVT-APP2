@@ -1,62 +1,176 @@
 import {
   NZTA_BREAK_AFTER_HOURS,
   NZTA_MAX_SHIFT_HOURS,
-  NZTA_MAX_WORK_HOURS,
   NZTA_REST_CONTINUE_HOURS,
-  NZTA_REST_WEEKLY_RESET_HOURS,
+  NZTA_WEEKLY_LOCKOUT_HOURS,
   NZTA_WEEKLY_MAX_HOURS,
 } from '@/constants/theme';
 import { loadLastShiftEnd, writeShiftEndLog } from '@/lib/shiftLogs';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { notifyBreakReminder } from '@/services/notificationService';
-import { NztaHoursState } from '@/types';
+import type { NztaHoursState, NztaLimitSignOutReason, NztaLockoutReason } from '@/types';
+
+export type EndShiftReason = 'manual' | NztaLimitSignOutReason;
+
+export const NZTA_BREAK_REMINDER_MESSAGE =
+  'You have been working 7 hours. Please take a break when possible.';
+
+export const NZTA_SHIFT_LIMIT_SIGNOUT_MESSAGE =
+  'Your 14-hour shift limit has been reached. You have been automatically signed out.';
+
+export const NZTA_WEEKLY_LIMIT_SIGNOUT_MESSAGE =
+  'Weekly 70-hour limit reached. You require a 24-hour break before starting a new shift.';
 
 const DEFAULT: NztaHoursState = {
   shiftStartedAt: null,
   shiftWindowEndsAt: null,
   workedMinutes: 0,
   weeklyWorkedMinutes: 0,
+  weekStartedAt: null,
   breakMinutes: 0,
   lastBreakAt: null,
   breakReminderShown: false,
   breakDeferredUntil: null,
   lastShiftEndAt: null,
+  lastShiftStartAt: null,
+  lastWorkedMinutes: 0,
   continuedWindow: false,
+  lockoutUntil: null,
+  lockoutReason: null,
+  pendingLimitSignOut: null,
 };
 
 const MS_HOUR = 3600000;
+const MS_MINUTE = 60000;
 
 export async function loadNztaHours(): Promise<NztaHoursState> {
   const saved = await getData<NztaHoursState>(STORAGE_KEYS.nztaHours);
-  return { ...DEFAULT, ...saved };
+  return ensureWeekBucket({ ...DEFAULT, ...saved });
 }
 
 export async function saveNztaHours(state: NztaHoursState) {
-  await storeData(STORAGE_KEYS.nztaHours, state);
+  await storeData(STORAGE_KEYS.nztaHours, ensureWeekBucket(state));
+}
+
+/** Monday 00:00:00.000 local time for the week containing `now`. */
+export function startOfWeekMondayMs(now = Date.now()): number {
+  const d = new Date(now);
+  const day = d.getDay(); // 0 = Sunday
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + diff);
+  return d.getTime();
+}
+
+export function ensureWeekBucket(state: NztaHoursState): NztaHoursState {
+  const weekStart = startOfWeekMondayMs();
+  if (state.weekStartedAt === weekStart) return state;
+  if (state.weekStartedAt == null) {
+    return { ...state, weekStartedAt: weekStart };
+  }
+  // New Monday–Sunday week — reset weekly minutes.
+  return {
+    ...state,
+    weekStartedAt: weekStart,
+    weeklyWorkedMinutes: 0,
+  };
+}
+
+function clearExpiredLockout(state: NztaHoursState): NztaHoursState {
+  if (state.lockoutUntil != null && state.lockoutUntil <= Date.now()) {
+    return { ...state, lockoutUntil: null, lockoutReason: null };
+  }
+  return state;
+}
+
+export function formatLockoutRemaining(remainingMs: number): string {
+  const totalMins = Math.max(0, Math.ceil(remainingMs / MS_MINUTE));
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  return `${h} hours ${m} minutes`;
+}
+
+export function getShiftLockout(state: NztaHoursState): {
+  blocked: boolean;
+  message: string;
+  remainingMs: number;
+  reason: NztaLockoutReason;
+} {
+  const cleared = clearExpiredLockout(state);
+  if (!cleared.lockoutUntil || cleared.lockoutUntil <= Date.now()) {
+    return { blocked: false, message: '', remainingMs: 0, reason: null };
+  }
+  const remainingMs = cleared.lockoutUntil - Date.now();
+  return {
+    blocked: true,
+    remainingMs,
+    reason: cleared.lockoutReason,
+    message: `Rest period required — ${formatLockoutRemaining(remainingMs)} remaining before you can start a new shift.`,
+  };
 }
 
 export async function initializeNztaOnLogin(companyId: string, uid: string): Promise<NztaHoursState> {
+  let state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours()));
   const last = await loadLastShiftEnd(companyId, uid);
-  const lastEnd = last?.shiftEndAt ?? null;
-  const now = Date.now();
-  const hoursSinceEnd = lastEnd ? (now - lastEnd) / MS_HOUR : Infinity;
+  const lastEnd = state.lastShiftEndAt ?? last?.shiftEndAt ?? null;
+  const lastStart = state.lastShiftStartAt ?? last?.shiftStartAt ?? null;
+  const lastWorked = state.lastWorkedMinutes || last?.workedMinutes || state.workedMinutes || 0;
+  const lastWeekly = Math.max(state.weeklyWorkedMinutes, last?.weeklyWorkedMinutes ?? 0);
 
-  let next: NztaHoursState = { ...DEFAULT, lastShiftEndAt: lastEnd };
+  const hoursSinceEnd = lastEnd ? (Date.now() - lastEnd) / MS_HOUR : Infinity;
 
-  if (hoursSinceEnd >= NZTA_REST_WEEKLY_RESET_HOURS) {
-    next.weeklyWorkedMinutes = 0;
-    next.workedMinutes = 0;
-    next.continuedWindow = false;
-  } else if (hoursSinceEnd < NZTA_REST_CONTINUE_HOURS && last?.shiftStartAt) {
-    next.shiftStartedAt = last.shiftStartAt;
-    next.shiftWindowEndsAt = last.shiftStartAt + NZTA_MAX_SHIFT_HOURS * MS_HOUR;
-    next.workedMinutes = last.workedMinutes ?? 0;
-    next.weeklyWorkedMinutes = last.weeklyWorkedMinutes ?? next.workedMinutes;
-    next.continuedWindow = true;
+  // Hard lockout after 14h / 70h auto sign-out — cannot start a shift yet.
+  if (state.lockoutUntil && state.lockoutUntil > Date.now()) {
+    const next: NztaHoursState = {
+      ...state,
+      lastShiftEndAt: lastEnd,
+      lastShiftStartAt: lastStart,
+      lastWorkedMinutes: lastWorked,
+      weeklyWorkedMinutes: lastWeekly,
+      shiftStartedAt: null,
+      shiftWindowEndsAt: null,
+      continuedWindow: false,
+      pendingLimitSignOut: null,
+    };
+    await saveNztaHours(next);
+    return next;
+  }
+
+  let next: NztaHoursState;
+  if (hoursSinceEnd < NZTA_REST_CONTINUE_HOURS && lastStart) {
+    // Same shift continues — clock resumes from original start.
+    next = {
+      ...state,
+      shiftStartedAt: lastStart,
+      shiftWindowEndsAt: lastStart + NZTA_MAX_SHIFT_HOURS * MS_HOUR,
+      workedMinutes: lastWorked,
+      weeklyWorkedMinutes: lastWeekly,
+      lastShiftEndAt: lastEnd,
+      lastShiftStartAt: lastStart,
+      lastWorkedMinutes: lastWorked,
+      continuedWindow: true,
+      pendingLimitSignOut: null,
+      lockoutUntil: null,
+      lockoutReason: null,
+    };
   } else {
-    next.workedMinutes = 0;
-    next.weeklyWorkedMinutes = last?.weeklyWorkedMinutes ?? 0;
-    next.continuedWindow = false;
+    // Fresh 14h clock on next startShiftClock; weekly bucket preserved (Mon–Sun).
+    next = {
+      ...state,
+      shiftStartedAt: null,
+      shiftWindowEndsAt: null,
+      workedMinutes: 0,
+      weeklyWorkedMinutes: lastWeekly,
+      lastShiftEndAt: lastEnd,
+      lastShiftStartAt: lastStart,
+      lastWorkedMinutes: lastWorked,
+      continuedWindow: false,
+      pendingLimitSignOut: null,
+      breakReminderShown: false,
+      breakDeferredUntil: null,
+      lockoutUntil: null,
+      lockoutReason: null,
+    };
   }
 
   await saveNztaHours(next);
@@ -64,20 +178,30 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
 }
 
 export async function startShiftClock(companyId?: string, uid?: string) {
-  let base = await loadNztaHours();
-  if (companyId && uid && !base.shiftStartedAt) {
+  let base = clearExpiredLockout(ensureWeekBucket(await loadNztaHours()));
+  if (companyId && uid && !base.shiftStartedAt && !base.continuedWindow) {
     base = await initializeNztaOnLogin(companyId, uid);
   }
+  const lockout = getShiftLockout(base);
+  if (lockout.blocked) {
+    throw new Error(lockout.message);
+  }
+
   const now = Date.now();
+  const resume = !!(base.continuedWindow && base.shiftStartedAt);
   const next: NztaHoursState = {
     ...base,
-    shiftStartedAt: base.continuedWindow && base.shiftStartedAt ? base.shiftStartedAt : now,
+    shiftStartedAt: resume && base.shiftStartedAt ? base.shiftStartedAt : now,
     shiftWindowEndsAt:
-      (base.continuedWindow && base.shiftWindowEndsAt
+      resume && base.shiftWindowEndsAt
         ? base.shiftWindowEndsAt
-        : now + NZTA_MAX_SHIFT_HOURS * MS_HOUR),
-    breakReminderShown: false,
-    breakDeferredUntil: null,
+        : (resume && base.shiftStartedAt
+            ? base.shiftStartedAt + NZTA_MAX_SHIFT_HOURS * MS_HOUR
+            : now + NZTA_MAX_SHIFT_HOURS * MS_HOUR),
+    workedMinutes: resume ? base.workedMinutes : 0,
+    breakReminderShown: resume ? base.breakReminderShown : false,
+    breakDeferredUntil: resume ? base.breakDeferredUntil : null,
+    pendingLimitSignOut: null,
   };
   await saveNztaHours(next);
   return next;
@@ -100,27 +224,79 @@ export async function captureEndShiftSummary(): Promise<EndShiftSummary> {
   };
 }
 
-export async function endShiftClock(companyId: string, uid: string, driverId: string) {
-  const state = await loadNztaHours();
+export async function endShiftClock(
+  companyId: string,
+  uid: string,
+  driverId: string,
+  reason: EndShiftReason = 'manual',
+) {
+  const state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours()));
   const now = Date.now();
+  const elapsed = Math.max(state.workedMinutes, shiftElapsedMinutes(state));
+
   await writeShiftEndLog(companyId, uid, {
     shiftEndAt: now,
-    shiftStartAt: state.shiftStartedAt ?? undefined,
-    workedMinutes: state.workedMinutes,
+    shiftStartAt: state.shiftStartedAt ?? state.lastShiftStartAt ?? undefined,
+    workedMinutes: elapsed,
     weeklyWorkedMinutes: state.weeklyWorkedMinutes,
     driverId,
   });
-  await saveNztaHours(DEFAULT);
-  return DEFAULT;
+
+  let lockoutUntil: number | null = null;
+  let lockoutReason: NztaLockoutReason = null;
+  if (reason === 'shift14h') {
+    lockoutUntil = now + NZTA_REST_CONTINUE_HOURS * MS_HOUR;
+    lockoutReason = 'shift_rest';
+  } else if (reason === 'weekly70h') {
+    lockoutUntil = now + NZTA_WEEKLY_LOCKOUT_HOURS * MS_HOUR;
+    lockoutReason = 'weekly_rest';
+  }
+
+  // Persist session locally for resume (<10h) and lockout enforcement.
+  const next: NztaHoursState = {
+    ...state,
+    shiftStartedAt: null,
+    shiftWindowEndsAt: null,
+    workedMinutes: elapsed,
+    lastShiftEndAt: now,
+    lastShiftStartAt: state.shiftStartedAt ?? state.lastShiftStartAt,
+    lastWorkedMinutes: elapsed,
+    weeklyWorkedMinutes: state.weeklyWorkedMinutes,
+    lockoutUntil,
+    lockoutReason,
+    pendingLimitSignOut: null,
+    continuedWindow: false,
+    breakReminderShown: reason === 'manual' ? state.breakReminderShown : false,
+    breakDeferredUntil: null,
+  };
+  await saveNztaHours(next);
+  return next;
 }
 
 export async function tickWorkedMinutes(addMinutes = 1) {
-  const state = await loadNztaHours();
+  let state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours()));
+  if (!state.shiftStartedAt) return state;
   const next = {
     ...state,
     workedMinutes: state.workedMinutes + addMinutes,
     weeklyWorkedMinutes: state.weeklyWorkedMinutes + addMinutes,
   };
+  await saveNztaHours(next);
+  return next;
+}
+
+export async function setPendingLimitSignOut(reason: NztaLimitSignOutReason) {
+  const state = await loadNztaHours();
+  if (state.pendingLimitSignOut === reason) return state;
+  const next = { ...state, pendingLimitSignOut: reason };
+  await saveNztaHours(next);
+  return next;
+}
+
+export async function clearPendingLimitSignOut() {
+  const state = await loadNztaHours();
+  if (!state.pendingLimitSignOut) return state;
+  const next = { ...state, pendingLimitSignOut: null };
   await saveNztaHours(next);
   return next;
 }
@@ -146,12 +322,12 @@ export function formatHours(minutes: number) {
 
 export function shiftElapsedMinutes(state: NztaHoursState) {
   if (!state.shiftStartedAt) return 0;
-  return Math.floor((Date.now() - state.shiftStartedAt) / 60000);
+  return Math.floor((Date.now() - state.shiftStartedAt) / MS_MINUTE);
 }
 
 export function remainingShiftMinutes(state: NztaHoursState): number {
   if (!state.shiftWindowEndsAt) return NZTA_MAX_SHIFT_HOURS * 60;
-  return Math.max(0, Math.floor((state.shiftWindowEndsAt - Date.now()) / 60000));
+  return Math.max(0, Math.floor((state.shiftWindowEndsAt - Date.now()) / MS_MINUTE));
 }
 
 export function remainingWeeklyMinutes(state: NztaHoursState): number {
@@ -159,27 +335,36 @@ export function remainingWeeklyMinutes(state: NztaHoursState): number {
 }
 
 export function remainingWorkMinutesToday(state: NztaHoursState): number {
-  return Math.max(0, NZTA_MAX_WORK_HOURS * 60 - state.workedMinutes);
+  return remainingShiftMinutes(state);
 }
 
+/** 7-hour dismissible break reminder (wall-clock from shift start). */
 export function needsBreak(state: NztaHoursState) {
+  if (!state.shiftStartedAt) return false;
   if (state.breakReminderShown) return false;
   if (state.breakDeferredUntil && Date.now() < state.breakDeferredUntil) return false;
-  return state.workedMinutes / 60 >= NZTA_BREAK_AFTER_HOURS;
-}
-
-export function exceedsMaxWorkHours(state: NztaHoursState) {
-  return state.workedMinutes / 60 >= NZTA_MAX_WORK_HOURS;
+  return shiftElapsedMinutes(state) >= NZTA_BREAK_AFTER_HOURS * 60;
 }
 
 export function exceedsMaxShiftHours(state: NztaHoursState) {
-  if (!state.shiftWindowEndsAt) return false;
-  return Date.now() >= state.shiftWindowEndsAt;
+  if (state.shiftWindowEndsAt && Date.now() >= state.shiftWindowEndsAt) return true;
+  if (!state.shiftStartedAt) return false;
+  return shiftElapsedMinutes(state) >= NZTA_MAX_SHIFT_HOURS * 60;
+}
+
+/** @deprecated use exceedsMaxShiftHours */
+export function exceedsMaxWorkHours(state: NztaHoursState) {
+  return exceedsMaxShiftHours(state);
+}
+
+export function exceedsWeeklyHours(state: NztaHoursState) {
+  const s = ensureWeekBucket(state);
+  return s.weeklyWorkedMinutes >= NZTA_WEEKLY_MAX_HOURS * 60;
 }
 
 export async function deferBreakReminder(minutes: number) {
   const state = await loadNztaHours();
-  const next = { ...state, breakDeferredUntil: Date.now() + minutes * 60000 };
+  const next = { ...state, breakDeferredUntil: Date.now() + minutes * MS_MINUTE };
   await saveNztaHours(next);
   await notifyBreakReminder(
     'Break reminder',

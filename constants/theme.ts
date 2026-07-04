@@ -34,16 +34,19 @@ export const JOB_TYPES = ['Taxi', 'Freight', 'Food', 'Tow'] as const;
 
 export const JOB_STAGES = ['pickup', 'arrived', 'onboard', 'complete'] as const;
 
-/** Maximum driving/work time before mandatory break consideration */
-export const NZTA_MAX_WORK_HOURS = 13;
-/** Maximum total shift length (work + break time) */
+/** Maximum total shift length (work + break time) — auto sign-out */
 export const NZTA_MAX_SHIFT_HOURS = 14;
-export const NZTA_BREAK_AFTER_HOURS = 5;
-/** NZTA weekly driving limit */
+/** Break reminder after this many hours on shift (dismissible) */
+export const NZTA_BREAK_AFTER_HOURS = 7;
+/** NZTA weekly working limit (Monday–Sunday) */
 export const NZTA_WEEKLY_MAX_HOURS = 70;
-/** Continue same 14h shift window if rest under this many hours */
+/** Resume same 14h shift if rest is under this many hours; also 14h-limit lockout length */
 export const NZTA_REST_CONTINUE_HOURS = 10;
-/** Reset weekly counter after this many hours rest */
-export const NZTA_REST_WEEKLY_RESET_HOURS = 24;
-/** @deprecated use NZTA_MAX_WORK_HOURS */
-export const NZTA_MAX_HOURS = NZTA_MAX_WORK_HOURS;
+/** Lockout after weekly 70h limit */
+export const NZTA_WEEKLY_LOCKOUT_HOURS = 24;
+/** @deprecated use NZTA_WEEKLY_LOCKOUT_HOURS */
+export const NZTA_REST_WEEKLY_RESET_HOURS = NZTA_WEEKLY_LOCKOUT_HOURS;
+/** @deprecated — shift limit is NZTA_MAX_SHIFT_HOURS */
+export const NZTA_MAX_WORK_HOURS = NZTA_MAX_SHIFT_HOURS;
+/** @deprecated use NZTA_MAX_SHIFT_HOURS */
+export const NZTA_MAX_HOURS = NZTA_MAX_SHIFT_HOURS;

@@ -9,18 +9,17 @@ import { sharedStyles } from '@/constants/styles';
 import {
   NZTA_BREAK_AFTER_HOURS,
   NZTA_MAX_SHIFT_HOURS,
-  NZTA_MAX_WORK_HOURS,
+  NZTA_WEEKLY_MAX_HOURS,
 } from '@/constants/theme';
 import { NztaHoursBar } from '@/components/home/NztaHoursBar';
 import { SosButton } from '@/components/SosButton';
 import { loadVehicleBodyType } from '@/lib/vehicles';
 import {
+  NZTA_BREAK_REMINDER_MESSAGE,
   confirmBreakTaken,
-  deferBreakReminder,
-  exceedsMaxShiftHours,
-  exceedsMaxWorkHours,
   formatHours,
   loadNztaHours,
+  markBreakReminderShown,
   needsBreak,
   shiftElapsedMinutes,
 } from '@/services/nztaService';
@@ -36,12 +35,18 @@ const EMPTY_NZTA: NztaHoursState = {
   shiftWindowEndsAt: null,
   workedMinutes: 0,
   weeklyWorkedMinutes: 0,
+  weekStartedAt: null,
   breakMinutes: 0,
   lastBreakAt: null,
   breakReminderShown: false,
   breakDeferredUntil: null,
   lastShiftEndAt: null,
+  lastShiftStartAt: null,
+  lastWorkedMinutes: 0,
   continuedWindow: false,
+  lockoutUntil: null,
+  lockoutReason: null,
+  pendingLimitSignOut: null,
 };
 
 export default function ProfileScreen() {
@@ -92,68 +97,36 @@ export default function ProfileScreen() {
     return () => clearInterval(id);
   }, [refreshNzta, shiftActive]);
 
-  const showBreakChoice = useCallback(() => {
+  const showBreakReminder = useCallback(() => {
     if (breakAlertOpen.current) return;
     breakAlertOpen.current = true;
-    Alert.alert(
-      'Break reminder (NZTA)',
-      `You have been driving for ${NZTA_BREAK_AFTER_HOURS}+ hours. Choose when to take your break.`,
-      [
-        {
-          text: 'Take break now',
-          onPress: async () => {
-            await confirmBreakTaken();
-            await notifyBreakReminder('Break logged', 'Your break has been recorded. Drive safely.');
-            refreshNzta();
-            breakAlertOpen.current = false;
-          },
+    Alert.alert('Break reminder', NZTA_BREAK_REMINDER_MESSAGE, [
+      {
+        text: 'OK',
+        onPress: async () => {
+          await markBreakReminderShown();
+          refreshNzta();
+          breakAlertOpen.current = false;
         },
-        {
-          text: 'Remind in 30 min',
-          onPress: async () => {
-            await deferBreakReminder(30);
-            refreshNzta();
-            breakAlertOpen.current = false;
-          },
-        },
-        {
-          text: 'Continue driving',
-          style: 'cancel',
-          onPress: async () => {
-            const { markBreakReminderShown } = await import('@/services/nztaService');
-            await markBreakReminderShown();
-            refreshNzta();
-            breakAlertOpen.current = false;
-          },
-        },
-      ],
-      { cancelable: true, onDismiss: () => { breakAlertOpen.current = false; } },
-    );
+      },
+    ], {
+      cancelable: true,
+      onDismiss: () => {
+        void markBreakReminderShown().then(refreshNzta);
+        breakAlertOpen.current = false;
+      },
+    });
   }, [refreshNzta]);
 
   useEffect(() => {
     if (endShiftInProgress) return;
     if (!nzta || !shiftActive || !notifications) return;
+    // Primary enforcement (auto sign-out) runs in DriverContext; profile shows the 7h reminder too.
     if (needsBreak(nzta)) {
-      notifyBreakReminder(
-        'Break reminder',
-        `NZTA recommends a break after ${NZTA_BREAK_AFTER_HOURS} hours of driving.`,
-      ).catch(() => undefined);
-      showBreakChoice();
+      notifyBreakReminder('Break reminder', NZTA_BREAK_REMINDER_MESSAGE).catch(() => undefined);
+      showBreakReminder();
     }
-    if (exceedsMaxWorkHours(nzta)) {
-      Alert.alert(
-        'Work hours limit',
-        `Maximum ${NZTA_MAX_WORK_HOURS} hours of driving reached. Take a break or end your shift.`,
-      );
-    }
-    if (exceedsMaxShiftHours(nzta)) {
-      Alert.alert(
-        'Shift length limit',
-        `Maximum ${NZTA_MAX_SHIFT_HOURS}-hour shift reached (${NZTA_MAX_WORK_HOURS}h work + 1h break). Please end your shift.`,
-      );
-    }
-  }, [nzta, shiftActive, notifications, showBreakChoice, endShiftInProgress]);
+  }, [nzta, shiftActive, notifications, showBreakReminder, endShiftInProgress]);
 
   const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
   const vehicleIdForMeta = selectedVehicleId || driver?.vehicleId || '';
@@ -230,7 +203,7 @@ export default function ProfileScreen() {
         <NztaHoursBar embedded />
         <Text style={styles.hours}>{formatHours(nzta?.workedMinutes ?? 0)}</Text>
         <Text style={sharedStyles.cardText}>
-          Driving: max {NZTA_MAX_WORK_HOURS}h · Shift total: max {NZTA_MAX_SHIFT_HOURS}h ({NZTA_MAX_WORK_HOURS}h work + 1h break)
+          Shift limit: {NZTA_MAX_SHIFT_HOURS}h · Weekly limit: {NZTA_WEEKLY_MAX_HOURS}h (Mon–Sun)
         </Text>
         <Text style={sharedStyles.cardText}>
           Shift elapsed: {formatHours(shiftElapsedMinutes(nzta ?? EMPTY_NZTA))}
@@ -239,7 +212,7 @@ export default function ProfileScreen() {
           Break logged: {formatHours(nzta?.breakMinutes ?? 0)}
         </Text>
         <Text style={sharedStyles.cardText}>
-          Push reminder after {NZTA_BREAK_AFTER_HOURS}h — you choose when to break
+          Reminder at {NZTA_BREAK_AFTER_HOURS}h · Auto sign-out at {NZTA_MAX_SHIFT_HOURS}h / {NZTA_WEEKLY_MAX_HOURS}h
         </Text>
         {shiftActive ? (
           <Button

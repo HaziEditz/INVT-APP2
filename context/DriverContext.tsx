@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useRef, useState, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState, ReactNode } from 'react';
 import { Alert } from 'react-native';
 import { get, onValue, ref, update } from 'firebase/database';
 import { getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
@@ -38,7 +38,6 @@ import { playInAppNotificationSound, alertDriverToOffer } from '@/lib/notificati
 import { subscribeDriverQueue, filterLiveDriverQueueOffers } from '@/lib/driverQueue';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
-import { tickWorkedMinutes } from '@/services/nztaService';
 import {
   clearOnlinePresence,
   isPresenceSessionEnded,
@@ -78,8 +77,23 @@ import {
   verifyJobStageOnFirebase,
 } from '@/lib/bookingSync';
 import { subscribeActiveJobFirebaseWatch } from '@/lib/activeJobPresenceWatch';
-import { initializeNztaOnLogin } from '@/services/nztaService';
-import type { EndShiftSummary } from '@/services/nztaService';
+import {
+  NZTA_BREAK_REMINDER_MESSAGE,
+  NZTA_SHIFT_LIMIT_SIGNOUT_MESSAGE,
+  NZTA_WEEKLY_LIMIT_SIGNOUT_MESSAGE,
+  exceedsMaxShiftHours,
+  exceedsWeeklyHours,
+  getShiftLockout,
+  initializeNztaOnLogin,
+  loadNztaHours,
+  markBreakReminderShown,
+  needsBreak,
+  setPendingLimitSignOut,
+  tickWorkedMinutes,
+  type EndShiftReason,
+  type EndShiftSummary,
+} from '@/services/nztaService';
+import { notifyBreakReminder } from '@/services/notificationService';
 import { createInitialMeter, watchMeter } from '@/services/meterEngine';
 import { disableWakeLock, enableWakeLock } from '@/services/wakeLock';
 import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED, parseFiniteFare } from '@/lib/tariffs';
@@ -599,9 +613,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (!driver?.companyId || !driver.uid) return;
-    initializeNztaOnLogin(driver.companyId, driver.uid).catch((err) =>
-      console.error('[Driver] initializeNztaOnLogin', err),
-    );
+    initializeNztaOnLogin(driver.companyId, driver.uid)
+      .then((state) => {
+        const lockout = getShiftLockout(state);
+        if (lockout.blocked) {
+          Alert.alert('Rest period required', lockout.message);
+        }
+      })
+      .catch((err) => console.error('[Driver] initializeNztaOnLogin', err));
   }, [driver?.companyId, driver?.uid], 'Driver-nztaInit');
 
   useSafeEffect(() => {
@@ -809,13 +828,94 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.companyId, driver?.id], 'Driver-jobHistory');
 
+  const hasBlockingNztaJob = useCallback(() => {
+    if (hailActiveRef.current) return true;
+    if (paymentJob) return true;
+    return !!activeJobIdRef.current;
+  }, [paymentJob]);
+
+  const forceNztaLimitSignOutRef = useRef<
+    ((reason: EndShiftReason, message: string) => Promise<void>) | null
+  >(null);
+
   useSafeEffect(() => {
     if (!shiftActive) return;
+    let cancelled = false;
+    const breakAlertOpen = { current: false };
+
+    const evaluateNztaLimits = async (tick: boolean) => {
+      if (cancelled || endShiftInProgressRef.current || !shiftActiveRef.current) return;
+      try {
+        const state = tick ? await tickWorkedMinutes(1) : await loadNztaHours();
+        if (cancelled || endShiftInProgressRef.current) return;
+
+        if (exceedsWeeklyHours(state) || state.pendingLimitSignOut === 'weekly70h') {
+          if (hasBlockingNztaJob()) {
+            await setPendingLimitSignOut('weekly70h');
+            return;
+          }
+          await forceNztaLimitSignOutRef.current?.('weekly70h', NZTA_WEEKLY_LIMIT_SIGNOUT_MESSAGE);
+          return;
+        }
+
+        if (exceedsMaxShiftHours(state) || state.pendingLimitSignOut === 'shift14h') {
+          if (hasBlockingNztaJob()) {
+            await setPendingLimitSignOut('shift14h');
+            return;
+          }
+          await forceNztaLimitSignOutRef.current?.('shift14h', NZTA_SHIFT_LIMIT_SIGNOUT_MESSAGE);
+          return;
+        }
+
+        if (needsBreak(state) && !breakAlertOpen.current) {
+          breakAlertOpen.current = true;
+          await notifyBreakReminder('Break reminder', NZTA_BREAK_REMINDER_MESSAGE).catch(() => undefined);
+          Alert.alert('Break reminder', NZTA_BREAK_REMINDER_MESSAGE, [
+            {
+              text: 'OK',
+              onPress: () => {
+                void markBreakReminderShown();
+                breakAlertOpen.current = false;
+              },
+            },
+          ], { cancelable: true, onDismiss: () => {
+            void markBreakReminderShown();
+            breakAlertOpen.current = false;
+          } });
+        }
+      } catch (err) {
+        console.error('[Driver] NZTA compliance tick failed:', err);
+      }
+    };
+
+    void evaluateNztaLimits(false);
     const id = setInterval(() => {
-      tickWorkedMinutes(1).catch((err) => console.error('[Driver] tickWorkedMinutes', err));
+      void evaluateNztaLimits(true);
     }, 60000);
-    return () => clearInterval(id);
-  }, [shiftActive], 'Driver-nztaTick');
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [shiftActive, hasBlockingNztaJob], 'Driver-nztaTick');
+
+  // When a job clears after a deferred 14h/70h limit, sign out immediately.
+  useSafeEffect(() => {
+    if (!shiftActive || hasBlockingNztaJob() || endShiftInProgressRef.current) return;
+    let cancelled = false;
+    void (async () => {
+      const state = await loadNztaHours();
+      if (cancelled || !state.pendingLimitSignOut) return;
+      const reason = state.pendingLimitSignOut;
+      const message =
+        reason === 'weekly70h'
+          ? NZTA_WEEKLY_LIMIT_SIGNOUT_MESSAGE
+          : NZTA_SHIFT_LIMIT_SIGNOUT_MESSAGE;
+      await forceNztaLimitSignOutRef.current?.(reason, message);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [shiftActive, activeJob, hailActive, paymentJob, hasBlockingNztaJob], 'Driver-nztaDeferredSignOut');
 
   const sessionEarnings = sumBreakdown(completedJobs);
   const historyEarnings = sumBreakdown(
@@ -1978,6 +2078,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
+    try {
+      const nztaState = await initializeNztaOnLogin(driver.companyId, driver.uid);
+      const lockout = getShiftLockout(nztaState);
+      if (lockout.blocked) {
+        Alert.alert('Rest period required', lockout.message);
+        return false;
+      }
+    } catch (err) {
+      console.error('[Driver] NZTA lockout check failed:', err);
+    }
+
     if (vehicleId !== selectedVehicleId) {
       await setSelectedVehicleId(vehicleId);
     }
@@ -2160,6 +2271,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const endShiftRemote = async (
     driverSnapshot: typeof driver,
     vehicleId: string | null,
+    reason: EndShiftReason = 'manual',
   ): Promise<EndShiftSummary | null> => {
     // 1) Synchronous lock + stop all writers BEFORE any await / server DELETE.
     //    Heartbeat, GPS keep-alive, and listener repair must not recreate
@@ -2199,7 +2311,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     if (driverSnapshot?.companyId && driverSnapshot.uid) {
       const { endShiftClock } = await import('@/services/nztaService');
-      await endShiftClock(driverSnapshot.companyId, driverSnapshot.uid, driverSnapshot.id);
+      await endShiftClock(driverSnapshot.companyId, driverSnapshot.uid, driverSnapshot.id, reason);
     }
     const { stopShiftRuntime } = await import('@/services/shiftRuntimeService');
     stopShiftRuntime();
@@ -2238,8 +2350,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const endShiftAndSignOut = async () => {
-    if (blockIfTripInProgress()) return;
+  const endShiftAndSignOut = async (opts?: {
+    force?: boolean;
+    reason?: EndShiftReason;
+    message?: string;
+    skipSummary?: boolean;
+  }) => {
+    if (!opts?.force && blockIfTripInProgress()) return;
     if (endShiftInProgressRef.current) return;
 
     endShiftInProgressRef.current = true;
@@ -2247,9 +2364,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       const vehicleId = await resolveVehicleId();
       const driverSnapshot = driver;
-      const summary = await endShiftRemote(driverSnapshot, vehicleId);
+      const reason = opts?.reason ?? 'manual';
+      const summary = await endShiftRemote(driverSnapshot, vehicleId, reason);
 
-      if (summary) {
+      if (summary && !opts?.skipSummary && !opts?.force) {
         setEndShiftSummary(summary);
         await waitForEndShiftSummaryAck();
       }
@@ -2257,6 +2375,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       endShiftLocal();
       await signOut();
       router.replace('/(auth)/login');
+      if (opts?.message) {
+        Alert.alert('Shift limit', opts.message);
+      }
     } catch (err) {
       console.error('[Driver] endShiftAndSignOut failed:', err);
       Alert.alert('End shift failed', err instanceof Error ? err.message : 'Could not end shift');
@@ -2266,6 +2387,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setEndShiftSummary(null);
       endShiftSummaryAckRef.current = null;
     }
+  };
+
+  forceNztaLimitSignOutRef.current = async (reason, message) => {
+    await endShiftAndSignOut({
+      force: true,
+      reason,
+      message,
+      skipSummary: true,
+    });
   };
 
   const syncJobStageToDispatch = async (
