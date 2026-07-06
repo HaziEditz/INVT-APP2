@@ -3072,12 +3072,37 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const noShowActiveJob = async () => {
     if (!activeJob || !driver) return;
+    const jobId = activeJob.id;
+    const driverId = driver.id;
+    const companyId = driver.companyId;
+    console.log('[no-show] POST /api/cancel starting', { jobId, driverId, companyId });
     try {
-      await reportNoShow(activeJob.id, driver.id, driver.companyId);
-    } catch {
+      await reportNoShow(jobId, driverId, companyId);
+      console.log('[no-show] POST /api/cancel OK', { jobId });
+    } catch (err) {
+      const status = err instanceof DispatchApiError ? err.status : null;
+      const errorCode = err instanceof DispatchApiError ? err.errorCode : null;
+      const message = err instanceof Error ? err.message : String(err);
+      const body = err instanceof DispatchApiError ? err.body : undefined;
+      console.error('[no-show] POST /api/cancel FAILED', {
+        jobId,
+        driverId,
+        companyId,
+        status,
+        errorCode,
+        message,
+        body,
+        errName: err instanceof Error ? err.name : typeof err,
+        isNetwork:
+          err instanceof TypeError ||
+          (err instanceof Error && err.message.toLowerCase().includes('network')),
+      });
       await enqueueOfflineItem({
         type: 'job_update',
-        payload: { action: 'no_show', jobId: activeJob.id },
+        payload: { action: 'no_show', jobId },
+      });
+      console.warn('[no-show] queued offline job_update (no_show) — flush uses /api/offline-sync', {
+        jobId,
       });
     }
     await clearJobLocallyAfterTerminal();

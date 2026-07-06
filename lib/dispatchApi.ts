@@ -180,6 +180,15 @@ export async function dispatchGet<T>(path: string): Promise<T> {
 export async function dispatchPost<T>(path: string, body: Record<string, unknown>, opts?: { userKey?: string }): Promise<T> {
   const headers = await driverApiHeaders();
   if (opts?.userKey) headers['X-User-Key'] = opts.userKey;
+  if (path === '/api/cancel') {
+    console.log('[dispatchPost] /api/cancel request', {
+      hasUserKey: !!headers['X-User-Key'],
+      hasAuthBearer: !!headers.Authorization,
+      cancelledBy: body.cancelledBy,
+      bookingId: body.bookingId,
+      noShow: body.noShow,
+    });
+  }
   const res = await fetch(`${DISPATCH_API_URL}${path}`, {
     method: 'POST',
     headers,
@@ -187,6 +196,14 @@ export async function dispatchPost<T>(path: string, body: Record<string, unknown
   });
   const data = await parseJsonBody(res);
   if (!res.ok) {
+    if (path === '/api/cancel') {
+      console.error('[dispatchPost] /api/cancel response error', {
+        status: res.status,
+        error: data.error,
+        error_code: data.error_code,
+        hasUserKey: !!headers['X-User-Key'],
+      });
+    }
     throw new DispatchApiError(
       String(data.error || `Dispatch POST ${path} failed: ${res.status}`),
       res.status,
