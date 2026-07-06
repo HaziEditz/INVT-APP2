@@ -18,10 +18,16 @@ export async function removeData(key: string): Promise<void> {
   await AsyncStorage.removeItem(key);
 }
 
+/** Per-driver NZTA hours + lockout (never share across drivers on one device). */
+export function nztaHoursStorageKey(companyId: string, uid: string): string {
+  return `bw_nzta_hours_${String(companyId || '').trim()}_${String(uid || '').trim()}`;
+}
+
 export const STORAGE_KEYS = {
   driverSession: 'bw_driver_session',
   offlineQueue: 'bw_offline_queue',
   activeJob: 'bw_active_job',
+  /** @deprecated legacy device-wide key — migrate to nztaHoursStorageKey on login */
   nztaHours: 'bw_nzta_hours',
   selectedVehicle: 'bw_selected_vehicle',
   shiftActive: 'bw_shift_active',

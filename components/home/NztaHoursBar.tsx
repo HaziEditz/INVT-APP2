@@ -1,4 +1,5 @@
 import { Colors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import {
   formatHours,
   loadNztaHours,
@@ -13,11 +14,16 @@ import { StyleSheet, Text, View } from 'react-native';
 type Props = { embedded?: boolean };
 
 export function NztaHoursBar({ embedded }: Props) {
+  const { driver } = useAuth();
   const [nzta, setNzta] = useState<NztaHoursState | null>(null);
 
   const refresh = useCallback(() => {
-    loadNztaHours().then(setNzta).catch(() => undefined);
-  }, []);
+    if (!driver?.companyId || !driver.uid) {
+      setNzta(null);
+      return;
+    }
+    loadNztaHours(driver.companyId, driver.uid).then(setNzta).catch(() => undefined);
+  }, [driver?.companyId, driver?.uid]);
 
   useEffect(() => {
     refresh();

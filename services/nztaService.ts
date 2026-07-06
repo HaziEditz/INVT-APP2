@@ -6,7 +6,7 @@ import {
   NZTA_WEEKLY_MAX_HOURS,
 } from '@/constants/theme';
 import { loadLastShiftEnd, writeShiftEndLog } from '@/lib/shiftLogs';
-import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
+import { getData, nztaHoursStorageKey, removeData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { notifyBreakReminder } from '@/services/notificationService';
 import type { NztaHoursState, NztaLimitSignOutReason, NztaLockoutReason } from '@/types';
 
@@ -42,14 +42,55 @@ const DEFAULT: NztaHoursState = {
 
 const MS_HOUR = 3600000;
 const MS_MINUTE = 60000;
+const LEGACY_MIGRATE_END_TOLERANCE_MS = 120_000;
 
-export async function loadNztaHours(): Promise<NztaHoursState> {
-  const saved = await getData<NztaHoursState>(STORAGE_KEYS.nztaHours);
+function requireNztaDriver(companyId: string, uid: string) {
+  const cid = String(companyId || '').trim();
+  const id = String(uid || '').trim();
+  if (!cid || !id) {
+    throw new Error('NZTA hours require companyId and uid (per-driver storage)');
+  }
+  return { companyId: cid, uid: id };
+}
+
+async function maybeMigrateLegacyNztaHours(
+  companyId: string,
+  uid: string,
+): Promise<NztaHoursState | null> {
+  const legacy = await getData<NztaHoursState>(STORAGE_KEYS.nztaHours);
+  if (!legacy) return null;
+
+  const last = await loadLastShiftEnd(companyId, uid);
+  const legacyEnd = legacy.lastShiftEndAt ?? null;
+  const remoteEnd = last?.shiftEndAt ?? null;
+
+  const belongsToDriver =
+    legacyEnd != null &&
+    remoteEnd != null &&
+    Math.abs(legacyEnd - remoteEnd) <= LEGACY_MIGRATE_END_TOLERANCE_MS;
+
+  if (!belongsToDriver) return null;
+
+  const migrated = ensureWeekBucket({ ...DEFAULT, ...legacy });
+  await storeData(nztaHoursStorageKey(companyId, uid), migrated);
+  await removeData(STORAGE_KEYS.nztaHours);
+  console.log('[NZTA] migrated legacy shared hours state to per-driver storage');
+  return migrated;
+}
+
+export async function loadNztaHours(companyId: string, uid: string): Promise<NztaHoursState> {
+  const { companyId: cid, uid: id } = requireNztaDriver(companyId, uid);
+  const key = nztaHoursStorageKey(cid, id);
+  let saved = await getData<NztaHoursState>(key);
+  if (!saved) {
+    saved = await maybeMigrateLegacyNztaHours(cid, id);
+  }
   return ensureWeekBucket({ ...DEFAULT, ...saved });
 }
 
-export async function saveNztaHours(state: NztaHoursState) {
-  await storeData(STORAGE_KEYS.nztaHours, ensureWeekBucket(state));
+export async function saveNztaHours(companyId: string, uid: string, state: NztaHoursState) {
+  const { companyId: cid, uid: id } = requireNztaDriver(companyId, uid);
+  await storeData(nztaHoursStorageKey(cid, id), ensureWeekBucket(state));
 }
 
 /** Monday 00:00:00.000 local time for the week containing `now`. */
@@ -110,7 +151,7 @@ export function getShiftLockout(state: NztaHoursState): {
 }
 
 export async function initializeNztaOnLogin(companyId: string, uid: string): Promise<NztaHoursState> {
-  let state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours()));
+  let state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(companyId, uid)));
   const last = await loadLastShiftEnd(companyId, uid);
   const lastEnd = state.lastShiftEndAt ?? last?.shiftEndAt ?? null;
   const lastStart = state.lastShiftStartAt ?? last?.shiftStartAt ?? null;
@@ -132,7 +173,7 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
       continuedWindow: false,
       pendingLimitSignOut: null,
     };
-    await saveNztaHours(next);
+    await saveNztaHours(companyId, uid, next);
     return next;
   }
 
@@ -173,14 +214,15 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
     };
   }
 
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   return next;
 }
 
-export async function startShiftClock(companyId?: string, uid?: string) {
-  let base = clearExpiredLockout(ensureWeekBucket(await loadNztaHours()));
-  if (companyId && uid && !base.shiftStartedAt && !base.continuedWindow) {
-    base = await initializeNztaOnLogin(companyId, uid);
+export async function startShiftClock(companyId: string, uid: string) {
+  const { companyId: cid, uid: id } = requireNztaDriver(companyId, uid);
+  let base = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(cid, id)));
+  if (!base.shiftStartedAt && !base.continuedWindow) {
+    base = await initializeNztaOnLogin(cid, id);
   }
   const lockout = getShiftLockout(base);
   if (lockout.blocked) {
@@ -203,7 +245,7 @@ export async function startShiftClock(companyId?: string, uid?: string) {
     breakDeferredUntil: resume ? base.breakDeferredUntil : null,
     pendingLimitSignOut: null,
   };
-  await saveNztaHours(next);
+  await saveNztaHours(cid, id, next);
   return next;
 }
 
@@ -214,8 +256,8 @@ export type EndShiftSummary = {
   shiftElapsedMinutes: number;
 };
 
-export async function captureEndShiftSummary(): Promise<EndShiftSummary> {
-  const state = await loadNztaHours();
+export async function captureEndShiftSummary(companyId: string, uid: string): Promise<EndShiftSummary> {
+  const state = await loadNztaHours(companyId, uid);
   return {
     workedMinutes: state.workedMinutes,
     weeklyWorkedMinutes: state.weeklyWorkedMinutes,
@@ -230,7 +272,7 @@ export async function endShiftClock(
   driverId: string,
   reason: EndShiftReason = 'manual',
 ) {
-  const state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours()));
+  const state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(companyId, uid)));
   const now = Date.now();
   const elapsed = Math.max(state.workedMinutes, shiftElapsedMinutes(state));
 
@@ -269,40 +311,44 @@ export async function endShiftClock(
     breakReminderShown: reason === 'manual' ? state.breakReminderShown : false,
     breakDeferredUntil: null,
   };
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   return next;
 }
 
-export async function tickWorkedMinutes(addMinutes = 1) {
-  let state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours()));
+export async function tickWorkedMinutes(companyId: string, uid: string, addMinutes = 1) {
+  let state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(companyId, uid)));
   if (!state.shiftStartedAt) return state;
   const next = {
     ...state,
     workedMinutes: state.workedMinutes + addMinutes,
     weeklyWorkedMinutes: state.weeklyWorkedMinutes + addMinutes,
   };
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   return next;
 }
 
-export async function setPendingLimitSignOut(reason: NztaLimitSignOutReason) {
-  const state = await loadNztaHours();
+export async function setPendingLimitSignOut(
+  companyId: string,
+  uid: string,
+  reason: NztaLimitSignOutReason,
+) {
+  const state = await loadNztaHours(companyId, uid);
   if (state.pendingLimitSignOut === reason) return state;
   const next = { ...state, pendingLimitSignOut: reason };
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   return next;
 }
 
-export async function clearPendingLimitSignOut() {
-  const state = await loadNztaHours();
+export async function clearPendingLimitSignOut(companyId: string, uid: string) {
+  const state = await loadNztaHours(companyId, uid);
   if (!state.pendingLimitSignOut) return state;
   const next = { ...state, pendingLimitSignOut: null };
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   return next;
 }
 
-export async function addBreakMinutes(minutes: number) {
-  const state = await loadNztaHours();
+export async function addBreakMinutes(companyId: string, uid: string, minutes: number) {
+  const state = await loadNztaHours(companyId, uid);
   const next = {
     ...state,
     breakMinutes: state.breakMinutes + minutes,
@@ -310,7 +356,7 @@ export async function addBreakMinutes(minutes: number) {
     breakReminderShown: true,
     breakDeferredUntil: null,
   };
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   return next;
 }
 
@@ -362,10 +408,10 @@ export function exceedsWeeklyHours(state: NztaHoursState) {
   return s.weeklyWorkedMinutes >= NZTA_WEEKLY_MAX_HOURS * 60;
 }
 
-export async function deferBreakReminder(minutes: number) {
-  const state = await loadNztaHours();
+export async function deferBreakReminder(companyId: string, uid: string, minutes: number) {
+  const state = await loadNztaHours(companyId, uid);
   const next = { ...state, breakDeferredUntil: Date.now() + minutes * MS_MINUTE };
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   await notifyBreakReminder(
     'Break reminder',
     `NZTA recommends a break. We'll remind you again in ${minutes} minutes.`,
@@ -374,8 +420,8 @@ export async function deferBreakReminder(minutes: number) {
   return next;
 }
 
-export async function confirmBreakTaken() {
-  const state = await loadNztaHours();
+export async function confirmBreakTaken(companyId: string, uid: string) {
+  const state = await loadNztaHours(companyId, uid);
   const next = {
     ...state,
     lastBreakAt: Date.now(),
@@ -383,17 +429,17 @@ export async function confirmBreakTaken() {
     breakDeferredUntil: null,
     breakMinutes: state.breakMinutes + 15,
   };
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   return next;
 }
 
-export async function markBreakReminderShown() {
-  const state = await loadNztaHours();
+export async function markBreakReminderShown(companyId: string, uid: string) {
+  const state = await loadNztaHours(companyId, uid);
   const next = { ...state, breakReminderShown: true };
-  await saveNztaHours(next);
+  await saveNztaHours(companyId, uid, next);
   return next;
 }
 
-export async function markBreakTaken() {
-  return confirmBreakTaken();
+export async function markBreakTaken(companyId: string, uid: string) {
+  return confirmBreakTaken(companyId, uid);
 }

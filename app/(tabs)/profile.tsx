@@ -73,8 +73,12 @@ export default function ProfileScreen() {
   const breakAlertOpen = useRef(false);
 
   const refreshNzta = useCallback(() => {
-    loadNztaHours().then(setNzta);
-  }, []);
+    if (!driver?.companyId || !driver.uid) {
+      setNzta(null);
+      return;
+    }
+    loadNztaHours(driver.companyId, driver.uid).then(setNzta);
+  }, [driver?.companyId, driver?.uid]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -98,13 +102,14 @@ export default function ProfileScreen() {
   }, [refreshNzta, shiftActive]);
 
   const showBreakReminder = useCallback(() => {
-    if (breakAlertOpen.current) return;
+    if (breakAlertOpen.current || !driver?.companyId || !driver.uid) return;
+    const { companyId, uid } = driver;
     breakAlertOpen.current = true;
     Alert.alert('Break reminder', NZTA_BREAK_REMINDER_MESSAGE, [
       {
         text: 'OK',
         onPress: async () => {
-          await markBreakReminderShown();
+          await markBreakReminderShown(companyId, uid);
           refreshNzta();
           breakAlertOpen.current = false;
         },
@@ -112,11 +117,11 @@ export default function ProfileScreen() {
     ], {
       cancelable: true,
       onDismiss: () => {
-        void markBreakReminderShown().then(refreshNzta);
+        void markBreakReminderShown(companyId, uid).then(refreshNzta);
         breakAlertOpen.current = false;
       },
     });
-  }, [refreshNzta]);
+  }, [refreshNzta, driver?.companyId, driver?.uid]);
 
   useEffect(() => {
     if (endShiftInProgress) return;
@@ -220,7 +225,8 @@ export default function ProfileScreen() {
             variant="secondary"
             style={{ marginTop: 12 }}
             onPress={async () => {
-              await confirmBreakTaken();
+              if (!driver?.companyId || !driver.uid) return;
+              await confirmBreakTaken(driver.companyId, driver.uid);
               refreshNzta();
               Alert.alert('Break logged', '15 minutes added to your break time.');
             }}

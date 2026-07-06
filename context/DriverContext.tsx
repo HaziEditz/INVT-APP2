@@ -839,19 +839,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   >(null);
 
   useSafeEffect(() => {
-    if (!shiftActive) return;
+    if (!shiftActive || !driver?.companyId || !driver.uid) return;
     let cancelled = false;
     const breakAlertOpen = { current: false };
+    const { companyId, uid } = driver;
 
     const evaluateNztaLimits = async (tick: boolean) => {
       if (cancelled || endShiftInProgressRef.current || !shiftActiveRef.current) return;
       try {
-        const state = tick ? await tickWorkedMinutes(1) : await loadNztaHours();
+        const state = tick
+          ? await tickWorkedMinutes(companyId, uid, 1)
+          : await loadNztaHours(companyId, uid);
         if (cancelled || endShiftInProgressRef.current) return;
 
         if (exceedsWeeklyHours(state) || state.pendingLimitSignOut === 'weekly70h') {
           if (hasBlockingNztaJob()) {
-            await setPendingLimitSignOut('weekly70h');
+            await setPendingLimitSignOut(companyId, uid, 'weekly70h');
             return;
           }
           await forceNztaLimitSignOutRef.current?.('weekly70h', NZTA_WEEKLY_LIMIT_SIGNOUT_MESSAGE);
@@ -860,7 +863,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
         if (exceedsMaxShiftHours(state) || state.pendingLimitSignOut === 'shift14h') {
           if (hasBlockingNztaJob()) {
-            await setPendingLimitSignOut('shift14h');
+            await setPendingLimitSignOut(companyId, uid, 'shift14h');
             return;
           }
           await forceNztaLimitSignOutRef.current?.('shift14h', NZTA_SHIFT_LIMIT_SIGNOUT_MESSAGE);
@@ -874,12 +877,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             {
               text: 'OK',
               onPress: () => {
-                void markBreakReminderShown();
+                void markBreakReminderShown(companyId, uid);
                 breakAlertOpen.current = false;
               },
             },
           ], { cancelable: true, onDismiss: () => {
-            void markBreakReminderShown();
+            void markBreakReminderShown(companyId, uid);
             breakAlertOpen.current = false;
           } });
         }
@@ -896,14 +899,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [shiftActive, hasBlockingNztaJob], 'Driver-nztaTick');
+  }, [shiftActive, hasBlockingNztaJob, driver?.companyId, driver?.uid], 'Driver-nztaTick');
 
   // When a job clears after a deferred 14h/70h limit, sign out immediately.
   useSafeEffect(() => {
-    if (!shiftActive || hasBlockingNztaJob() || endShiftInProgressRef.current) return;
+    if (!shiftActive || !driver?.companyId || !driver.uid || hasBlockingNztaJob() || endShiftInProgressRef.current) return;
     let cancelled = false;
+    const { companyId, uid } = driver;
     void (async () => {
-      const state = await loadNztaHours();
+      const state = await loadNztaHours(companyId, uid);
       if (cancelled || !state.pendingLimitSignOut) return;
       const reason = state.pendingLimitSignOut;
       const message =
@@ -915,7 +919,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [shiftActive, activeJob, hailActive, paymentJob, hasBlockingNztaJob], 'Driver-nztaDeferredSignOut');
+  }, [shiftActive, activeJob, hailActive, paymentJob, hasBlockingNztaJob, driver?.companyId, driver?.uid], 'Driver-nztaDeferredSignOut');
 
   const sessionEarnings = sumBreakdown(completedJobs);
   const historyEarnings = sumBreakdown(
@@ -2293,7 +2297,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     if (driverSnapshot?.companyId && driverSnapshot.uid) {
       const { captureEndShiftSummary } = await import('@/services/nztaService');
-      summary = await captureEndShiftSummary();
+      summary = await captureEndShiftSummary(driverSnapshot.companyId, driverSnapshot.uid);
     }
 
     if (driverSnapshot && vehicleId) {
