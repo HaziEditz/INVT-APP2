@@ -501,6 +501,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const shiftActiveRef = useRef(false);
   const endShiftInProgressRef = useRef(false);
   const endShiftSummaryAckRef = useRef<(() => void) | null>(null);
+  const endShiftAndSignOutRef = useRef<
+    ((opts?: {
+      force?: boolean;
+      reason?: EndShiftReason;
+      message?: string;
+      skipSummary?: boolean;
+    }) => Promise<void>) | null
+  >(null);
+  const adminForceEndInFlightRef = useRef(false);
   const readyForJobsRef = useRef(false);
   const hailActiveRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
@@ -1418,6 +1427,57 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (type === 'kicked' || eventType === 'kicked') {
+      if (adminForceEndInFlightRef.current) return;
+      adminForceEndInFlightRef.current = true;
+      void playInAppNotificationSound('alert');
+      const msg = String(val.message ?? val.content ?? 'You have been kicked by dispatcher');
+      Alert.alert('Signed out', msg);
+      await clearDriverNotification(driver.id, driver.companyId);
+      try {
+        await endShiftAndSignOutRef.current?.({
+          force: true,
+          reason: 'manual',
+          message: msg,
+          skipSummary: true,
+        });
+      } finally {
+        adminForceEndInFlightRef.current = false;
+      }
+      return;
+    }
+
+    if (type === 'suspended' || eventType === 'suspended') {
+      if (adminForceEndInFlightRef.current) return;
+      adminForceEndInFlightRef.current = true;
+      void playInAppNotificationSound('alert');
+      const untilRaw = val.suspendedUntil;
+      const untilStr =
+        untilRaw != null && String(untilRaw).trim()
+          ? String(untilRaw)
+          : '';
+      const msg = String(
+        val.message ??
+          val.content ??
+          (untilStr
+            ? `You have been suspended by dispatcher until ${untilStr}.`
+            : 'You have been suspended by dispatcher.'),
+      );
+      Alert.alert('Suspended', msg);
+      await clearDriverNotification(driver.id, driver.companyId);
+      try {
+        await endShiftAndSignOutRef.current?.({
+          force: true,
+          reason: 'manual',
+          message: msg,
+          skipSummary: true,
+        });
+      } finally {
+        adminForceEndInFlightRef.current = false;
+      }
+      return;
+    }
+
     if (type === 'job_removed') {
       void playInAppNotificationSound('alert');
       Alert.alert('Job taken back', 'Job has been taken back by dispatcher');
@@ -1549,32 +1609,48 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.id) return;
-    try {
-      const notifyRef = ref(getDatabaseInstance(), `notification/${driver.id}`);
-      return onValue(notifyRef, async (snap) => {
-        try {
-          const val = snap.val();
-          if (!val) return;
-          if (typeof val === 'object' && !Array.isArray(val) && (val.type || val.eventType || isOfferPayload(val as Record<string, unknown>))) {
-            const payload = val as Record<string, unknown>;
-            if (!canListenForOffers && !notificationBypassesOfferGate(payload)) return;
-            await handleDriverNotification(payload);
-            return;
-          }
-          if (!canListenForOffers) return;
-          const payloads = extractOfferPayloads(val);
-          for (const payload of payloads) {
-            await processOfferPayload(payload);
-          }
-        } catch (err) {
-          console.error('[Driver] notification listener', err);
+    const handlePayload = async (val: Record<string, unknown> | null) => {
+      if (!val || typeof val !== 'object' || Array.isArray(val)) return;
+      if (val.type || val.eventType || isOfferPayload(val)) {
+        const payload = val as Record<string, unknown>;
+        if (!canListenForOffers && !notificationBypassesOfferGate(payload)) {
+          const t = readNotificationType(payload);
+          if (t !== 'kicked' && t !== 'suspended') return;
         }
-      });
+        await handleDriverNotification(payload);
+        return;
+      }
+      if (!canListenForOffers) return;
+      const payloads = extractOfferPayloads(val);
+      for (const payload of payloads) {
+        await processOfferPayload(payload);
+      }
+    };
+    try {
+      const unsubs: Array<() => void> = [];
+      const attach = (path: string) => {
+        const notifyRef = ref(getDatabaseInstance(), path);
+        const unsub = onValue(notifyRef, async (snap) => {
+          try {
+            await handlePayload(snap.val() as Record<string, unknown> | null);
+          } catch (err) {
+            console.error('[Driver] notification listener', path, err);
+          }
+        });
+        unsubs.push(unsub);
+      };
+      attach(`notification/${driver.id}`);
+      if (driver.companyId) {
+        attach(`notification/${driver.companyId}/${driver.id}`);
+      }
+      return () => {
+        for (const unsub of unsubs) unsub();
+      };
     } catch (err) {
       console.error('[Driver] notification subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftActive, canListenForOffers, driver?.id], 'Driver-notification');
+  }, [shiftActive, canListenForOffers, driver?.id, driver?.companyId], 'Driver-notification');
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.id) return;
@@ -2401,6 +2477,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       skipSummary: true,
     });
   };
+
+  endShiftAndSignOutRef.current = endShiftAndSignOut;
 
   const syncJobStageToDispatch = async (
     stage: JobStage,

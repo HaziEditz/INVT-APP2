@@ -7,11 +7,15 @@ export type DriverNotificationType =
   | 'job_cancelled'
   | 'job_updated'
   | 'no_show'
+  | 'kicked'
+  | 'suspended'
   | string;
 
 export function readNotificationType(val: Record<string, unknown>): DriverNotificationType {
   const raw = val.type ?? val.eventType ?? val.content ?? '';
   const s = String(raw).toLowerCase();
+  if (s === 'kicked') return 'kicked';
+  if (s === 'suspended') return 'suspended';
   if (s === 'job_offer' || s.includes('offered new job')) return 'job_offer';
   if (s === 'job_removed' || s === 'removed' || s === 'recalled') return 'job_removed';
   if (s === 'job_cancelled' || s === 'cancelled' || s.includes('cancel')) return 'job_cancelled';
@@ -34,10 +38,13 @@ export function jobIdsMatch(a: string | undefined | null, b: string | undefined 
   return na === nb;
 }
 
-export async function clearDriverNotification(driverId: string): Promise<void> {
+export async function clearDriverNotification(driverId: string, companyId?: string): Promise<void> {
   if (!driverId) return;
   try {
     await remove(ref(getDatabaseInstance(), `notification/${driverId}`));
+    if (companyId) {
+      await remove(ref(getDatabaseInstance(), `notification/${companyId}/${driverId}`));
+    }
   } catch {
     // non-fatal
   }
