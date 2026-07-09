@@ -1,11 +1,13 @@
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Colors } from '@/constants/theme';
+import { useDriver } from '@/context/DriverContext';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const { chatUnreadCount } = useDriver();
 
   return (
     <ErrorBoundary name="Tabs">
@@ -48,6 +50,7 @@ export default function TabLayout() {
         name="chat"
         options={{
           title: 'Chat',
+          tabBarBadge: chatUnreadCount > 0 ? chatUnreadCount : undefined,
           tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={color} />,
         }}
       />

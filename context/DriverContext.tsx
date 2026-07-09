@@ -35,6 +35,7 @@ import {
   readNotificationType,
 } from '@/lib/driverNotifications';
 import { playInAppNotificationSound, alertDriverToOffer } from '@/lib/notificationSound';
+import { subscribeChat } from '@/lib/chatService';
 import { subscribeDriverQueue, filterLiveDriverQueueOffers } from '@/lib/driverQueue';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
@@ -218,6 +219,9 @@ interface DriverContextValue {
   tripOnTheWay: boolean;
   inAppBanner: DriverInAppBannerState | null;
   dismissInAppBanner: () => void;
+  chatUnreadCount: number;
+  markChatViewed: () => void;
+  markChatTabBlurred: () => void;
 }
 
 const DriverContext = createContext<DriverContextValue | null>(null);
@@ -488,6 +492,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [tariffs, setTariffsState] = useState<Tariff[]>([]);
   const [selectedTariff, setSelectedTariffState] = useState<Tariff>(NO_TARIFF_CONFIGURED);
   const [inAppBanner, setInAppBanner] = useState<DriverInAppBannerState | null>(null);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const chatTabFocusedRef = useRef(false);
+  const lastChatNotifyKeyRef = useRef('');
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
   const [broadcastOffers, setBroadcastOffers] = useState<JobOffer[]>([]);
   const [poolOffers, setPoolOffers] = useState<JobOffer[]>([]);
@@ -1247,6 +1254,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     shiftActive && !offersLockedForEnrouteDispatch ? visibleOffers.length : 0;
   const nextQueuedOffer = queuedOffers[0] ?? null;
 
+  const notifyDispatcherChat = useCallback((text: string, dedupeKey?: string) => {
+    const body = text.trim() || 'New message from dispatch';
+    const key = dedupeKey || body;
+    if (lastChatNotifyKeyRef.current === key) return;
+    lastChatNotifyKeyRef.current = key;
+    void playInAppNotificationSound('general');
+    if (!chatTabFocusedRef.current) {
+      setInAppBanner({ kind: 'chat', message: body });
+      setChatUnreadCount((c) => c + 1);
+    }
+  }, []);
+
+  const markChatViewed = useCallback(() => {
+    chatTabFocusedRef.current = true;
+    setChatUnreadCount(0);
+  }, []);
+
+  const markChatTabBlurred = useCallback(() => {
+    chatTabFocusedRef.current = false;
+  }, []);
+
   useSafeEffect(() => {
     if (canListenForOffers) return;
     setJobOffer(null);
@@ -1662,11 +1690,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           if (!val || typeof val !== 'object') return;
           const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
           if (eventType !== 'chat_message') return;
-          void playInAppNotificationSound('general');
-          setInAppBanner({
-            kind: 'chat',
-            message: String(val.content ?? val.message ?? 'New message from dispatch'),
-          });
+          const body = String(val.content ?? val.message ?? 'New message from dispatch');
+          const dedupeKey = String(val.messageId ?? val.timestamp ?? body);
+          notifyDispatcherChat(body, dedupeKey);
           await clearChatNotification(driver.id);
         } catch (err) {
           console.error('[Driver] chat notification listener', err);
@@ -1676,7 +1702,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] chat notification subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftActive, driver?.id], 'Driver-notificationChat');
+  }, [shiftActive, driver?.id, notifyDispatcherChat], 'Driver-notificationChat');
+
+  useSafeEffect(() => {
+    if (!shiftActive || !driver?.id) return;
+    const unsub = subscribeChat(driver.id, (msg) => {
+      if (msg.sender !== 'dispatcher') return;
+      notifyDispatcherChat(msg.text, msg.id);
+      void clearChatNotification(driver.id);
+    });
+    return unsub;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shiftActive, driver?.id, notifyDispatcherChat], 'Driver-globalChat');
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.id) return;
@@ -3745,6 +3782,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         tripOnTheWay,
         inAppBanner,
         dismissInAppBanner: () => setInAppBanner(null),
+        chatUnreadCount,
+        markChatViewed,
+        markChatTabBlurred,
       }}
     >
       {children}

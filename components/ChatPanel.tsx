@@ -23,6 +23,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+function formatChatTime(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return time;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+}
+
 export function ChatPanel() {
   const insets = useSafeAreaInsets();
   const { driver } = useAuth();
@@ -125,6 +133,7 @@ export function ChatPanel() {
           <View style={[styles.bubble, item.sender === 'driver' ? styles.mine : styles.theirs]}>
             <Text style={styles.sender}>{item.sender === 'driver' ? 'You' : 'Dispatcher'}</Text>
             <Text style={styles.message}>{item.text}</Text>
+            <Text style={styles.timestamp}>{formatChatTime(item.timestamp)}</Text>
           </View>
         )}
       />
@@ -160,7 +169,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   sender: { color: Colors.textMuted, fontSize: 11, marginBottom: 4, fontWeight: '600' },
-  message: { color: Colors.text, fontSize: 15 },
+  message: { color: Colors.text, fontSize: 15, lineHeight: 20 },
+  timestamp: { color: Colors.textMuted, fontSize: 11, marginTop: 8, alignSelf: 'flex-end' },
   composer: {
     flexDirection: 'row',
     paddingHorizontal: 12,
