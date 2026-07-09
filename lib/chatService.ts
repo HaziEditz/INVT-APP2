@@ -8,8 +8,11 @@ export function parseChatBookingId(bookingid: string): { senderName: string; tex
   const parts = String(bookingid || '').split(',');
   if (parts.length < 2) return { senderName: 'Dispatcher', text: bookingid };
   const senderName = parts[0] || 'Dispatcher';
-  const text = parts.slice(1, Math.max(2, parts.length - 2)).join(',');
-  return { senderName, text: text || parts[1] || '' };
+  // senderName,message,datetime,companyId,sourceTag — message is always parts[1]
+  if (parts.length >= 4) {
+    return { senderName, text: parts[1] || '' };
+  }
+  return { senderName, text: parts.slice(1).join(',') || parts[1] || '' };
 }
 
 export function chatPayloadToMessage(

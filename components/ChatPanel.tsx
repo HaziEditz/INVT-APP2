@@ -132,8 +132,12 @@ export function ChatPanel() {
         renderItem={({ item }) => (
           <View style={[styles.bubble, item.sender === 'driver' ? styles.mine : styles.theirs]}>
             <Text style={styles.sender}>{item.sender === 'driver' ? 'You' : 'Dispatcher'}</Text>
-            <Text style={styles.message}>{item.text}</Text>
-            <Text style={styles.timestamp}>{formatChatTime(item.timestamp)}</Text>
+            <View style={styles.bubbleBody}>
+              <Text style={styles.message}>{item.text}</Text>
+              <View style={styles.timestampRow}>
+                <Text style={styles.timestamp}>{formatChatTime(item.timestamp)}</Text>
+              </View>
+            </View>
           </View>
         )}
       />
@@ -169,8 +173,16 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   sender: { color: Colors.textMuted, fontSize: 11, marginBottom: 4, fontWeight: '600' },
+  bubbleBody: { width: '100%' },
   message: { color: Colors.text, fontSize: 15, lineHeight: 20 },
-  timestamp: { color: Colors.textMuted, fontSize: 11, marginTop: 8, alignSelf: 'flex-end' },
+  timestampRow: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+    alignSelf: 'stretch',
+  },
+  timestamp: { color: Colors.textMuted, fontSize: 11, textAlign: 'right' },
   composer: {
     flexDirection: 'row',
     paddingHorizontal: 12,
