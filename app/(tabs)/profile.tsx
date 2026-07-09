@@ -241,8 +241,12 @@ export default function ProfileScreen() {
 
       {shiftActive ? (
         <View style={sharedStyles.card}>
-          <Text style={sharedStyles.cardTitle}>Emergency SOS</Text>
-          <SosButton disabled={endShiftInProgress || hasTripInProgress} />
+          <Text style={[sharedStyles.cardTitle, { opacity: 0.75 }]}>Emergency SOS (backup)</Text>
+          <SosButton
+            variant="secondary"
+            vehicleNumber={activeVehicle?.number || vehicleIdForMeta}
+            disabled={endShiftInProgress || hasTripInProgress}
+          />
         </View>
       ) : null}
 

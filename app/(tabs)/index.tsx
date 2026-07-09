@@ -10,6 +10,7 @@ import { TripToolsBar } from '@/components/home/TripToolsBar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MapErrorFallback } from '@/components/MapErrorFallback';
 import JobMap from '@/components/JobMap';
+import { SosButton } from '@/components/SosButton';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
@@ -43,6 +44,10 @@ export default function MainScreen() {
     pauseMeter,
     companyZones,
     paymentJob,
+    selectedVehicleId,
+    vehicles,
+    endShiftInProgress,
+    hasTripInProgress,
   } = useDriver();
 
   const [mainTab, setMainTab] = useState<MainPanelTab>('current');
@@ -106,6 +111,9 @@ export default function MainScreen() {
     );
   }
 
+  const activeVehicle = vehicles.find((v) => v.id === selectedVehicleId);
+  const vehicleNumber = activeVehicle?.number || selectedVehicleId || driver?.vehicleId || '';
+
   const mapZones = companyZones.map((z) => ({
     name: z.name,
     active: z.active,
@@ -119,6 +127,15 @@ export default function MainScreen() {
       </ErrorBoundary>
 
       <View style={[styles.body, hasCurrent && styles.bodyTrip]}>
+        {shiftActive ? (
+          <View style={styles.sosCorner} pointerEvents="box-none">
+            <SosButton
+              variant="corner"
+              vehicleNumber={vehicleNumber}
+              disabled={endShiftInProgress || hasTripInProgress}
+            />
+          </View>
+        ) : null}
         <View style={[styles.mapSection, hasCurrent && styles.mapSectionTrip]}>
           <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
             <JobMap
@@ -234,6 +251,12 @@ const styles = StyleSheet.create({
   },
   bodyTrip: {
     flexDirection: 'column',
+  },
+  sosCorner: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    zIndex: 20,
   },
   mapSection: {
     flex: 1,

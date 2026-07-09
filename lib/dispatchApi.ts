@@ -580,6 +580,7 @@ export async function triggerDriverSos(payload: {
   lng: number;
   phone?: string;
   driverName?: string;
+  vehiclenumber?: string;
 }) {
   return driverApiPost<{ ok: boolean; sosId?: string; status?: string }>('/api/driver/sos', payload);
 }
