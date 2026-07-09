@@ -3,7 +3,7 @@ import { Input } from '@/components/Input';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
 import { useAuth } from '@/context/AuthContext';
-import { clearChatNotification } from '@/lib/driverNotifications';
+import { clearChatNotification, clearDriverNotification } from '@/lib/driverNotifications';
 import {
   loadChatHistory,
   sendChatToDispatch,
@@ -104,8 +104,8 @@ export function ChatPanel() {
   return (
     <KeyboardAvoidingView
       style={sharedStyles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : insets.top}
     >
       {loading ? (
         <View style={styles.loadingWrap}>
