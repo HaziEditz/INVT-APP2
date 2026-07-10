@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { cancelDriverSos, triggerDriverSos } from '@/lib/dispatchApi';
 import { getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
 import { getLastKnownCoords } from '@/services/locationService';
-import { onValue, ref } from 'firebase/database';
+import { get, onValue, ref } from 'firebase/database';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -62,10 +62,20 @@ export function SosButton({ disabled, variant = 'secondary', vehicleNumber }: Pr
       const coords = await getLastKnownCoords();
       const lat = coords?.latitude ?? 0;
       const lng = coords?.longitude ?? 0;
+      let phone = driver.phone?.trim() || '';
+      if (!phone && driver.uid && isFirebaseReady) {
+        const profileSnap = await get(
+          ref(getDatabaseInstance(), `drivers/${driver.companyId}/${driver.uid}`),
+        );
+        if (profileSnap.exists()) {
+          const fb = profileSnap.val() as Record<string, unknown>;
+          phone = String(fb.phone ?? fb.PhoneNo ?? '').trim();
+        }
+      }
       await triggerDriverSos({
         lat,
         lng,
-        phone: driver.phone,
+        phone,
         driverName: driver.name,
         vehiclenumber: vehicleNumber?.trim() || driver.vehicleId || '',
       });

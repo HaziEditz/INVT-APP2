@@ -123,19 +123,20 @@ export default function MainScreen() {
   return (
     <View style={styles.root}>
       <ErrorBoundary name="HomeTopBar">
-        <HomeStatusBar />
+        <HomeStatusBar
+          sosSlot={
+            shiftActive ? (
+              <SosButton
+                variant="corner"
+                vehicleNumber={vehicleNumber}
+                disabled={endShiftInProgress || hasTripInProgress}
+              />
+            ) : null
+          }
+        />
       </ErrorBoundary>
 
       <View style={[styles.body, hasCurrent && styles.bodyTrip]}>
-        {shiftActive ? (
-          <View style={styles.sosCorner} pointerEvents="box-none">
-            <SosButton
-              variant="corner"
-              vehicleNumber={vehicleNumber}
-              disabled={endShiftInProgress || hasTripInProgress}
-            />
-          </View>
-        ) : null}
         <View style={[styles.mapSection, hasCurrent && styles.mapSectionTrip]}>
           <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
             <JobMap
@@ -251,12 +252,6 @@ const styles = StyleSheet.create({
   },
   bodyTrip: {
     flexDirection: 'column',
-  },
-  sosCorner: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    zIndex: 20,
   },
   mapSection: {
     flex: 1,

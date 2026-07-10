@@ -1,7 +1,7 @@
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { formatQueueDisplay } from '@/lib/zoneQueue';
-import { useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,8 +13,8 @@ function formatZoneElapsed(ms: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-/** Top bar: lifecycle status (color) | ZQ | Zone | Time */
-export function HomeStatusBar() {
+/** Top bar: lifecycle status (color) | ZQ | Zone | Time | optional SOS */
+export function HomeStatusBar({ sosSlot }: { sosSlot?: ReactNode }) {
   const insets = useSafeAreaInsets();
   const {
     shiftActive,
@@ -107,6 +107,8 @@ export function HomeStatusBar() {
           Time: <Text style={styles.metaVal}>{timeInZone}</Text>
         </Text>
       </View>
+
+      {sosSlot ? <View style={styles.sosSlot}>{sosSlot}</View> : null}
     </View>
   );
 }
@@ -133,6 +135,7 @@ const styles = StyleSheet.create({
   },
   lifecycleText: { color: '#fff', fontWeight: '800', fontSize: 11 },
   metaLine: { flex: 1, minWidth: 0 },
+  sosSlot: { flexShrink: 0 },
   meta: { color: Colors.textMuted, fontSize: 11, fontWeight: '600' },
   metaVal: { color: Colors.text, fontWeight: '700', fontSize: 11 },
   sep: { color: Colors.border, fontSize: 11, fontWeight: '400' },

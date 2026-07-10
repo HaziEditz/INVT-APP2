@@ -162,6 +162,17 @@ export default function ProfileScreen() {
     >
       <ScreenHeader title="Profile" subtitle="Driver info, earnings & compliance" />
 
+      {shiftActive ? (
+        <View style={sharedStyles.card}>
+          <Text style={[sharedStyles.cardTitle, { opacity: 0.75 }]}>Emergency SOS (backup)</Text>
+          <SosButton
+            variant="secondary"
+            vehicleNumber={activeVehicle?.number || vehicleIdForMeta}
+            disabled={endShiftInProgress || hasTripInProgress}
+          />
+        </View>
+      ) : null}
+
       <View style={sharedStyles.card}>
         <Text style={sharedStyles.cardTitle}>{driver?.name ?? 'Driver'}</Text>
         <Text style={sharedStyles.cardText}>Driver ID: {driver?.id ?? '—'}</Text>
@@ -238,17 +249,6 @@ export default function ProfileScreen() {
         <Text style={sharedStyles.cardTitle}>Push notifications</Text>
         <Switch value={notifications} onValueChange={setNotifications} trackColor={{ true: Colors.accent }} />
       </View>
-
-      {shiftActive ? (
-        <View style={sharedStyles.card}>
-          <Text style={[sharedStyles.cardTitle, { opacity: 0.75 }]}>Emergency SOS (backup)</Text>
-          <SosButton
-            variant="secondary"
-            vehicleNumber={activeVehicle?.number || vehicleIdForMeta}
-            disabled={endShiftInProgress || hasTripInProgress}
-          />
-        </View>
-      ) : null}
 
       <Button
         title={endShiftInProgress ? 'Ending shift…' : 'End Shift'}
