@@ -168,7 +168,6 @@ export default function ProfileScreen() {
           <SosButton
             variant="secondary"
             vehicleNumber={activeVehicle?.number || vehicleIdForMeta}
-            disabled={endShiftInProgress || hasTripInProgress}
           />
         </View>
       ) : null}

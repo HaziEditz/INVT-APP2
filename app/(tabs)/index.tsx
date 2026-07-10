@@ -46,8 +46,6 @@ export default function MainScreen() {
     paymentJob,
     selectedVehicleId,
     vehicles,
-    endShiftInProgress,
-    hasTripInProgress,
   } = useDriver();
 
   const [mainTab, setMainTab] = useState<MainPanelTab>('current');
@@ -129,7 +127,6 @@ export default function MainScreen() {
               <SosButton
                 variant="corner"
                 vehicleNumber={vehicleNumber}
-                disabled={endShiftInProgress || hasTripInProgress}
               />
             ) : null
           }
