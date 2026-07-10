@@ -509,6 +509,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const chatTabFocusedRef = useRef(false);
   const lastChatNotifyKeyRef = useRef('');
+  const lastSosAlertRef = useRef('');
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
   const [broadcastOffers, setBroadcastOffers] = useState<JobOffer[]>([]);
   const [poolOffers, setPoolOffers] = useState<JobOffer[]>([]);
@@ -1304,6 +1305,29 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const processIncomingSosNotification = useCallback(async (
+    val: Record<string, unknown>,
+    source: 'notificationSos' | 'notification',
+  ) => {
+    const alert = parseIncomingSosAlert(val);
+    if (!alert) return;
+    const dedupeKey = `${alert.incidentId}:${alert.timestamp}`;
+    if (lastSosAlertRef.current === dedupeKey) return;
+    lastSosAlertRef.current = dedupeKey;
+    console.log(`[Driver] SOS alert via ${source}`, {
+      sosDriverId: alert.sosDriverId,
+      incidentId: alert.incidentId,
+      driverName: alert.driverName,
+    });
+    applyIncomingSosAlert(alert);
+    if (driver?.id) {
+      await clearSosNotification(driver.id);
+      if (source === 'notification') {
+        await clearDriverNotification(driver.id);
+      }
+    }
+  }, [applyIncomingSosAlert, driver?.id]);
+
   const openIncomingSosMap = useCallback(() => {
     if (!incomingSosAlert) return;
     router.push('/sos-alert');
@@ -1516,6 +1540,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (type === 'driver_sos' || eventType === 'driver_sos') {
+      await processIncomingSosNotification(val, 'notification');
       return;
     }
 
@@ -1785,25 +1810,25 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.id) return;
+    console.log('[Driver] notificationSos listener attached', driver.id);
     try {
       const sosRef = ref(getDatabaseInstance(), `notificationSos/${driver.id}`);
       return onValue(sosRef, async (snap) => {
         try {
           const val = snap.val() as Record<string, unknown> | null;
           if (!val || typeof val !== 'object') return;
-          const alert = parseIncomingSosAlert(val);
-          if (!alert) return;
-          applyIncomingSosAlert(alert);
-          await clearSosNotification(driver.id);
+          await processIncomingSosNotification(val, 'notificationSos');
         } catch (err) {
           console.error('[Driver] SOS notification listener', err);
         }
+      }, (err) => {
+        console.error('[Driver] notificationSos permission/error', driver.id, err);
       });
     } catch (err) {
       console.error('[Driver] SOS notification subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftActive, driver?.id, applyIncomingSosAlert], 'Driver-notificationSos');
+  }, [shiftActive, driver?.id, processIncomingSosNotification], 'Driver-notificationSos');
 
   useSafeEffect(() => {
     if (!driver?.companyId || !activeJob?.id) {
