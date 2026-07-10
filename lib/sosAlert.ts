@@ -28,6 +28,31 @@ export function parseIncomingSosAlert(val: Record<string, unknown>): IncomingSos
   };
 }
 
+export function parseIncomingSosResolved(val: Record<string, unknown>): {
+  sosDriverId: string;
+  incidentId: string;
+  resolution: 'resolved' | 'false_alarm';
+  message: string;
+} | null {
+  const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
+  if (eventType !== 'sos_resolved') return null;
+  const sosDriverId = String(val.sosDriverId ?? '').trim();
+  if (!sosDriverId) return null;
+  const resolutionRaw = String(val.resolution ?? 'resolved').toLowerCase();
+  const resolution = resolutionRaw === 'false_alarm' ? 'false_alarm' : 'resolved';
+  return {
+    sosDriverId,
+    incidentId: String(val.incidentId ?? `sos-${sosDriverId}`).trim(),
+    resolution,
+    message: String(
+      val.content ??
+        (resolution === 'false_alarm'
+          ? 'Dispatch marked this SOS as a false alarm.'
+          : 'Dispatch has resolved this emergency.'),
+    ).trim(),
+  };
+}
+
 export function incomingSosAlertToNotificationData(alert: IncomingSosAlert): Record<string, string> {
   return {
     type: 'driver_sos',

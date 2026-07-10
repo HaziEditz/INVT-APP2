@@ -3,6 +3,7 @@ import { Button } from '@/components/Button';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { sharedStyles } from '@/constants/styles';
+import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { router } from 'expo-router';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,12 +12,24 @@ export default function SosAlertScreen() {
   const insets = useSafeAreaInsets();
   const {
     incomingSosAlert,
+    incomingSosResolved,
+    incomingSosResolvedMessage,
     sosResponding,
     respondToIncomingSos,
+    dismissIncomingSosAlert,
     clearIncomingSosAlert,
   } = useDriver();
 
-  if (!incomingSosAlert) {
+  useSafeEffect(() => {
+    if (!incomingSosResolved) return;
+    const timer = setTimeout(() => {
+      clearIncomingSosAlert();
+      router.replace('/(tabs)');
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [incomingSosResolved, clearIncomingSosAlert], 'SosAlertScreen-resolved');
+
+  if (!incomingSosAlert && !incomingSosResolved) {
     return (
       <View style={[sharedStyles.screen, styles.empty, { paddingTop: insets.top + 24 }]}>
         <Text style={styles.emptyTitle}>No active SOS alert</Text>
@@ -25,7 +38,27 @@ export default function SosAlertScreen() {
     );
   }
 
-  const { driverName, vehiclenumber, locationAddress, lat, lng, content } = incomingSosAlert;
+  if (incomingSosResolved) {
+    return (
+      <View style={[sharedStyles.screen, styles.empty, { paddingTop: insets.top + 24 }]}>
+        <Text style={styles.resolvedTitle}>Emergency resolved</Text>
+        <Text style={styles.resolvedMessage}>
+          {incomingSosResolvedMessage || 'Dispatch has closed this SOS incident.'}
+        </Text>
+        <Text style={styles.resolvedHint}>Returning to main screen…</Text>
+        <Button
+          title="Clear"
+          variant="secondary"
+          onPress={() => {
+            clearIncomingSosAlert();
+            router.replace('/(tabs)');
+          }}
+        />
+      </View>
+    );
+  }
+
+  const { driverName, vehiclenumber, locationAddress, lat, lng, content } = incomingSosAlert!;
   const hasCoords = Math.abs(lat) > 0.0001 || Math.abs(lng) > 0.0001;
 
   return (
@@ -55,12 +88,12 @@ export default function SosAlertScreen() {
           onPress={() => void respondToIncomingSos()}
         />
         <Button
-          title="Close"
+          title="Clear"
           variant="secondary"
           style={{ marginTop: 10 }}
           onPress={() => {
-            clearIncomingSosAlert();
-            router.back();
+            dismissIncomingSosAlert();
+            router.replace('/(tabs)');
           }}
         />
         {sosResponding ? (
@@ -80,6 +113,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   emptyTitle: { color: Colors.text, fontSize: 16, fontWeight: '600' },
+  resolvedTitle: { color: Colors.success, fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  resolvedMessage: { color: Colors.text, fontSize: 16, textAlign: 'center', lineHeight: 22 },
+  resolvedHint: { color: Colors.textMuted, fontSize: 14, textAlign: 'center' },
   mapWrap: { flex: 1, minHeight: 280 },
   mapFallback: {
     flex: 1,

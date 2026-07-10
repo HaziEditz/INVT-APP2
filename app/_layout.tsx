@@ -10,6 +10,7 @@ import { PaymentModalFallback } from '@/components/PaymentModalFallback';
 import { EndShiftFlow } from '@/components/EndShiftFlow';
 import { DriverInAppBanner } from '@/components/DriverInAppBanner';
 import { SosNotificationBootstrap } from '@/components/SosNotificationBootstrap';
+import { SosIncidentRelease } from '@/components/SosIncidentRelease';
 import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -55,6 +56,9 @@ export default function RootLayout() {
         </Stack>
         <ErrorBoundary name="SosNotificationBootstrap">
           <SosNotificationBootstrap />
+        </ErrorBoundary>
+        <ErrorBoundary name="SosIncidentRelease">
+          <SosIncidentRelease />
         </ErrorBoundary>
         <ErrorBoundary name="ShiftKeepAwake">
           <ShiftKeepAwake />

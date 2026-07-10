@@ -41,6 +41,7 @@ import { subscribePendingJobs } from '@/lib/pendingJobs';
 import {
   incomingSosAlertToNotificationData,
   parseIncomingSosAlert,
+  parseIncomingSosResolved,
   type IncomingSosAlert,
 } from '@/lib/sosAlert';
 import { notifySosAlert } from '@/services/notificationService';
@@ -226,11 +227,14 @@ interface DriverContextValue {
   inAppBanner: DriverInAppBannerState | null;
   dismissInAppBanner: () => void;
   incomingSosAlert: IncomingSosAlert | null;
+  incomingSosResolved: boolean;
+  incomingSosResolvedMessage: string;
   sosResponding: boolean;
   openIncomingSosMap: () => void;
   handleSosNotificationOpen: (alert: IncomingSosAlert) => void;
   respondToIncomingSos: () => Promise<void>;
   clearIncomingSosAlert: () => void;
+  dismissIncomingSosAlert: () => void;
   chatUnreadCount: number;
   markChatViewed: () => void;
   markChatTabBlurred: () => void;
@@ -505,11 +509,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [selectedTariff, setSelectedTariffState] = useState<Tariff>(NO_TARIFF_CONFIGURED);
   const [inAppBanner, setInAppBanner] = useState<DriverInAppBannerState | null>(null);
   const [incomingSosAlert, setIncomingSosAlert] = useState<IncomingSosAlert | null>(null);
+  const [incomingSosResolved, setIncomingSosResolved] = useState(false);
+  const [incomingSosResolvedMessage, setIncomingSosResolvedMessage] = useState('');
   const [sosResponding, setSosResponding] = useState(false);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const chatTabFocusedRef = useRef(false);
   const lastChatNotifyKeyRef = useRef('');
   const lastSosAlertRef = useRef('');
+  const incomingSosAlertRef = useRef<IncomingSosAlert | null>(null);
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
   const [broadcastOffers, setBroadcastOffers] = useState<JobOffer[]>([]);
   const [poolOffers, setPoolOffers] = useState<JobOffer[]>([]);
@@ -1346,7 +1353,46 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const clearIncomingSosAlert = useCallback(() => {
     setIncomingSosAlert(null);
     setSosResponding(false);
+    setIncomingSosResolved(false);
+    setIncomingSosResolvedMessage('');
+    setInAppBanner((banner) => (banner?.kind === 'sos' ? null : banner));
   }, []);
+
+  const markIncomingSosResolved = useCallback((message?: string) => {
+    setIncomingSosResolved(true);
+    setIncomingSosResolvedMessage(
+      message?.trim() || 'Emergency resolved — returning to main screen.',
+    );
+    setInAppBanner((banner) => (banner?.kind === 'sos' ? null : banner));
+  }, []);
+
+  const dismissIncomingSosAlert = useCallback(() => {
+    clearIncomingSosAlert();
+  }, [clearIncomingSosAlert]);
+
+  const processIncomingSosClosed = useCallback(async (val: Record<string, unknown>) => {
+    const closed = parseIncomingSosResolved(val);
+    if (!closed) return;
+    const active = incomingSosAlertRef.current;
+    if (!active || active.sosDriverId !== closed.sosDriverId) return;
+    console.log('[Driver] SOS incident closed', {
+      sosDriverId: closed.sosDriverId,
+      resolution: closed.resolution,
+    });
+    markIncomingSosResolved(
+      closed.resolution === 'false_alarm'
+        ? 'False alarm — this emergency is over.'
+        : 'Emergency resolved.',
+    );
+    if (driver?.id) {
+      await clearSosNotification(driver.id);
+      await clearDriverNotification(driver.id);
+    }
+  }, [driver?.id, markIncomingSosResolved]);
+
+  useSafeEffect(() => {
+    incomingSosAlertRef.current = incomingSosAlert;
+  }, [incomingSosAlert], 'Driver-incomingSosAlertRef');
 
   const respondToIncomingSos = useCallback(async () => {
     if (!incomingSosAlert || sosResponding) return;
@@ -1536,6 +1582,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     if (eventType === 'assigned' || eventType === 'accepted' || eventType === 'queued') {
       await clearDriverNotification(driver.id);
+      return;
+    }
+
+    if (eventType === 'sos_resolved') {
+      await processIncomingSosClosed(val);
       return;
     }
 
@@ -1817,6 +1868,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         try {
           const val = snap.val() as Record<string, unknown> | null;
           if (!val || typeof val !== 'object') return;
+          if (parseIncomingSosResolved(val)) {
+            await processIncomingSosClosed(val);
+            return;
+          }
           await processIncomingSosNotification(val, 'notificationSos');
         } catch (err) {
           console.error('[Driver] SOS notification listener', err);
@@ -1828,7 +1883,40 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] SOS notification subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftActive, driver?.id, processIncomingSosNotification], 'Driver-notificationSos');
+  }, [shiftActive, driver?.id, processIncomingSosNotification, processIncomingSosClosed], 'Driver-notificationSos');
+
+  useSafeEffect(() => {
+    if (!shiftActive || !isFirebaseReady || !driver?.companyId || !incomingSosAlert?.sosDriverId) {
+      return;
+    }
+    const sosDriverId = incomingSosAlert.sosDriverId;
+    try {
+      const emergRef = ref(
+        getDatabaseInstance(),
+        `Emergency/${driver.companyId}/${sosDriverId}`,
+      );
+      return onValue(emergRef, (snap) => {
+        const val = snap.val() as Record<string, unknown> | null;
+        if (!val) {
+          markIncomingSosResolved('Emergency resolved.');
+          return;
+        }
+        const status = String(val.status ?? '').toLowerCase();
+        if (status === 'resolved' || status === 'false_alarm') {
+          markIncomingSosResolved(
+            status === 'false_alarm'
+              ? 'False alarm — this emergency is over.'
+              : 'Emergency resolved.',
+          );
+        }
+      }, (err) => {
+        console.error('[Driver] SOS emergency watch', sosDriverId, err);
+      });
+    } catch (err) {
+      console.error('[Driver] SOS emergency watch subscribe failed', err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shiftActive, driver?.companyId, incomingSosAlert?.sosDriverId, markIncomingSosResolved], 'Driver-sosEmergencyWatch');
 
   useSafeEffect(() => {
     if (!driver?.companyId || !activeJob?.id) {
@@ -3872,11 +3960,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         inAppBanner,
         dismissInAppBanner: () => setInAppBanner(null),
         incomingSosAlert,
+        incomingSosResolved,
+        incomingSosResolvedMessage,
         sosResponding,
         openIncomingSosMap,
         handleSosNotificationOpen,
         respondToIncomingSos,
         clearIncomingSosAlert,
+        dismissIncomingSosAlert,
         chatUnreadCount,
         markChatViewed,
         markChatTabBlurred,
