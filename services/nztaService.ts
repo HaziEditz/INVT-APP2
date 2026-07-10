@@ -43,6 +43,60 @@ const DEFAULT: NztaHoursState = {
 const MS_HOUR = 3600000;
 const MS_MINUTE = 60000;
 const LEGACY_MIGRATE_END_TOLERANCE_MS = 120_000;
+/** Genuine 14h sign-out may trail window end by up to one compliance tick. */
+const STALE_LOCKOUT_WINDOW_SLACK_MS = 30 * MS_MINUTE;
+
+export function shiftWindowEndMs(shiftStartAt: number): number {
+  return shiftStartAt + NZTA_MAX_SHIFT_HOURS * MS_HOUR;
+}
+
+/** True when wall-clock time is at or past the 14h limit from shift start. */
+export function isShiftWindowExpired(shiftStartAt: number | null, now = Date.now()): boolean {
+  if (!shiftStartAt) return false;
+  return now >= shiftWindowEndMs(shiftStartAt);
+}
+
+/** Shift-rest lockout set after a limit breach on a window that had already expired. */
+export function isStaleShiftRestLockout(state: NztaHoursState, now = Date.now()): boolean {
+  if (!state.lockoutUntil || state.lockoutUntil <= now) return false;
+  if (state.lockoutReason !== 'shift_rest') return false;
+  const anchor = state.lastShiftStartAt ?? state.shiftStartedAt;
+  if (!anchor) return false;
+  const lockoutSetAt = state.lockoutUntil - NZTA_REST_CONTINUE_HOURS * MS_HOUR;
+  return lockoutSetAt > shiftWindowEndMs(anchor) + STALE_LOCKOUT_WINDOW_SLACK_MS;
+}
+
+/** Drop continuation/lockout state that only exists because an ancient window was resumed. */
+export function healStaleNztaState(state: NztaHoursState, now = Date.now()): NztaHoursState {
+  let next = clearExpiredLockout(state);
+  const anchor = next.lastShiftStartAt ?? next.shiftStartedAt;
+
+  if (isStaleShiftRestLockout(next, now)) {
+    console.log('[NZTA] clearing stale shift-rest lockout from expired window');
+    next = {
+      ...next,
+      lockoutUntil: null,
+      lockoutReason: null,
+      pendingLimitSignOut: null,
+    };
+  }
+
+  if (anchor && isShiftWindowExpired(anchor, now)) {
+    if (next.continuedWindow || (next.shiftStartedAt && next.shiftStartedAt === anchor)) {
+      console.log('[NZTA] resetting expired continued shift window');
+    }
+    next = {
+      ...next,
+      shiftStartedAt: null,
+      shiftWindowEndsAt: null,
+      workedMinutes: 0,
+      continuedWindow: false,
+      pendingLimitSignOut: null,
+    };
+  }
+
+  return next;
+}
 
 function requireNztaDriver(companyId: string, uid: string) {
   const cid = String(companyId || '').trim();
@@ -85,7 +139,12 @@ export async function loadNztaHours(companyId: string, uid: string): Promise<Nzt
   if (!saved) {
     saved = await maybeMigrateLegacyNztaHours(cid, id);
   }
-  return ensureWeekBucket({ ...DEFAULT, ...saved });
+  const merged = ensureWeekBucket({ ...DEFAULT, ...saved });
+  const healed = healStaleNztaState(merged);
+  if (JSON.stringify(healed) !== JSON.stringify(merged)) {
+    await storeData(key, healed);
+  }
+  return healed;
 }
 
 export async function saveNztaHours(companyId: string, uid: string, state: NztaHoursState) {
@@ -151,7 +210,7 @@ export function getShiftLockout(state: NztaHoursState): {
 }
 
 export async function initializeNztaOnLogin(companyId: string, uid: string): Promise<NztaHoursState> {
-  let state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(companyId, uid)));
+  let state = healStaleNztaState(ensureWeekBucket(await loadNztaHours(companyId, uid)));
   const last = await loadLastShiftEnd(companyId, uid);
   const lastEnd = state.lastShiftEndAt ?? last?.shiftEndAt ?? null;
   const lastStart = state.lastShiftStartAt ?? last?.shiftStartAt ?? null;
@@ -159,31 +218,44 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
   const lastWeekly = Math.max(state.weeklyWorkedMinutes, last?.weeklyWorkedMinutes ?? 0);
 
   const hoursSinceEnd = lastEnd ? (Date.now() - lastEnd) / MS_HOUR : Infinity;
+  const canContinueWindow =
+    hoursSinceEnd < NZTA_REST_CONTINUE_HOURS &&
+    !!lastStart &&
+    !isShiftWindowExpired(lastStart);
 
   // Hard lockout after 14h / 70h auto sign-out — cannot start a shift yet.
   if (state.lockoutUntil && state.lockoutUntil > Date.now()) {
-    const next: NztaHoursState = {
-      ...state,
-      lastShiftEndAt: lastEnd,
-      lastShiftStartAt: lastStart,
-      lastWorkedMinutes: lastWorked,
-      weeklyWorkedMinutes: lastWeekly,
-      shiftStartedAt: null,
-      shiftWindowEndsAt: null,
-      continuedWindow: false,
-      pendingLimitSignOut: null,
-    };
-    await saveNztaHours(companyId, uid, next);
-    return next;
+    if (isStaleShiftRestLockout(state)) {
+      state = {
+        ...state,
+        lockoutUntil: null,
+        lockoutReason: null,
+        pendingLimitSignOut: null,
+      };
+    } else {
+      const next: NztaHoursState = {
+        ...state,
+        lastShiftEndAt: lastEnd,
+        lastShiftStartAt: lastStart,
+        lastWorkedMinutes: lastWorked,
+        weeklyWorkedMinutes: lastWeekly,
+        shiftStartedAt: null,
+        shiftWindowEndsAt: null,
+        continuedWindow: false,
+        pendingLimitSignOut: null,
+      };
+      await saveNztaHours(companyId, uid, next);
+      return next;
+    }
   }
 
   let next: NztaHoursState;
-  if (hoursSinceEnd < NZTA_REST_CONTINUE_HOURS && lastStart) {
+  if (canContinueWindow) {
     // Same shift continues — clock resumes from original start.
     next = {
       ...state,
       shiftStartedAt: lastStart,
-      shiftWindowEndsAt: lastStart + NZTA_MAX_SHIFT_HOURS * MS_HOUR,
+      shiftWindowEndsAt: shiftWindowEndMs(lastStart!),
       workedMinutes: lastWorked,
       weeklyWorkedMinutes: lastWeekly,
       lastShiftEndAt: lastEnd,
@@ -220,30 +292,31 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
 
 export async function startShiftClock(companyId: string, uid: string) {
   const { companyId: cid, uid: id } = requireNztaDriver(companyId, uid);
-  let base = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(cid, id)));
+  let base = healStaleNztaState(clearExpiredLockout(ensureWeekBucket(await loadNztaHours(cid, id))));
   if (!base.shiftStartedAt && !base.continuedWindow) {
     base = await initializeNztaOnLogin(cid, id);
   }
+  base = healStaleNztaState(base);
   const lockout = getShiftLockout(base);
   if (lockout.blocked) {
     throw new Error(lockout.message);
   }
 
   const now = Date.now();
-  const resume = !!(base.continuedWindow && base.shiftStartedAt);
+  const resumeAnchor = base.shiftStartedAt ?? base.lastShiftStartAt;
+  const resume =
+    !!base.continuedWindow &&
+    !!resumeAnchor &&
+    !isShiftWindowExpired(resumeAnchor, now);
   const next: NztaHoursState = {
     ...base,
-    shiftStartedAt: resume && base.shiftStartedAt ? base.shiftStartedAt : now,
-    shiftWindowEndsAt:
-      resume && base.shiftWindowEndsAt
-        ? base.shiftWindowEndsAt
-        : (resume && base.shiftStartedAt
-            ? base.shiftStartedAt + NZTA_MAX_SHIFT_HOURS * MS_HOUR
-            : now + NZTA_MAX_SHIFT_HOURS * MS_HOUR),
+    shiftStartedAt: resume ? resumeAnchor! : now,
+    shiftWindowEndsAt: resume ? shiftWindowEndMs(resumeAnchor!) : shiftWindowEndMs(now),
     workedMinutes: resume ? base.workedMinutes : 0,
     breakReminderShown: resume ? base.breakReminderShown : false,
     breakDeferredUntil: resume ? base.breakDeferredUntil : null,
     pendingLimitSignOut: null,
+    continuedWindow: resume,
   };
   await saveNztaHours(cid, id, next);
   return next;

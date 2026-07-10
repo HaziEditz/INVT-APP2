@@ -3,13 +3,13 @@ import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { storeData, STORAGE_KEYS } from '@/lib/storage';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 /** Gate after login: driver must confirm vehicle before main screen. */
 export default function SelectVehicleScreen() {
-  const { driver, profileLoading, refreshDriver, firebaseUser } = useAuth();
+  const { driver, profileLoading, refreshDriver, firebaseUser, signOut } = useAuth();
   const { vehicles, vehiclesLoading, selectedVehicleId, refreshVehicles, startShift, setSelectedVehicleId } =
     useDriver();
   const [pickerVehicle, setPickerVehicle] = useState(selectedVehicleId);
@@ -34,6 +34,15 @@ export default function SelectVehicleScreen() {
       setPickerVehicle('');
     }
   }, [selectedVehicleId, vehicles]);
+
+  const onCancel = useCallback(async () => {
+    if (starting) return;
+    try {
+      await signOut();
+    } catch (err) {
+      console.error('[SelectVehicle] cancel sign-out failed:', err);
+    }
+  }, [signOut, starting]);
 
   const onConfirm = async () => {
     if (!pickerVehicle) return;
@@ -75,7 +84,7 @@ export default function SelectVehicleScreen() {
         loading={starting || vehiclesLoading}
         onSelect={setPickerVehicle}
         onConfirm={onConfirm}
-        onClose={() => undefined}
+        onClose={onCancel}
       />
     </SafeAreaView>
   );
