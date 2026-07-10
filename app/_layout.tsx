@@ -9,6 +9,7 @@ import { PaymentModal } from '@/components/PaymentModal';
 import { PaymentModalFallback } from '@/components/PaymentModalFallback';
 import { EndShiftFlow } from '@/components/EndShiftFlow';
 import { DriverInAppBanner } from '@/components/DriverInAppBanner';
+import { SosNotificationBootstrap } from '@/components/SosNotificationBootstrap';
 import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -50,7 +51,11 @@ export default function RootLayout() {
           <Stack.Screen name="zone-queue" options={{ title: 'Zone Queue' }} />
           <Stack.Screen name="pre-booking" options={{ title: 'Pre-booking' }} />
           <Stack.Screen name="chat" options={{ title: 'Dispatcher Chat' }} />
+          <Stack.Screen name="sos-alert" options={{ title: 'SOS Alert', presentation: 'modal' }} />
         </Stack>
+        <ErrorBoundary name="SosNotificationBootstrap">
+          <SosNotificationBootstrap />
+        </ErrorBoundary>
         <ErrorBoundary name="ShiftKeepAwake">
           <ShiftKeepAwake />
         </ErrorBoundary>

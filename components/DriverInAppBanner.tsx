@@ -9,16 +9,19 @@ function bannerTitle(banner: DriverInAppBannerState): string {
 }
 
 export function DriverInAppBanner() {
-  const { inAppBanner, dismissInAppBanner } = useDriver();
+  const { inAppBanner, dismissInAppBanner, openIncomingSosMap } = useDriver();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   if (!inAppBanner) return null;
 
   const onOpen = () => {
-    dismissInAppBanner();
     if (inAppBanner.kind === 'chat') {
+      dismissInAppBanner();
       router.push('/(tabs)/chat');
+    } else {
+      openIncomingSosMap();
+      dismissInAppBanner();
     }
   };
 
@@ -27,17 +30,17 @@ export function DriverInAppBanner() {
       <View style={[styles.card, inAppBanner.kind === 'sos' && styles.cardSos]}>
         <Pressable
           style={styles.body}
-          onPress={inAppBanner.kind === 'chat' ? onOpen : undefined}
+          onPress={onOpen}
           accessibilityRole="button"
-          accessibilityLabel={inAppBanner.kind === 'chat' ? 'Open chat' : undefined}
+          accessibilityLabel={inAppBanner.kind === 'chat' ? 'Open chat' : 'View SOS on map'}
         >
           <Text style={styles.title}>{bannerTitle(inAppBanner)}</Text>
           <Text style={styles.message} numberOfLines={3}>
             {inAppBanner.message}
           </Text>
-          {inAppBanner.kind === 'chat' ? (
-            <Text style={styles.hint}>Tap to open chat</Text>
-          ) : null}
+          <Text style={styles.hint}>
+            {inAppBanner.kind === 'chat' ? 'Tap to open chat' : 'Tap to view SOS location'}
+          </Text>
         </Pressable>
         <Pressable
           style={styles.closeBtn}

@@ -1,6 +1,7 @@
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { TabSosBar } from '@/components/TabSosBar';
 import { createPreBooking } from '@/lib/dispatchApi';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
@@ -67,8 +68,10 @@ export default function BookingsTab() {
   };
 
   return (
-    <ScrollView style={sharedStyles.screen} contentContainerStyle={sharedStyles.content}>
-      <ScreenHeader title="Add Booking" subtitle="Create a pre-booking for a passenger" />
+    <View style={{ flex: 1 }}>
+      <TabSosBar />
+      <ScrollView style={sharedStyles.screen} contentContainerStyle={sharedStyles.content}>
+        <ScreenHeader title="Add Booking" subtitle="Create a pre-booking for a passenger" />
       <Text style={styles.hint}>Works while on trip — booking goes to company dispatch.</Text>
 
       <Input label="Passenger name" value={form.passengerName} onChangeText={(v) => update('passengerName', v)} />
@@ -117,7 +120,8 @@ export default function BookingsTab() {
 
       <Input label="Notes" value={form.notes} onChangeText={(v) => update('notes', v)} multiline />
       <Button title={loading ? 'Sending…' : 'Send to dispatch'} onPress={onSubmit} disabled={loading} />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 

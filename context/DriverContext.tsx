@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, StageTransportError, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, StageTransportError, syncJobStageOnDispatch } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -38,6 +38,12 @@ import { playInAppNotificationSound, alertDriverToOffer } from '@/lib/notificati
 import { subscribeChat } from '@/lib/chatService';
 import { subscribeDriverQueue, filterLiveDriverQueueOffers } from '@/lib/driverQueue';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
+import {
+  incomingSosAlertToNotificationData,
+  parseIncomingSosAlert,
+  type IncomingSosAlert,
+} from '@/lib/sosAlert';
+import { notifySosAlert } from '@/services/notificationService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import {
   clearOnlinePresence,
@@ -125,7 +131,7 @@ import { router } from 'expo-router';
 
 export type DriverInAppBannerState =
   | { kind: 'chat'; message: string }
-  | { kind: 'sos'; message: string };
+  | { kind: 'sos'; message: string; alert: IncomingSosAlert };
 
 interface DriverContextValue {
   presenceStatus: PresenceDisplayStatus;
@@ -219,6 +225,12 @@ interface DriverContextValue {
   tripOnTheWay: boolean;
   inAppBanner: DriverInAppBannerState | null;
   dismissInAppBanner: () => void;
+  incomingSosAlert: IncomingSosAlert | null;
+  sosResponding: boolean;
+  openIncomingSosMap: () => void;
+  handleSosNotificationOpen: (alert: IncomingSosAlert) => void;
+  respondToIncomingSos: () => Promise<void>;
+  clearIncomingSosAlert: () => void;
   chatUnreadCount: number;
   markChatViewed: () => void;
   markChatTabBlurred: () => void;
@@ -492,6 +504,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [tariffs, setTariffsState] = useState<Tariff[]>([]);
   const [selectedTariff, setSelectedTariffState] = useState<Tariff>(NO_TARIFF_CONFIGURED);
   const [inAppBanner, setInAppBanner] = useState<DriverInAppBannerState | null>(null);
+  const [incomingSosAlert, setIncomingSosAlert] = useState<IncomingSosAlert | null>(null);
+  const [sosResponding, setSosResponding] = useState(false);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const chatTabFocusedRef = useRef(false);
   const lastChatNotifyKeyRef = useRef('');
@@ -1275,6 +1289,60 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     chatTabFocusedRef.current = false;
   }, []);
 
+  const applyIncomingSosAlert = useCallback((alert: IncomingSosAlert) => {
+    setIncomingSosAlert(alert);
+    setInAppBanner({
+      kind: 'sos',
+      message: alert.content || `${alert.driverName} needs help`,
+      alert,
+    });
+    void playInAppNotificationSound('alert');
+    void notifySosAlert(
+      'Driver emergency nearby',
+      alert.content || `${alert.driverName} needs help`,
+      incomingSosAlertToNotificationData(alert),
+    );
+  }, []);
+
+  const openIncomingSosMap = useCallback(() => {
+    if (!incomingSosAlert) return;
+    router.push('/sos-alert');
+  }, [incomingSosAlert]);
+
+  const handleSosNotificationOpen = useCallback((alert: IncomingSosAlert) => {
+    setIncomingSosAlert(alert);
+    setInAppBanner({
+      kind: 'sos',
+      message: alert.content || `${alert.driverName} needs help`,
+      alert,
+    });
+    router.push('/sos-alert');
+  }, []);
+
+  const clearIncomingSosAlert = useCallback(() => {
+    setIncomingSosAlert(null);
+    setSosResponding(false);
+  }, []);
+
+  const respondToIncomingSos = useCallback(async () => {
+    if (!incomingSosAlert || sosResponding) return;
+    setSosResponding(true);
+    try {
+      await respondToDriverSos(incomingSosAlert.sosDriverId);
+      Alert.alert(
+        'Response sent',
+        'Dispatch can see you are going to help.',
+      );
+    } catch (e) {
+      Alert.alert(
+        'Could not respond',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setSosResponding(false);
+    }
+  }, [incomingSosAlert, sosResponding]);
+
   useSafeEffect(() => {
     if (canListenForOffers) return;
     setJobOffer(null);
@@ -1723,13 +1791,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         try {
           const val = snap.val() as Record<string, unknown> | null;
           if (!val || typeof val !== 'object') return;
-          const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
-          if (eventType !== 'driver_sos') return;
-          void playInAppNotificationSound('alert');
-          setInAppBanner({
-            kind: 'sos',
-            message: String(val.content ?? `${val.driverName ?? 'A driver'} has triggered SOS`),
-          });
+          const alert = parseIncomingSosAlert(val);
+          if (!alert) return;
+          applyIncomingSosAlert(alert);
           await clearSosNotification(driver.id);
         } catch (err) {
           console.error('[Driver] SOS notification listener', err);
@@ -1739,7 +1803,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] SOS notification subscribe failed', err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftActive, driver?.id], 'Driver-notificationSos');
+  }, [shiftActive, driver?.id, applyIncomingSosAlert], 'Driver-notificationSos');
 
   useSafeEffect(() => {
     if (!driver?.companyId || !activeJob?.id) {
@@ -3782,6 +3846,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         tripOnTheWay,
         inAppBanner,
         dismissInAppBanner: () => setInAppBanner(null),
+        incomingSosAlert,
+        sosResponding,
+        openIncomingSosMap,
+        handleSosNotificationOpen,
+        respondToIncomingSos,
+        clearIncomingSosAlert,
         chatUnreadCount,
         markChatViewed,
         markChatTabBlurred,

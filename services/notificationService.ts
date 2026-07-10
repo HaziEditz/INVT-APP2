@@ -138,6 +138,34 @@ export async function notifyJobOffer(title: string, body: string): Promise<void>
   }
 }
 
+export async function notifySosAlert(
+  title: string,
+  body: string,
+  data: Record<string, string>,
+): Promise<void> {
+  const Notifications = loadNotifications();
+  if (!Notifications) {
+    return;
+  }
+
+  try {
+    await ensureNotificationChannels();
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: OFFER_SOUND,
+        priority: Notifications.AndroidNotificationPriority?.MAX,
+        data: { ...data, type: 'driver_sos' },
+        ...(Platform.OS === 'android' ? { channelId: 'in-app-alerts' } : {}),
+      },
+      trigger: null,
+    });
+  } catch (err) {
+    console.warn('[Notifications] notifySosAlert failed:', err);
+  }
+}
+
 export async function notifyBreakReminder(
   title: string,
   body: string,

@@ -590,6 +590,13 @@ export async function cancelDriverSos() {
   return driverApiPost<{ ok: boolean; cleared?: boolean }>('/api/driver/sos/cancel', {});
 }
 
+/** Nearby driver is going to help an active SOS. */
+export async function respondToDriverSos(sosDriverId: string) {
+  return driverApiPost<{ ok: boolean; sosId?: string; responderId?: string }>('/api/sos/respond', {
+    sosId: sosDriverId,
+  });
+}
+
 /** Send a chat message to dispatch. */
 export async function sendDriverMessage(message: string) {
   return driverApiPost<{ ok: boolean; messageId?: number }>('/api/driver/message', { message });
