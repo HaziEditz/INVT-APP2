@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, StageTransportError, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, markSosResponderArrived, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, StageTransportError, syncJobStageOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -44,6 +44,11 @@ import {
   parseIncomingSosResolved,
   type IncomingSosAlert,
 } from '@/lib/sosAlert';
+import {
+  getDriverSosResponseState,
+  isSosEmergencyActive,
+  purgeStaleSosNotifications,
+} from '@/lib/sosEmergency';
 import { notifySosAlert } from '@/services/notificationService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import {
@@ -230,9 +235,13 @@ interface DriverContextValue {
   incomingSosResolved: boolean;
   incomingSosResolvedMessage: string;
   sosResponding: boolean;
+  incomingSosResponseCommitted: boolean;
   openIncomingSosMap: () => void;
   handleSosNotificationOpen: (alert: IncomingSosAlert) => void;
   respondToIncomingSos: () => Promise<void>;
+  withdrawIncomingSosResponse: () => Promise<void>;
+  markIncomingSosArrived: () => Promise<void>;
+  exitIncomingSosAlertScreen: () => void;
   clearIncomingSosAlert: () => void;
   dismissIncomingSosAlert: () => void;
   chatUnreadCount: number;
@@ -512,6 +521,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [incomingSosResolved, setIncomingSosResolved] = useState(false);
   const [incomingSosResolvedMessage, setIncomingSosResolvedMessage] = useState('');
   const [sosResponding, setSosResponding] = useState(false);
+  const [incomingSosResponseCommitted, setIncomingSosResponseCommitted] = useState(false);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const chatTabFocusedRef = useRef(false);
   const lastChatNotifyKeyRef = useRef('');
@@ -1317,7 +1327,43 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     source: 'notificationSos' | 'notification',
   ) => {
     const alert = parseIncomingSosAlert(val);
-    if (!alert) return;
+    if (!alert || !driver?.companyId) return;
+    const active = await isSosEmergencyActive(driver.companyId, alert.sosDriverId);
+    if (!active) {
+      console.log('[Driver] ignoring stale SOS notification', {
+        sosDriverId: alert.sosDriverId,
+        incidentId: alert.incidentId,
+        source,
+      });
+      if (driver.id) {
+        await clearSosNotification(driver.id);
+        if (source === 'notification') {
+          await clearDriverNotification(driver.id);
+        }
+      }
+      return;
+    }
+    if (driver.id) {
+      const responseState = await getDriverSosResponseState(
+        driver.companyId,
+        alert.sosDriverId,
+        driver.id,
+      );
+      if (responseState === 'arrived_handled') {
+        console.log('[Driver] ignoring SOS — responder already marked handled', {
+          sosDriverId: alert.sosDriverId,
+          source,
+        });
+        await clearSosNotification(driver.id);
+        if (source === 'notification') {
+          await clearDriverNotification(driver.id);
+        }
+        return;
+      }
+      setIncomingSosResponseCommitted(responseState === 'going_to_help');
+    } else {
+      setIncomingSosResponseCommitted(false);
+    }
     const dedupeKey = `${alert.incidentId}:${alert.timestamp}`;
     if (lastSosAlertRef.current === dedupeKey) return;
     lastSosAlertRef.current = dedupeKey;
@@ -1327,36 +1373,70 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       driverName: alert.driverName,
     });
     applyIncomingSosAlert(alert);
-    if (driver?.id) {
+    if (driver.id) {
       await clearSosNotification(driver.id);
       if (source === 'notification') {
         await clearDriverNotification(driver.id);
       }
     }
-  }, [applyIncomingSosAlert, driver?.id]);
+  }, [applyIncomingSosAlert, driver?.companyId, driver?.id]);
 
   const openIncomingSosMap = useCallback(() => {
     if (!incomingSosAlert) return;
     router.push('/sos-alert');
   }, [incomingSosAlert]);
 
-  const handleSosNotificationOpen = useCallback((alert: IncomingSosAlert) => {
+  const handleSosNotificationOpen = useCallback(async (alert: IncomingSosAlert) => {
+    if (!driver?.companyId) return;
+    const active = await isSosEmergencyActive(driver.companyId, alert.sosDriverId);
+    if (!active) {
+      if (driver.id) {
+        await clearSosNotification(driver.id);
+        await clearDriverNotification(driver.id);
+      }
+      return;
+    }
+    let responseCommitted = false;
+    if (driver.id) {
+      const responseState = await getDriverSosResponseState(
+        driver.companyId,
+        alert.sosDriverId,
+        driver.id,
+      );
+      if (responseState === 'arrived_handled') {
+        await clearSosNotification(driver.id);
+        await clearDriverNotification(driver.id);
+        return;
+      }
+      responseCommitted = responseState === 'going_to_help';
+    }
     setIncomingSosAlert(alert);
+    setIncomingSosResponseCommitted(responseCommitted);
     setInAppBanner({
       kind: 'sos',
       message: alert.content || `${alert.driverName} needs help`,
       alert,
     });
     router.push('/sos-alert');
-  }, []);
+  }, [driver?.companyId, driver?.id]);
 
   const clearIncomingSosAlert = useCallback(() => {
     setIncomingSosAlert(null);
     setSosResponding(false);
+    setIncomingSosResponseCommitted(false);
     setIncomingSosResolved(false);
     setIncomingSosResolvedMessage('');
     setInAppBanner((banner) => (banner?.kind === 'sos' ? null : banner));
   }, []);
+
+  const exitIncomingSosAlertScreen = useCallback(() => {
+    clearIncomingSosAlert();
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/(tabs)');
+  }, [clearIncomingSosAlert]);
 
   const markIncomingSosResolved = useCallback((message?: string) => {
     setIncomingSosResolved(true);
@@ -1394,15 +1474,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     incomingSosAlertRef.current = incomingSosAlert;
   }, [incomingSosAlert], 'Driver-incomingSosAlertRef');
 
+  useSafeEffect(() => {
+    if (!shiftActive || !driver?.id || !driver.companyId) return;
+    void purgeStaleSosNotifications(driver.companyId, driver.id);
+  }, [shiftActive, driver?.id, driver?.companyId], 'Driver-purgeStaleSosNotifications');
+
   const respondToIncomingSos = useCallback(async () => {
-    if (!incomingSosAlert || sosResponding) return;
+    if (!incomingSosAlert || sosResponding || incomingSosResponseCommitted) return;
     setSosResponding(true);
     try {
       await respondToDriverSos(incomingSosAlert.sosDriverId);
-      Alert.alert(
-        'Response sent',
-        'Dispatch can see you are going to help.',
-      );
+      setIncomingSosResponseCommitted(true);
     } catch (e) {
       Alert.alert(
         'Could not respond',
@@ -1411,7 +1493,43 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     } finally {
       setSosResponding(false);
     }
-  }, [incomingSosAlert, sosResponding]);
+  }, [incomingSosAlert, sosResponding, incomingSosResponseCommitted]);
+
+  const withdrawIncomingSosResponse = useCallback(async () => {
+    if (!incomingSosAlert || sosResponding) return;
+    setSosResponding(true);
+    try {
+      if (incomingSosResponseCommitted) {
+        await withdrawSosResponse(incomingSosAlert.sosDriverId);
+      }
+      exitIncomingSosAlertScreen();
+    } catch (e) {
+      Alert.alert(
+        'Could not cancel response',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setSosResponding(false);
+    }
+  }, [incomingSosAlert, sosResponding, incomingSosResponseCommitted, exitIncomingSosAlertScreen]);
+
+  const markIncomingSosArrived = useCallback(async () => {
+    if (!incomingSosAlert || sosResponding) return;
+    setSosResponding(true);
+    try {
+      if (incomingSosResponseCommitted) {
+        await markSosResponderArrived(incomingSosAlert.sosDriverId);
+      }
+      markIncomingSosResolved('You marked this emergency as handled.');
+    } catch (e) {
+      Alert.alert(
+        'Could not update response',
+        e instanceof Error ? e.message : 'Try again',
+      );
+    } finally {
+      setSosResponding(false);
+    }
+  }, [incomingSosAlert, sosResponding, incomingSosResponseCommitted, markIncomingSosResolved]);
 
   useSafeEffect(() => {
     if (canListenForOffers) return;
@@ -3963,9 +4081,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         incomingSosResolved,
         incomingSosResolvedMessage,
         sosResponding,
+        incomingSosResponseCommitted,
         openIncomingSosMap,
         handleSosNotificationOpen,
         respondToIncomingSos,
+        withdrawIncomingSosResponse,
+        markIncomingSosArrived,
+        exitIncomingSosAlertScreen,
         clearIncomingSosAlert,
         dismissIncomingSosAlert,
         chatUnreadCount,

@@ -15,8 +15,11 @@ export default function SosAlertScreen() {
     incomingSosResolved,
     incomingSosResolvedMessage,
     sosResponding,
+    incomingSosResponseCommitted,
     respondToIncomingSos,
-    dismissIncomingSosAlert,
+    withdrawIncomingSosResponse,
+    markIncomingSosArrived,
+    exitIncomingSosAlertScreen,
     clearIncomingSosAlert,
   } = useDriver();
 
@@ -81,21 +84,46 @@ export default function SosAlertScreen() {
         </Text>
         <Text style={styles.location}>{locationAddress || content || 'Location unavailable'}</Text>
 
-        <Button
-          title={sosResponding ? 'Sending response…' : 'Going to help'}
-          variant="danger"
-          disabled={sosResponding}
-          onPress={() => void respondToIncomingSos()}
-        />
-        <Button
-          title="Clear"
-          variant="secondary"
-          style={{ marginTop: 10 }}
-          onPress={() => {
-            dismissIncomingSosAlert();
-            router.replace('/(tabs)');
-          }}
-        />
+        {incomingSosResponseCommitted ? (
+          <>
+            <View style={styles.respondingBanner}>
+              <Text style={styles.respondingTitle}>You are responding</Text>
+              <Text style={styles.respondingHint}>
+                Dispatch can see you on the way. Mark handled when you arrive, or cancel if you can no longer help.
+              </Text>
+            </View>
+            <Button
+              title={sosResponding ? 'Updating…' : 'Arrived / Handled'}
+              variant="primary"
+              disabled={sosResponding}
+              onPress={() => void markIncomingSosArrived()}
+            />
+            <Button
+              title={sosResponding ? 'Cancelling…' : 'Cancel response'}
+              variant="secondary"
+              style={{ marginTop: 10 }}
+              disabled={sosResponding}
+              onPress={() => void withdrawIncomingSosResponse()}
+            />
+          </>
+        ) : (
+          <>
+            <Button
+              title={sosResponding ? 'Sending response…' : 'Going to help'}
+              variant="danger"
+              disabled={sosResponding}
+              onPress={() => void respondToIncomingSos()}
+            />
+            <Button
+              title="Dismiss"
+              variant="secondary"
+              style={{ marginTop: 10 }}
+              disabled={sosResponding}
+              onPress={() => exitIncomingSosAlertScreen()}
+            />
+          </>
+        )}
+
         {sosResponding ? (
           <ActivityIndicator color={Colors.accent} style={{ marginTop: 12 }} />
         ) : null}
@@ -134,4 +162,15 @@ const styles = StyleSheet.create({
   title: { color: Colors.danger, fontSize: 18, fontWeight: '800' },
   meta: { color: Colors.text, fontSize: 15, fontWeight: '700' },
   location: { color: Colors.textMuted, fontSize: 14, marginBottom: 8 },
+  respondingBanner: {
+    backgroundColor: Colors.success + '22',
+    borderColor: Colors.success,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 4,
+    gap: 4,
+  },
+  respondingTitle: { color: Colors.success, fontSize: 16, fontWeight: '800' },
+  respondingHint: { color: Colors.textMuted, fontSize: 13, lineHeight: 18 },
 });

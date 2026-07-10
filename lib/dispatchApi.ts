@@ -597,6 +597,20 @@ export async function respondToDriverSos(sosDriverId: string) {
   });
 }
 
+/** Nearby driver withdraws from an SOS they committed to respond to. */
+export async function withdrawSosResponse(sosDriverId: string) {
+  return driverApiPost<{ ok: boolean; sosId?: string; responderId?: string }>('/api/sos/respond/withdraw', {
+    sosId: sosDriverId,
+  });
+}
+
+/** Nearby driver marked arrived / handled — clears their responder commitment. */
+export async function markSosResponderArrived(sosDriverId: string) {
+  return driverApiPost<{ ok: boolean; sosId?: string; responderId?: string }>('/api/sos/respond/arrived', {
+    sosId: sosDriverId,
+  });
+}
+
 /** Send a chat message to dispatch. */
 export async function sendDriverMessage(message: string) {
   return driverApiPost<{ ok: boolean; messageId?: number }>('/api/driver/message', { message });
