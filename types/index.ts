@@ -56,6 +56,8 @@ export interface JobOffer {
   fixedFare?: number;
   estimatedFare?: number;
   estimatedDistanceKm?: number;
+  /** Dispatch fixed-price job — meter must stay off. */
+  isFixedPrice?: boolean;
   paymentType?: PaymentType;
   isAcc?: boolean;
   isTotalMobility?: boolean;

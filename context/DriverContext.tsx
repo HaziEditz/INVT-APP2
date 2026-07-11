@@ -49,7 +49,16 @@ import {
   isSosEmergencyActive,
   purgeStaleSosNotifications,
 } from '@/lib/sosEmergency';
-import { isFixedPriceBooking, readFixedFareFromBooking } from '@/lib/tariffResolve';
+import {
+  isFixedPriceBooking,
+  readBookingTariffHints,
+  readFixedFareAmount,
+  readFixedFareFromBooking,
+  resolveTariffFromList,
+  sanitizeMeterTariff,
+  sanitizeSelectedTariff,
+  shouldStartMeterForBooking,
+} from '@/lib/tariffResolve';
 import { notifySosAlert } from '@/services/notificationService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import {
@@ -69,12 +78,6 @@ import {
   FirebaseDriverStatus,
 } from '@/services/presenceService';
 import { subscribeCompanyTariffs } from '@/lib/companyTariffs';
-import {
-  readBookingTariffHints,
-  resolveTariffFromList,
-  sanitizeMeterTariff,
-  sanitizeSelectedTariff,
-} from '@/lib/tariffResolve';
 import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
 import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
@@ -321,6 +324,13 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
   const allNotes = collectJobNotes(val);
   const primaryNote = allNotes.map((n) => n.text).join('\n\n') || undefined;
   const rawFare = val.fare ?? val.jobfare ?? val.jobFare;
+  const offerFare =
+    parseFiniteFare(val.CustomeRate) ??
+    parseFiniteFare(val.customRate) ??
+    parseFiniteFare(val.jobFare) ??
+    parseFiniteFare(val.fixedFare) ??
+    parseFiniteFare(rawFare);
+  const fixedPrice = isFixedPriceBooking(val);
   const rawPayment = val.payment ?? val.jobpayment ?? val.paymentType ?? val.PaymentType ?? val.paymentMethod;
   const rawId = val.id ?? val.jobId ?? val.joboffer ?? val.bookingid ?? val.bookingId ?? val.BookingId ?? '';
   const idStr = normalizeBookingId(rawId);
@@ -343,14 +353,9 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
         ? String(val.phone ?? val.JobphoneNo)
         : undefined,
     passengerEmail: val.passengerEmail ? String(val.passengerEmail) : undefined,
-    fixedFare:
-      val.fixedFare != null
-        ? parseFiniteFare(val.fixedFare)
-        : parseFiniteFare(rawFare),
-    estimatedFare:
-      val.estimatedFare != null
-        ? parseFiniteFare(val.estimatedFare)
-        : parseFiniteFare(rawFare),
+    fixedFare: offerFare,
+    estimatedFare: offerFare,
+    isFixedPrice: fixedPrice,
     estimatedDistanceKm:
       val.estimatedDistanceKm != null
         ? Number(val.estimatedDistanceKm)
@@ -421,6 +426,17 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
   };
 }
 
+function bookingRawSeedFromOffer(offer: JobOffer): Record<string, unknown> | null {
+  if (!offer.isFixedPrice) return null;
+  return {
+    TarriffId: '-1',
+    TarriffType: 'Fixed',
+    tarriffType: 'Fixed',
+    CustomeRate: offer.fixedFare ?? offer.estimatedFare ?? offer.fare ?? '',
+    jobFare: offer.fixedFare ?? offer.estimatedFare ?? offer.fare ?? '',
+  };
+}
+
 function resolveTariffForDriver(
   tariffs: Tariff[],
   hints?: { id?: string; name?: string } | null,
@@ -467,6 +483,9 @@ function buildNotificationFieldPatch(val: Record<string, unknown>): Partial<JobO
   if (fare != null) {
     patch.fixedFare = fare;
     patch.estimatedFare = fare;
+  }
+  if (isFixedPriceBooking(val)) {
+    patch.isFixedPrice = true;
   }
   const pay = readPaymentFromRecord(val);
   if (pay) patch.paymentType = pay as PaymentType;
@@ -2134,6 +2153,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         patch.estimatedFare = fareFromRaw;
         patch.fare = fareFromRaw;
       }
+      if (isFixedPriceBooking(update.raw)) {
+        patch.isFixedPrice = true;
+      }
       if (!patch.paymentType && prevRaw) {
         const payFromRaw = readPaymentFromRecord(update.raw);
         const prevPay = readPaymentFromRecord(prevRaw);
@@ -2881,6 +2903,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         const job = defaultActiveJob(offerSnapshot);
         job.originalStatus = offerSnapshot.originalStatus ?? 'pending';
         job.updateSeq = result.version;
+        const rawSeed = bookingRawSeedFromOffer(job);
+        if (rawSeed) bookingRawRef.current = rawSeed;
         setActiveJob(job);
         activeJobIdRef.current = job.id;
         await storeData(STORAGE_KEYS.activeJob, job);
@@ -2945,6 +2969,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const job = defaultActiveJob(offerSnapshot);
     job.originalStatus = offerSnapshot.originalStatus ?? 'pending';
     job.updateSeq = acceptResult?.version ?? acceptResult?.booking?.version;
+    const rawSeed = bookingRawSeedFromOffer(job);
+    if (rawSeed) bookingRawRef.current = rawSeed;
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
@@ -3054,6 +3080,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     removeBroadcastOffer(offer.id);
     const job = defaultActiveJob(offer);
     job.originalStatus = offer.originalStatus ?? 'pending';
+    const rawSeed = bookingRawSeedFromOffer(job);
+    if (rawSeed) bookingRawRef.current = rawSeed;
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
@@ -3071,6 +3099,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const startMeterForJob = () => {
+    if (!shouldStartMeterForBooking(bookingRawRef.current, activeJobRef.current)) {
+      const fixedFare = readFixedFareAmount(bookingRawRef.current, activeJobRef.current ?? undefined);
+      if (fixedFare != null && activeJobRef.current) {
+        setActiveJob((prev) => {
+          if (!prev) return prev;
+          const updated = {
+            ...prev,
+            fare: fixedFare,
+            fixedFare,
+            estimatedFare: fixedFare,
+            isFixedPrice: true,
+          };
+          persistActiveJobAsync(updated);
+          return updated;
+        });
+      }
+      return;
+    }
     const tariffs = tariffsListRef.current;
     const fromBooking = bookingRawRef.current
       ? resolveTariffFromList(tariffs, readBookingTariffHints(bookingRawRef.current))
@@ -3170,12 +3216,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       let onboardFixedFare: number | undefined;
       if (nextStage === 'onboard') {
         stepTimes.onboardAt = now;
-        if (isFixedPriceBooking(bookingRawRef.current)) {
-          onboardFixedFare =
-            readFixedFareFromBooking(bookingRawRef.current) ??
-            parseFiniteFare(activeJob.fixedFare) ??
-            parseFiniteFare(activeJob.estimatedFare) ??
-            parseFiniteFare(activeJob.fare);
+        if (!shouldStartMeterForBooking(bookingRawRef.current, activeJob)) {
+          onboardFixedFare = readFixedFareAmount(bookingRawRef.current, activeJob);
         } else {
           startMeterForJob();
         }
@@ -3189,6 +3231,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         fare: onboardFixedFare ?? activeJob.fare,
         fixedFare: onboardFixedFare ?? activeJob.fixedFare,
         estimatedFare: onboardFixedFare ?? activeJob.estimatedFare,
+        isFixedPrice: activeJob.isFixedPrice || !shouldStartMeterForBooking(bookingRawRef.current, activeJob),
         distanceKm: activeJob.distanceKm,
       };
       setActiveJob(updated);
@@ -3218,15 +3261,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           if (nextStage === 'arrived') stepTimes.arrivedAt = now;
           if (nextStage === 'onboard') {
             stepTimes.onboardAt = now;
-            if (!isFixedPriceBooking(bookingRawRef.current)) {
+            if (shouldStartMeterForBooking(bookingRawRef.current, activeJob)) {
               startMeterForJob();
             }
           }
-          const recoveredFixedFare = isFixedPriceBooking(bookingRawRef.current)
-            ? readFixedFareFromBooking(bookingRawRef.current) ??
-              parseFiniteFare(activeJob.fixedFare) ??
-              parseFiniteFare(activeJob.estimatedFare) ??
-              parseFiniteFare(activeJob.fare)
+          const recoveredFixedFare = !shouldStartMeterForBooking(bookingRawRef.current, activeJob)
+            ? readFixedFareAmount(bookingRawRef.current, activeJob)
             : undefined;
           const recovered: ActiveJob = {
             ...activeJob,
@@ -3236,6 +3276,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             fare: recoveredFixedFare ?? activeJob.fare,
             fixedFare: recoveredFixedFare ?? activeJob.fixedFare,
             estimatedFare: recoveredFixedFare ?? activeJob.estimatedFare,
+            isFixedPrice: activeJob.isFixedPrice || !shouldStartMeterForBooking(bookingRawRef.current, activeJob),
             distanceKm: activeJob.distanceKm,
             ...(verified.updateSeq != null ? { updateSeq: verified.updateSeq } : {}),
           };

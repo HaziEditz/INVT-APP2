@@ -7,7 +7,9 @@ export function readBookingTariffHints(
 ): { id?: string; name?: string } {
   if (!raw || typeof raw !== 'object') return {};
   const id = String(raw.TarriffId ?? raw.TariffId ?? raw.tariffId ?? '').trim();
-  const nameRaw = String(raw.TarriffType ?? raw.TariffName ?? raw.tariffName ?? '').trim();
+  const nameRaw = String(
+    raw.TarriffType ?? raw.TariffType ?? raw.tarriffType ?? raw.TariffName ?? raw.tariffName ?? '',
+  ).trim();
   const name = nameRaw && !isForbiddenPlaceholderTariffName(nameRaw) ? nameRaw : undefined;
   return { id: id || undefined, name };
 }
@@ -19,9 +21,22 @@ export function isFixedPriceBooking(
   if (!raw || typeof raw !== 'object') return false;
   const id = String(raw.TarriffId ?? raw.TariffId ?? raw.tariffId ?? '').trim();
   if (id === '-1') return true;
-  const type = String(raw.TarriffType ?? raw.TariffType ?? '').trim().toLowerCase();
+  const type = String(
+    raw.TarriffType ?? raw.TariffType ?? raw.tarriffType ?? '',
+  )
+    .trim()
+    .toLowerCase();
   const name = String(raw.TarriffName ?? raw.TariffName ?? raw.tariffName ?? '').trim().toLowerCase();
   return type === 'fixed' || name === 'fixed';
+}
+
+/** Whether the GPS meter should run (false for fixed-price jobs). */
+export function shouldStartMeterForBooking(
+  raw: Record<string, unknown> | null | undefined,
+  job?: { isFixedPrice?: boolean } | null,
+): boolean {
+  if (job?.isFixedPrice) return false;
+  return !isFixedPriceBooking(raw);
 }
 
 /** Fixed fare amount from booking record, if present. */
@@ -31,12 +46,28 @@ export function readFixedFareFromBooking(
   if (!raw || typeof raw !== 'object') return undefined;
   return parseFiniteFare(
     raw.CustomeRate ??
+      raw.customRate ??
       raw.CustomRate ??
       raw.RideCost ??
       raw.EstimatedFare ??
       raw.estimatedFare ??
+      raw.jobFare ??
       raw.fixedFare ??
       raw.Fare,
+  );
+}
+
+/** Best-effort fixed fare from booking record and/or active job snapshot. */
+export function readFixedFareAmount(
+  raw: Record<string, unknown> | null | undefined,
+  job?: { fixedFare?: number; estimatedFare?: number; fare?: number } | null,
+): number | undefined {
+  const fromRaw = readFixedFareFromBooking(raw);
+  if (fromRaw != null) return fromRaw;
+  return (
+    parseFiniteFare(job?.fixedFare) ??
+    parseFiniteFare(job?.estimatedFare) ??
+    parseFiniteFare(job?.fare)
   );
 }
 
@@ -48,11 +79,11 @@ export function resolveTariffFromList(
   if (!tariffs.length || !hints) return null;
   const id = hints.id?.trim();
   const name = hints.name?.trim();
-  if (id) {
+  if (id && id !== '-1') {
     const byId = tariffs.find((t) => t.id === id || String(t.id) === id);
     if (byId) return byId;
   }
-  if (name && !isForbiddenPlaceholderTariffName(name)) {
+  if (name && !isForbiddenPlaceholderTariffName(name) && name.toLowerCase() !== 'fixed') {
     const lower = name.toLowerCase();
     const byName = tariffs.find((t) => t.name.trim().toLowerCase() === lower);
     if (byName) return byName;
