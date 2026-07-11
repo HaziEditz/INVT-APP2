@@ -49,6 +49,7 @@ import {
   isSosEmergencyActive,
   purgeStaleSosNotifications,
 } from '@/lib/sosEmergency';
+import { isFixedPriceBooking, readFixedFareFromBooking } from '@/lib/tariffResolve';
 import { notifySosAlert } from '@/services/notificationService';
 import { enqueueOfflineItem, flushOfflineQueue, subscribeConnectivity } from '@/services/offlineService';
 import {
@@ -3166,9 +3167,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const now = Date.now();
       const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
       if (nextStage === 'arrived') stepTimes.arrivedAt = now;
+      let onboardFixedFare: number | undefined;
       if (nextStage === 'onboard') {
         stepTimes.onboardAt = now;
-        startMeterForJob();
+        if (isFixedPriceBooking(bookingRawRef.current)) {
+          onboardFixedFare =
+            readFixedFareFromBooking(bookingRawRef.current) ??
+            parseFiniteFare(activeJob.fixedFare) ??
+            parseFiniteFare(activeJob.estimatedFare) ??
+            parseFiniteFare(activeJob.fare);
+        } else {
+          startMeterForJob();
+        }
       }
 
       const updated: ActiveJob = {
@@ -3176,7 +3186,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         stage: nextStage,
         stepTimes,
         meterSnapshot: activeJob.meterSnapshot,
-        fare: activeJob.fare,
+        fare: onboardFixedFare ?? activeJob.fare,
+        fixedFare: onboardFixedFare ?? activeJob.fixedFare,
+        estimatedFare: onboardFixedFare ?? activeJob.estimatedFare,
         distanceKm: activeJob.distanceKm,
       };
       setActiveJob(updated);
@@ -3206,14 +3218,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           if (nextStage === 'arrived') stepTimes.arrivedAt = now;
           if (nextStage === 'onboard') {
             stepTimes.onboardAt = now;
-            startMeterForJob();
+            if (!isFixedPriceBooking(bookingRawRef.current)) {
+              startMeterForJob();
+            }
           }
+          const recoveredFixedFare = isFixedPriceBooking(bookingRawRef.current)
+            ? readFixedFareFromBooking(bookingRawRef.current) ??
+              parseFiniteFare(activeJob.fixedFare) ??
+              parseFiniteFare(activeJob.estimatedFare) ??
+              parseFiniteFare(activeJob.fare)
+            : undefined;
           const recovered: ActiveJob = {
             ...activeJob,
             stage: nextStage,
             stepTimes,
             meterSnapshot: activeJob.meterSnapshot,
-            fare: activeJob.fare,
+            fare: recoveredFixedFare ?? activeJob.fare,
+            fixedFare: recoveredFixedFare ?? activeJob.fixedFare,
+            estimatedFare: recoveredFixedFare ?? activeJob.estimatedFare,
             distanceKm: activeJob.distanceKm,
             ...(verified.updateSeq != null ? { updateSeq: verified.updateSeq } : {}),
           };

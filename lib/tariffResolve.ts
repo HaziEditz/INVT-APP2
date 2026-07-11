@@ -1,5 +1,5 @@
 import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
-import { calcMeterBreakdown } from '@/lib/tariffs';
+import { calcMeterBreakdown, parseFiniteFare } from '@/lib/tariffs';
 import { MeterState, Tariff } from '@/types';
 
 export function readBookingTariffHints(
@@ -10,6 +10,34 @@ export function readBookingTariffHints(
   const nameRaw = String(raw.TarriffType ?? raw.TariffName ?? raw.tariffName ?? '').trim();
   const name = nameRaw && !isForbiddenPlaceholderTariffName(nameRaw) ? nameRaw : undefined;
   return { id: id || undefined, name };
+}
+
+/** True when booking is fixed-price (tariff id -1 / name Fixed). */
+export function isFixedPriceBooking(
+  raw: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const id = String(raw.TarriffId ?? raw.TariffId ?? raw.tariffId ?? '').trim();
+  if (id === '-1') return true;
+  const type = String(raw.TarriffType ?? raw.TariffType ?? '').trim().toLowerCase();
+  const name = String(raw.TarriffName ?? raw.TariffName ?? raw.tariffName ?? '').trim().toLowerCase();
+  return type === 'fixed' || name === 'fixed';
+}
+
+/** Fixed fare amount from booking record, if present. */
+export function readFixedFareFromBooking(
+  raw: Record<string, unknown> | null | undefined,
+): number | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  return parseFiniteFare(
+    raw.CustomeRate ??
+      raw.CustomRate ??
+      raw.RideCost ??
+      raw.EstimatedFare ??
+      raw.estimatedFare ??
+      raw.fixedFare ??
+      raw.Fare,
+  );
 }
 
 /** Resolve a company tariff from booking hints — never returns a forbidden placeholder name. */
