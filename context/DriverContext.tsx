@@ -369,7 +369,7 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     source: val.source ? String(val.source) : undefined,
     notes: primaryNote ?? (val.notes ? String(val.notes) : undefined),
     allNotes: allNotes.length ? allNotes : undefined,
-    dispatcherName: val.dispatcherName ? String(val.dispatcherName) : undefined,
+    dispatcherName: String(val.DispatcherName ?? val.dispatcherName ?? '').trim() || undefined,
     pickupLat: val.pickupLat != null ? Number(val.pickupLat) : val.lat != null ? Number(val.lat) : undefined,
     pickupLng: val.pickupLng != null ? Number(val.pickupLng) : val.lng != null ? Number(val.lng) : undefined,
     dropoffLat: val.dropoffLat != null ? Number(val.dropoffLat) : undefined,

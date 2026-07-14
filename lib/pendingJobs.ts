@@ -64,6 +64,8 @@ export function parseJobOfferRecord(
       return Number.isFinite(n) ? n : Date.now();
     })(),
     source: String(val.BookingSource ?? val.CreatedBy ?? val.source ?? 'dispatch'),
+    dispatcherName:
+      String(val.DispatcherName ?? val.dispatcherName ?? '').trim() || undefined,
     notes: primaryNote,
     allNotes: allNotes.length ? allNotes : undefined,
     pickupLat: pickLl.lat,
