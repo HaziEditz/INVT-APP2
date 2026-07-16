@@ -7,21 +7,33 @@ export type ActiveJobWithdrawReason =
   | 'current-cleared'
   | 'currentJobId-cleared';
 
+/** Presence / offer-node signals — do NOT prove job ownership was withdrawn. */
+export function isPresenceOnlyActiveJobSignal(reason: ActiveJobWithdrawReason): boolean {
+  return (
+    reason === 'current-cleared' ||
+    reason === 'currentJobId-cleared' ||
+    reason === 'jobs-node-deleted'
+  );
+}
+
 function readCurrentJobId(node: Record<string, unknown>): string {
   return String(node.currentJobId ?? node.jobId ?? node.bookingId ?? node.joboffer ?? '').trim();
 }
 
 /**
- * Watch Firebase paths that prove a driver no longer owns a booking:
- * - jobs/{cid}/{vid}/{driverId}/{bookingId} removed
- * - online/{cid}/{vid}/current currentJobId cleared or changed
+ * Watch Firebase paths that *may* indicate a booking is no longer on this vehicle.
+ *
+ * Important: ghost-presence cleanup deletes `online/{cid}/{vid}` while the job can
+ * still be Assigned/Active on the server. Offer cleanup also deletes `jobs/...`.
+ * Callers must reconcile against booking ownership (allbookings / active-bookings)
+ * before clearing local activeJob — never treat these signals as proof of withdraw.
  */
 export function subscribeActiveJobFirebaseWatch(
   companyId: string,
   vehicleId: string,
   driverId: string,
   bookingId: string,
-  onWithdrawn: (reason: ActiveJobWithdrawReason) => void,
+  onSignal: (reason: ActiveJobWithdrawReason) => void,
 ): () => void {
   const db = getDatabaseInstance();
   const unsubs: Array<() => void> = [];
@@ -30,7 +42,7 @@ export function subscribeActiveJobFirebaseWatch(
   unsubs.push(
     onValue(jobsRef, (snap) => {
       if (!snap.exists()) {
-        onWithdrawn('jobs-node-deleted');
+        onSignal('jobs-node-deleted');
       }
     }),
   );
@@ -39,12 +51,12 @@ export function subscribeActiveJobFirebaseWatch(
   unsubs.push(
     onValue(currentRef, (snap) => {
       if (!snap.exists()) {
-        onWithdrawn('current-cleared');
+        onSignal('current-cleared');
         return;
       }
       const val = snap.val();
       if (!val || typeof val !== 'object') {
-        onWithdrawn('current-cleared');
+        onSignal('current-cleared');
         return;
       }
       const cur = val as Record<string, unknown>;
@@ -54,7 +66,7 @@ export function subscribeActiveJobFirebaseWatch(
       }
       const currentJobId = readCurrentJobId(cur);
       if (!currentJobId || currentJobId === '0' || !jobIdsMatch(currentJobId, bookingId)) {
-        onWithdrawn('currentJobId-cleared');
+        onSignal('currentJobId-cleared');
       }
     }),
   );

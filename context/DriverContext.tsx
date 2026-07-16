@@ -21,6 +21,7 @@ import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnD
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
+  localActiveJobLostOnServer,
   localStageFromServerStatus,
   resolveServerBookingState,
   serverStatusIndex,
@@ -2369,20 +2370,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (isReturnedToDispatchPool(server.status)) {
-        if (hailTrip) {
+      const ownership = localActiveJobLostOnServer(server.status, server.driverId, driver.id);
+      if (ownership.lost) {
+        if (hailTrip && isReturnedToDispatchPool(server.status)) {
           console.log(`[Driver] ${reason}: hail #${job.id} returned on dispatch — clearing hail trip`);
         }
-        console.log(`[Driver] ${reason}: clearing stale local job #${job.id} — server=${server.status}`);
-        await clearStaleActiveJobLocal('This booking was returned to dispatch.');
-        return;
-      }
-
-      if (isTerminalBookingStatus(server.status)) {
-        console.log(`[Driver] ${reason}: clearing stale local job #${job.id} — server=${server.status}`);
-        await clearStaleActiveJobLocal(
-          `Job #${job.id} is ${server.status} on dispatch. You can end shift or take new jobs.`,
+        console.log(
+          `[Driver] ${reason}: clearing stale local job #${job.id} — ${ownership.reason} server=${server.status}`,
         );
+        const detail = isTerminalBookingStatus(server.status)
+          ? `Job #${job.id} is ${server.status} on dispatch. You can end shift or take new jobs.`
+          : 'This booking was returned to dispatch.';
+        await clearStaleActiveJobLocal(detail);
         return;
       }
 
@@ -2455,17 +2454,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       activeJob.id,
       (reason) => {
         if (!activeJobIdRef.current || !jobIdsMatch(activeJobIdRef.current, activeJob.id)) return;
-        // Hail trips stamp currentJobId on the GPS heartbeat (~15s). Until then, or when
-        // liveMeterPresence briefly clears the field, ignore this false withdraw only.
-        // Real cancellations still arrive via allbookings subscribe, job_cancelled notification,
-        // refreshActiveJobFromServer terminal status, and jobs-node-deleted below.
-        if (reason === 'currentJobId-cleared' && isHailTripJob(activeJobRef.current, hailActiveRef.current)) {
-          console.log(`[Driver] ignoring stale currentJobId withdraw during hail #${activeJob.id}`);
-          return;
-        }
-        console.log(`[Driver] active job withdrawn via Firebase (${reason}) — clearing #${activeJob.id}`);
-        void playInAppNotificationSound('cancel');
-        void clearStaleActiveJobLocal('This booking was returned to dispatch.', { silent: true });
+        // Presence wipe / offer-node delete are NOT proof the job left this driver.
+        // Ghost-presence sweeper deletes online/{cid}/{vid} while allbookings can still
+        // show Assigned/Active. Reconcile ownership, then repair presence if still ours.
+        // Real withdraws still clear via job_removed / job_cancelled / subscribeBooking /
+        // refreshActiveJobFromServer ownership checks.
+        console.log(
+          `[Driver] active-job Firebase signal (${reason}) for #${activeJob.id} — reconciling ownership (not clearing on presence alone)`,
+        );
+        void (async () => {
+          await refreshActiveJobRef.current?.(`presence-signal:${reason}`);
+          if (activeJobIdRef.current && jobIdsMatch(activeJobIdRef.current, activeJob.id)) {
+            void repairPresenceRef.current?.(`presence-signal:${reason}`);
+          }
+        })();
       },
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2944,7 +2946,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       queued = !!(result?.queued || result?.status === 'Queued');
     } catch (err) {
       if (isDispatchAcceptRetryable(err)) {
-        await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offerSnapshot.id } });
+        await enqueueOfflineItem({
+          type: 'job_update',
+          payload: {
+            action: 'accept',
+            jobId: offerSnapshot.id,
+            driverId: driver.id,
+            companyId: driver.companyId,
+          },
+        });
         Alert.alert('Could not accept', 'The server did not confirm this job. It was queued for retry when you are back online.');
       } else {
         const msg = err instanceof DispatchApiError
@@ -3012,7 +3022,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       } catch {
         await enqueueOfflineItem({
           type: 'job_update',
-          payload: { action: 'recall', jobId: offerSnapshot.id },
+          payload: {
+            action: 'recall',
+            jobId: offerSnapshot.id,
+            driverId: driver.id,
+            companyId: driver.companyId,
+            originalStatus: offerSnapshot.originalStatus ?? 'pending',
+          },
         });
       }
       setQueuedOffers((prev) => prev.filter((o) => o.id !== offerSnapshot.id));
@@ -3024,7 +3040,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           timedOut,
         });
       } catch {
-        await enqueueOfflineItem({ type: 'job_update', payload: { action: 'decline', jobId: offerSnapshot.id } });
+        await enqueueOfflineItem({
+          type: 'job_update',
+          payload: {
+            action: 'decline',
+            jobId: offerSnapshot.id,
+            driverId: driver.id,
+            companyId: driver.companyId,
+            originalStatus: offerSnapshot.originalStatus ?? 'pending',
+            timedOut: !!timedOut,
+          },
+        });
       }
       removeBroadcastOffer(offerSnapshot.id);
       if (shiftActive && timedOut && !driverHasConfirmedActiveTrip()) {
@@ -3066,7 +3092,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       if (isDispatchAcceptRetryable(err)) {
-        await enqueueOfflineItem({ type: 'job_update', payload: { action: 'accept', jobId: offer.id } });
+        await enqueueOfflineItem({
+          type: 'job_update',
+          payload: {
+            action: 'accept',
+            jobId: offer.id,
+            driverId: driver.id,
+            companyId: driver.companyId,
+          },
+        });
         Alert.alert('Could not accept', 'The server did not confirm this job. It was queued for retry when you are back online.');
       } else {
         const msg = err instanceof DispatchApiError
@@ -3462,7 +3496,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (completeFailed) {
         await enqueueOfflineItem({
           type: 'job_update',
-          payload: { action: 'complete', jobId: job.id, paymentType, fare: totalFare, extras },
+          payload: {
+            action: 'complete',
+            jobId: job.id,
+            bookingId: job.id,
+            driverId: driver.id,
+            companyId: driver.companyId,
+            paymentType,
+            fare: totalFare,
+            totalFare,
+            distanceKm: closed.distanceKm,
+            distance: closed.distanceKm,
+            extras,
+            // Preserve payment-specific fields for flush → /api/job/complete
+            // (TM / ACC / Stripe / Account / Cash — opaque to the sync layer).
+            ...(tmDetails ?? {}),
+          },
         });
         const msg =
           `Dispatch server did not confirm completion (${completionErrorMessage(err)}). ` +
@@ -3531,7 +3580,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     } catch {
       await enqueueOfflineItem({
         type: 'job_update',
-        payload: { action: 'cancel', jobId: activeJob.id },
+        payload: {
+          action: 'cancel',
+          jobId: activeJob.id,
+          driverId: driver.id,
+          companyId: driver.companyId,
+        },
       });
     }
     await clearJobLocallyAfterTerminal();
@@ -3572,9 +3626,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       });
       await enqueueOfflineItem({
         type: 'job_update',
-        payload: { action: 'no_show', jobId },
+        payload: {
+          action: 'no_show',
+          jobId,
+          driverId,
+          companyId,
+        },
       });
-      console.warn('[no-show] queued offline job_update (no_show) — flush uses /api/offline-sync', {
+      console.warn('[no-show] queued offline job_update (no_show) — flush replays via /api/cancel', {
         jobId,
       });
     }

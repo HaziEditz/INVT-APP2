@@ -1,6 +1,8 @@
 import { get, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
+import { driverIdsMatch } from '@/lib/driverAuth';
 import { fetchDriverActiveBookings, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import { isReturnedToDispatchPool } from '@/lib/bookingSync';
 import { JobStage } from '@/types';
 
 /** Server BookingStatus values required for each local stage (pickup = Assigned, no extra call). */
@@ -50,11 +52,43 @@ export function serverStatusIndex(status: string): number {
   return STAGE_ORDER.indexOf(stage);
 }
 
+export type ServerBookingSnapshot = {
+  status: string;
+  updateSeq?: number;
+  driverId?: string;
+};
+
+/**
+ * True when a locally held active job must be cleared because dispatch no longer
+ * has this booking attached to this driver (pool return, re-offer, other driver, terminal).
+ */
+export function localActiveJobLostOnServer(
+  status: string,
+  serverDriverId: string | undefined,
+  localDriverId: string,
+): { lost: boolean; reason: string } {
+  if (isTerminalBookingStatus(status)) {
+    return { lost: true, reason: `terminal:${status}` };
+  }
+  if (isReturnedToDispatchPool(status)) {
+    return { lost: true, reason: `pool:${status}` };
+  }
+  const st = String(status || '').trim();
+  // Accept → Assigned; reassign withdraws via Assigned → Offered. Unreached/Reject are also not ours.
+  if (st === 'Offered' || st === 'Unreached' || st === 'Reject') {
+    return { lost: true, reason: `reoffer:${st}` };
+  }
+  if (serverDriverId && localDriverId && !driverIdsMatch(serverDriverId, localDriverId)) {
+    return { lost: true, reason: `driver-mismatch:${serverDriverId}` };
+  }
+  return { lost: false, reason: '' };
+}
+
 /** Read updateSeq + status from allbookings (fallback when REST list is empty). */
 export async function fetchBookingFromFirebase(
   companyId: string,
   bookingId: string,
-): Promise<{ status: string; updateSeq?: number } | null> {
+): Promise<ServerBookingSnapshot | null> {
   try {
     const snap = await get(ref(getDatabaseInstance(), `allbookings/${companyId}/${bookingId}`));
     if (!snap.exists()) return null;
@@ -62,7 +96,14 @@ export async function fetchBookingFromFirebase(
     const status = String(rec.BookingStatus ?? rec.Status ?? rec.status ?? '');
     const rawSeq = rec.updateSeq ?? rec._seq ?? rec.version;
     const updateSeq = rawSeq != null ? parseInt(String(rawSeq), 10) : undefined;
-    return { status, updateSeq: Number.isNaN(updateSeq!) ? undefined : updateSeq };
+    const driverId = String(
+      rec.DriverId ?? rec.driverId ?? rec.AssignedDriverId ?? rec.assignedDriverId ?? '',
+    ).trim();
+    return {
+      status,
+      updateSeq: Number.isNaN(updateSeq!) ? undefined : updateSeq,
+      driverId: driverId || undefined,
+    };
   } catch {
     return null;
   }
@@ -102,12 +143,13 @@ export async function catchUpJobStagesOnDispatch(
   return { version: ver, synced };
 }
 
-export interface ServerBookingRow {
+export type ServerBookingRow = {
   bookingId: number;
   status: string;
-  version: number;
+  version?: number;
   bookingStatus?: string;
-}
+  driverId?: string;
+};
 
 /** Resolve server truth for a cached booking (Firebase first — includes Completed/Cancelled). */
 export async function resolveServerBookingState(
@@ -125,6 +167,7 @@ export async function resolveServerBookingState(
       status: fb.status,
       version: fb.updateSeq ?? 0,
       bookingStatus: fb.status,
+      driverId: fb.driverId,
     };
     if (isTerminalBookingStatus(fb.status)) {
       return row;
@@ -140,6 +183,7 @@ export async function resolveServerBookingState(
         status: hit.bookingStatus || hit.status,
         version: hit.version,
         bookingStatus: hit.bookingStatus || hit.status,
+        driverId,
       };
     }
   } catch (err) {
@@ -152,6 +196,7 @@ export async function resolveServerBookingState(
       status: fb.status,
       version: fb.updateSeq ?? 0,
       bookingStatus: fb.status,
+      driverId: fb.driverId,
     };
   }
 
