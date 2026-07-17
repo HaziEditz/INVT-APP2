@@ -46,6 +46,7 @@ import {
 import {
   connectionNoticeForTransition,
   dispatchIsConnected,
+  offerAcceptanceIsAllowed,
   type DispatchConnectionNotice,
 } from '@/lib/dispatchConnectionPolicy';
 import {
@@ -636,6 +637,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setIsOffline(!nextConnected);
 
       if (notice === 'offline') {
+        // Accept is a real-time claim. Hide the current popup without declining it;
+        // reconnect reconciliation will restore it only if dispatch still owns it.
+        jobOfferRef.current = null;
+        setJobOffer(null);
         if (connectionNoticeTimerRef.current) {
           clearTimeout(connectionNoticeTimerRef.current);
           connectionNoticeTimerRef.current = null;
@@ -3052,6 +3057,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const acceptOffer = async () => {
     if (!jobOffer || !driver || acceptingOfferRef.current) return;
+    if (
+      !offerAcceptanceIsAllowed(
+        networkConnectedRef.current,
+        rtdbConnectedRef.current,
+      )
+    ) {
+      jobOfferRef.current = null;
+      setJobOffer(null);
+      Alert.alert(
+        'Connection lost',
+        'Reconnect and wait for a fresh offer before accepting.',
+      );
+      return;
+    }
     acceptingOfferRef.current = true;
     try {
     const offerSnapshot = jobOffer;
@@ -3233,6 +3252,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const pickOfferFromList = async (offerId: string) => {
     const offer = visibleOffers.find((o) => o.id === offerId);
     if (!offer || !driver || acceptingOfferRef.current) return;
+    if (
+      !offerAcceptanceIsAllowed(
+        networkConnectedRef.current,
+        rtdbConnectedRef.current,
+      )
+    ) {
+      Alert.alert(
+        'Connection lost',
+        'Reconnect and wait for a fresh offer before accepting.',
+      );
+      return;
+    }
     acceptingOfferRef.current = true;
     try {
     try {

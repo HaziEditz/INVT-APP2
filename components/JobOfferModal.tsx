@@ -9,7 +9,15 @@ import { useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export function JobOfferModal() {
-  const { jobOffer, acceptOffer, declineOffer, hailActive, activeJob, paymentJob } = useDriver();
+  const {
+    jobOffer,
+    acceptOffer,
+    declineOffer,
+    hailActive,
+    activeJob,
+    paymentJob,
+    isOffline,
+  } = useDriver();
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [accepting, setAccepting] = useState(false);
   const timedOutRef = useRef(false);
@@ -54,9 +62,10 @@ export function JobOfferModal() {
   if (!jobOffer || hailActive || !!activeJob || !!paymentJob) return null;
 
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
+  const acceptDisabled = accepting || isOffline;
 
   const onAccept = () => {
-    if (accepting) return;
+    if (acceptDisabled) return;
     setAccepting(true);
     void acceptOffer()
       .catch((err) => console.error('[JobOfferModal] accept', err))
@@ -132,16 +141,18 @@ export function JobOfferModal() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Accept job offer"
-              disabled={accepting}
+              disabled={acceptDisabled}
               onPress={onAccept}
               hitSlop={8}
               style={({ pressed }) => [
                 styles.acceptBtn,
-                accepting && styles.acceptBtnDisabled,
-                pressed && !accepting && styles.acceptBtnPressed,
+                acceptDisabled && styles.acceptBtnDisabled,
+                pressed && !acceptDisabled && styles.acceptBtnPressed,
               ]}
             >
-              <Text style={styles.acceptBtnText}>{accepting ? 'Accepting…' : 'Accept'}</Text>
+              <Text style={styles.acceptBtnText}>
+                {isOffline ? 'Reconnect to accept' : accepting ? 'Accepting…' : 'Accept'}
+              </Text>
             </Pressable>
           </View>
         </View>

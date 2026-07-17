@@ -10,6 +10,14 @@ export function dispatchIsConnected(
   return networkOk && rtdbOk;
 }
 
+/** Offers are real-time claims and must never be accepted after either link drops. */
+export function offerAcceptanceIsAllowed(
+  networkConnected: boolean | null,
+  rtdbConnected: boolean | null,
+): boolean {
+  return dispatchIsConnected(networkConnected, rtdbConnected);
+}
+
 export function connectionNoticeForTransition(
   previousConnected: boolean | null,
   nextConnected: boolean,

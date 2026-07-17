@@ -7,6 +7,7 @@ import {
 import {
   connectionNoticeForTransition,
   dispatchIsConnected,
+  offerAcceptanceIsAllowed,
 } from '../lib/dispatchConnectionPolicy.ts';
 
 test('C4 suppresses returned offer only for its previous driver', () => {
@@ -55,6 +56,14 @@ test('C6 combines device and RTDB connectivity', () => {
   assert.equal(dispatchIsConnected(true, false), false);
   assert.equal(dispatchIsConnected(true, true), true);
   assert.equal(dispatchIsConnected(null, null), true);
+});
+
+test('offer accept gate closes on either explicit disconnect', () => {
+  assert.equal(offerAcceptanceIsAllowed(false, true), false);
+  assert.equal(offerAcceptanceIsAllowed(true, false), false);
+  assert.equal(offerAcceptanceIsAllowed(false, false), false);
+  assert.equal(offerAcceptanceIsAllowed(true, true), true);
+  assert.equal(offerAcceptanceIsAllowed(null, null), true);
 });
 
 test('C6 notice persists offline and announces recovery only after outage', () => {

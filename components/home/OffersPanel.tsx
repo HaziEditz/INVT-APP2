@@ -17,7 +17,7 @@ function timeSince(ts?: number): string {
 }
 
 export function OffersPanel() {
-  const { visibleOffers, pickOfferFromList, shiftActive } = useDriver();
+  const { visibleOffers, pickOfferFromList, shiftActive, isOffline } = useDriver();
 
   if (!shiftActive) {
     return (
@@ -65,7 +65,12 @@ export function OffersPanel() {
             {o.vehicleTypeRequired ? <Text style={styles.meta}>Vehicle: {o.vehicleTypeRequired}</Text> : null}
             {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
             {fare != null ? <Text style={styles.fare}>Est. fare ${fare.toFixed(2)}</Text> : null}
-            <Button title="Accept" onPress={() => pickOfferFromList(o.id)} style={{ marginTop: 10 }} />
+            <Button
+              title={isOffline ? 'Reconnect to accept' : 'Accept'}
+              disabled={isOffline}
+              onPress={() => pickOfferFromList(o.id)}
+              style={{ marginTop: 10 }}
+            />
           </View>
         );
       })}
