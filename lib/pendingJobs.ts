@@ -73,6 +73,10 @@ export function parseJobOfferRecord(
     dropoffLat: dropLl.lat,
     dropoffLng: dropLl.lng,
     silent: true,
+    returnReason:
+      String(val.returnReason ?? val.ReturnReason ?? '').trim() || undefined,
+    lastOfferDriverId:
+      String(val.lastOfferDriverId ?? val.LastOfferDriverId ?? '').trim() || undefined,
     ...scheduling,
   };
 }

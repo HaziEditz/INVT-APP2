@@ -1,4 +1,5 @@
 import { CurrentTripPanel } from '@/components/home/CurrentTripPanel';
+import { ConnectionStatusBanner } from '@/components/home/ConnectionStatusBanner';
 import { FullScreenMapModal } from '@/components/home/FullScreenMapModal';
 import { HomeMainTabs } from '@/components/home/HomeMainTabs';
 import { HomeStatusBar } from '@/components/home/HomeStatusBar';
@@ -132,6 +133,7 @@ export default function MainScreen() {
           }
         />
       </ErrorBoundary>
+      <ConnectionStatusBanner />
 
       <View style={[styles.body, hasCurrent && styles.bodyTrip]}>
         <View style={[styles.mapSection, hasCurrent && styles.mapSectionTrip]}>

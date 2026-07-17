@@ -201,6 +201,17 @@ export async function flushOfflineQueue() {
   for (const item of queue) {
     try {
       if (item.type === 'job_update') {
+        // Accept is a real-time claim, not an eventually-consistent update.
+        // Replaying it after reconnect can claim a booking that dispatch already
+        // expired and re-offered to another driver. Drop legacy queued accepts.
+        if (asString(item.payload?.action) === 'accept') {
+          console.warn('[offline-sync] dropping stale queued accept', {
+            id: item.id,
+            jobId: item.payload?.jobId,
+          });
+          flushed += 1;
+          continue;
+        }
         await flushJobUpdate(item.payload ?? {}, session);
         flushed += 1;
         console.log('[offline-sync] flushed job_update', {

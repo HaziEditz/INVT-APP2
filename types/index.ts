@@ -76,6 +76,10 @@ export interface JobOffer {
   passengers?: number;
   serviceTypeRaw?: string;
   originalStatus?: 'pending' | 'manual';
+  /** Why dispatch returned this booking to the pool. */
+  returnReason?: string;
+  /** Last driver who held the exclusive offer. */
+  lastOfferDriverId?: string;
   queuedAt?: number;
   postedAt?: number;
   /** Set when promoted from Queue tab after trip ends. */
