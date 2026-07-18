@@ -96,17 +96,21 @@ export function updatePresenceHeartbeatStatus(status: FirebaseDriverStatus) {
 
 /**
  * Re-create online/{cid}/{vid} when missing or stale. Uses full set on /current when node was absent.
+ * Pass force=true (or a reason containing "reconnect") to always rewrite lastSeen — soft reconnect
+ * must not wait for the 20s repair threshold or dispatch assign will keep seeing a quiet driver.
  */
 export async function repairOnlinePresence(
   driver: DriverProfile,
   vehicleId: string,
   status: FirebaseDriverStatus,
   reason = 'repair',
+  opts?: { force?: boolean },
 ): Promise<boolean> {
   if (!driver.companyId || !vehicleId) return false;
   if (isPresenceSessionEnded(driver.companyId, vehicleId)) return false;
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
   const db = getDatabaseInstance();
+  const force = opts?.force === true || /reconnect/i.test(reason);
   try {
     const [baseSnap, curSnap] = await Promise.all([
       get(ref(db, onlinePath)),
@@ -130,10 +134,12 @@ export async function repairOnlinePresence(
     const serverStale =
       serverLastSeen > 0 && Date.now() - serverLastSeen > PRESENCE_LASTSEEN_REPAIR_MS;
     const stale = localStale || serverStale;
-    if (!needsFull && !stale && curStatus.toLowerCase() === status.toLowerCase()) {
+    if (!force && !needsFull && !stale && curStatus.toLowerCase() === status.toLowerCase()) {
       return true;
     }
-    console.log(`[Presence] repair (${reason}) needsFull=${needsFull} stale=${stale} status=${status}`);
+    console.log(
+      `[Presence] repair (${reason}) force=${force} needsFull=${needsFull} stale=${stale} status=${status}`,
+    );
     await writeOnlinePresence(driver, vehicleId, status, needsFull);
     return true;
   } catch (err) {
