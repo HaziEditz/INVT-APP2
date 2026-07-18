@@ -816,14 +816,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         try {
           updateDispatchConnection('network', connected);
           if (connected) {
-            await reconcileOffersRef.current?.('netinfo-reconnect');
-            await flushOfflineQueue();
-            if (activeJobRef.current?.id) {
-              void refreshActiveJobRef.current?.('netinfo-reconnect');
-            }
+            // Presence first: dispatch treats a quiet driver as unreachable, so
+            // heal the heartbeat immediately instead of after reconcile+flush.
             if (shiftActiveRef.current) {
               void repairPresenceRef.current?.('netinfo-reconnect');
             }
+            if (activeJobRef.current?.id) {
+              void refreshActiveJobRef.current?.('netinfo-reconnect');
+            }
+            await reconcileOffersRef.current?.('netinfo-reconnect');
+            await flushOfflineQueue();
           }
         } catch (err) {
           console.error('[Driver] connectivity handler:', err);
@@ -2657,13 +2659,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const unsubRtdb = subscribeFirebaseRtdbConnected((connected) => {
       updateDispatchConnection('rtdb', connected);
       if (connected) {
-        void reconcileOffersRef.current?.('rtdb-reconnect');
-        if (activeJobRef.current?.id) {
-          void refreshActiveJobRef.current?.('rtdb-reconnect');
-        }
+        // Presence first so dispatch stops treating this driver as unreachable.
         if (shiftActiveRef.current) {
           void repairPresenceRef.current?.('rtdb-reconnect');
         }
+        if (activeJobRef.current?.id) {
+          void refreshActiveJobRef.current?.('rtdb-reconnect');
+        }
+        void reconcileOffersRef.current?.('rtdb-reconnect');
       }
     });
     return unsubRtdb;

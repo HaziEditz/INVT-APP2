@@ -18,6 +18,8 @@ export {
 } from '@/lib/presenceGuards';
 
 const PRESENCE_HEARTBEAT_MS = 30_000;
+/** Repair when the server-side lastSeen is older than this — keeps the driver under the dispatch 30s stale badge. */
+const PRESENCE_LASTSEEN_REPAIR_MS = 20_000;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatCtx: {
   driver: DriverProfile;
@@ -34,6 +36,23 @@ export function getPresenceWriteDiagnostics() {
     heartbeatActive: heartbeatTimer != null,
     heartbeatStatus: heartbeatCtx?.status ?? null,
   };
+}
+
+function normalizeLastSeenToMs(raw: unknown): number {
+  const n = Number(raw || 0);
+  if (!n || !Number.isFinite(n)) return 0;
+  return n < 1e12 ? n * 1000 : n;
+}
+
+/** Freshest of parent lastSeen vs /current lastSeen (either can lag the other). */
+function freshestNodeLastSeenMs(
+  base: Record<string, unknown> | null,
+  current: Record<string, unknown> | null,
+): number {
+  return Math.max(
+    normalizeLastSeenToMs(base?.lastSeen),
+    normalizeLastSeenToMs(current?.lastSeen),
+  );
 }
 
 /** Firebase RTDB connection — distinct from device NetInfo (Wi‑Fi can be up while RTDB is disconnected). */
@@ -97,10 +116,20 @@ export async function repairOnlinePresence(
     const curStatus = curSnap.exists()
       ? String((curSnap.val() as Record<string, unknown>)?.vehiclestatus ?? '')
       : '';
-    const stale =
+    const localStale =
       curSnap.exists() &&
       lastPresenceWriteAt > 0 &&
       Date.now() - lastPresenceWriteAt > PRESENCE_HEARTBEAT_MS * 2;
+    // The local write clock lies after a reconnect: a write buffered while
+    // offline flushes with its old lastSeen but resolves "now". Trust the
+    // server-side heartbeat instead so dispatch stops showing us stale.
+    const serverLastSeen = freshestNodeLastSeenMs(
+      baseSnap.exists() ? (baseSnap.val() as Record<string, unknown>) : null,
+      curSnap.exists() ? (curSnap.val() as Record<string, unknown>) : null,
+    );
+    const serverStale =
+      serverLastSeen > 0 && Date.now() - serverLastSeen > PRESENCE_LASTSEEN_REPAIR_MS;
+    const stale = localStale || serverStale;
     if (!needsFull && !stale && curStatus.toLowerCase() === status.toLowerCase()) {
       return true;
     }
