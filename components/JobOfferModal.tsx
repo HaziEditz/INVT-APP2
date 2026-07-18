@@ -59,7 +59,9 @@ export function JobOfferModal() {
     return () => clearInterval(id);
   }, [jobOffer, declineOffer, hailActive, activeJob, paymentJob], 'JobOfferModal-timer');
 
-  if (!jobOffer || hailActive || !!activeJob || !!paymentJob) return null;
+  // Hide while offline (accept is a live claim) but keep the timer effect above so a
+  // missed exclusive offer still times out → Away even during a brief disconnect.
+  if (!jobOffer || hailActive || !!activeJob || !!paymentJob || isOffline) return null;
 
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
   const acceptDisabled = accepting || isOffline;

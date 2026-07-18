@@ -637,10 +637,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setIsOffline(!nextConnected);
 
       if (notice === 'offline') {
-        // Accept is a real-time claim. Hide the current popup without declining it;
-        // reconnect reconciliation will restore it only if dispatch still owns it.
-        jobOfferRef.current = null;
-        setJobOffer(null);
+        // Accept is a real-time claim — JobOfferModal hides while offline and disables
+        // Accept. Keep jobOffer so the miss-timeout → Away path still runs; reconnect
+        // reconciliation clears it only if dispatch no longer owns the offer.
         if (connectionNoticeTimerRef.current) {
           clearTimeout(connectionNoticeTimerRef.current);
           connectionNoticeTimerRef.current = null;
@@ -3216,11 +3215,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setQueuedOffers((prev) => prev.filter((o) => o.id !== offerSnapshot.id));
       Alert.alert('Job declined', 'Job returned to dispatch for other drivers.');
     } else {
+      let driverSetAway = timedOut;
       try {
-        await declineJobOffer(offerSnapshot.id, driver.id, {
+        const result = (await declineJobOffer(offerSnapshot.id, driver.id, {
           originalStatus: offerSnapshot.originalStatus ?? 'pending',
           timedOut,
-        });
+        })) as { driverSetAway?: boolean };
+        if (result && typeof result.driverSetAway === 'boolean') {
+          driverSetAway = result.driverSetAway;
+        }
       } catch {
         await enqueueOfflineItem({
           type: 'job_update',
@@ -3233,15 +3236,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             timedOut: !!timedOut,
           },
         });
+        // Offline miss: still Away locally. Server Away only applies if the job was
+        // still Offered when the queued decline flushes (not after a network bounce).
+        driverSetAway = timedOut;
       }
       removeBroadcastOffer(offerSnapshot.id);
-      if (shiftActive && timedOut && !driverHasConfirmedActiveTrip()) {
-        console.log('[away-debug] declineOffer → setAwayAfterMissedOffer (timed-out broadcast offer)');
+      if (shiftActive && driverSetAway && !driverHasConfirmedActiveTrip()) {
+        console.log('[away-debug] declineOffer → setAwayAfterMissedOffer (timed-out exclusive offer)');
         await setAwayAfterMissedOffer();
       } else {
         console.log('[away-debug] declineOffer skip Away', {
           shiftActive,
           timedOut,
+          driverSetAway,
           hasTrip: driverHasConfirmedActiveTrip(),
         });
       }
