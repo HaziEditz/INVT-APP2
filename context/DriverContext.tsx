@@ -2725,7 +2725,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       console.log('[Shift] startShift — profile uid:', driver.uid, 'vehicle:', vehicleId);
       await startShiftOnline(driver, vehicleId);
-      console.log('[Shift] startShiftOnline done — enrich runs in background');
+
+      // GPS + fresh lastSeen before advertising offerable — same Firebase shape as
+      // hail-complete / goAvailable. Location was previously fire-and-forget after
+      // readyForJobs=true, so the first auto-dispatch ticks often saw 0,0 / no GPS.
+      let trackingStarted = false;
+      try {
+        const { startBackgroundTracking } = await import('@/services/locationService');
+        console.log('[Shift] location tracking begin (before readyForJobs)');
+        trackingStarted = await startBackgroundTracking(
+          driver.id,
+          driver.companyId,
+          vehicleId,
+        );
+        console.log('[Shift] location tracking result:', trackingStarted);
+      } catch (err) {
+        console.warn('[Shift] location tracking failed (non-fatal):', err);
+      }
+
+      await writeOnlinePresence(driver, vehicleId, 'Available');
+      console.log('[Shift] writeOnlinePresence Available done — GPS/lastSeen stamped');
+
       setPresenceStatus('Online');
       setReadyForJobs(true);
       readyForJobsRef.current = true;
@@ -2733,6 +2753,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       startPresenceHeartbeat(driver, vehicleId, 'Available');
       void syncBgLocationFirebaseStatus('Available');
       console.log('[Shift] presence Online, readyForJobs=true');
+
+      if (!trackingStarted) {
+        Alert.alert(
+          'Location optional',
+          'You are online and ready for jobs. Enable location when prompted so dispatch can see your position on the map.',
+        );
+      }
     } catch (err) {
       console.warn('[Shift] Firebase online status write failed:', err);
       Alert.alert('Connection issue', 'Could not register with dispatch. Check your network and try again.');
@@ -2742,7 +2769,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    console.log('[Shift] scheduling NZTA clock + location (background)');
+    console.log('[Shift] scheduling NZTA clock (background)');
 
     void import('@/services/shiftRuntimeService').then(({ startShiftRuntime }) =>
       startShiftRuntime({
@@ -2758,22 +2785,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         .then(() => console.log('[Shift] NZTA clock started'))
         .catch((err) => console.error('[Driver] startShiftClock', err)),
     );
-
-    void import('@/services/locationService').then(async ({ startBackgroundTracking }) => {
-      try {
-        console.log('[Shift] location tracking begin');
-        const trackingStarted = await startBackgroundTracking(driver.id, driver.companyId, vehicleId);
-        console.log('[Shift] location tracking result:', trackingStarted);
-        if (!trackingStarted) {
-          Alert.alert(
-            'Location optional',
-            'You are online and ready for jobs. Enable location when prompted so dispatch can see your position on the map.',
-          );
-        }
-      } catch (err) {
-        console.warn('[Shift] location tracking failed (non-fatal):', err);
-      }
-    });
 
     if (driver.companyId) {
       update(ref(getDatabaseInstance(), `vehicles/${driver.companyId}/${vehicleId}`), {

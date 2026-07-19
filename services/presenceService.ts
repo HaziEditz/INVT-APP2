@@ -270,6 +270,7 @@ async function enrichShiftPresenceInBackground(
     vehiclenumber: vehicleId,
     vehicleId,
     updatedAt: nowIso,
+    lastSeen: Date.now(),
     lat: lat || 0,
     lng: lng || 0,
   });
