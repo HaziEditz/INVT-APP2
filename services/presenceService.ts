@@ -1,7 +1,7 @@
 import { onDisconnect, onValue, ref, remove, set, update, get } from 'firebase/database';
 import { getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { DriverProfile, PresenceDisplayStatus } from '@/types';
-import { getCurrentCoords } from '@/services/locationService';
+import { getCurrentCoords, getLastKnownCoords } from '@/services/locationService';
 import {
   clearPresenceSessionEnded,
   isPresenceSessionEnded,
@@ -17,9 +17,9 @@ export {
   markPresenceSessionEnded,
 } from '@/lib/presenceGuards';
 
-const PRESENCE_HEARTBEAT_MS = 30_000;
+const PRESENCE_HEARTBEAT_MS = 20_000;
 /** Repair when the server-side lastSeen is older than this — keeps the driver under the dispatch 30s stale badge. */
-const PRESENCE_LASTSEEN_REPAIR_MS = 20_000;
+const PRESENCE_LASTSEEN_REPAIR_MS = 15_000;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatCtx: {
   driver: DriverProfile;
@@ -97,7 +97,7 @@ export function updatePresenceHeartbeatStatus(status: FirebaseDriverStatus) {
 /**
  * Re-create online/{cid}/{vid} when missing or stale. Uses full set on /current when node was absent.
  * Pass force=true (or a reason containing "reconnect") to always rewrite lastSeen — soft reconnect
- * must not wait for the 20s repair threshold or dispatch assign will keep seeing a quiet driver.
+ * must not wait for the repair threshold or dispatch assign will keep seeing a quiet driver.
  */
 export async function repairOnlinePresence(
   driver: DriverProfile,
@@ -140,6 +140,16 @@ export async function repairOnlinePresence(
     console.log(
       `[Presence] repair (${reason}) force=${force} needsFull=${needsFull} stale=${stale} status=${status}`,
     );
+    // Reconnect: stamp lastSeen first so dispatch clears amber without waiting on GPS.
+    if (force) {
+      await stampPresenceLastSeen(driver, vehicleId, status);
+      if (!needsFull) {
+        void writeOnlinePresence(driver, vehicleId, status, false).catch((err) => {
+          console.warn(`[Presence] repair (${reason}) GPS enrich failed:`, err);
+        });
+        return true;
+      }
+    }
     await writeOnlinePresence(driver, vehicleId, status, needsFull);
     return true;
   } catch (err) {
@@ -178,6 +188,79 @@ async function getGps(): Promise<{ lat: number; lng: number }> {
   } catch {
     return { lat: 0, lng: 0 };
   }
+}
+
+/** Prefer cached coords so reconnect lastSeen never waits on a fresh GPS fix. */
+async function getGpsCachedFirst(): Promise<{ lat: number; lng: number }> {
+  try {
+    const last = await getLastKnownCoords(120_000);
+    if (last && (last.latitude || last.longitude)) {
+      return { lat: last.latitude, lng: last.longitude };
+    }
+  } catch {
+    // fall through
+  }
+  return getGps();
+}
+
+/**
+ * Stamp lastSeen (+ status/GPS if known) immediately without awaiting a fresh
+ * getCurrentPosition. Used on reconnect so dispatch clears the 30s amber badge
+ * before a slow GPS fix completes.
+ */
+export async function stampPresenceLastSeen(
+  driver: DriverProfile,
+  vehicleId: string,
+  status: FirebaseDriverStatus,
+): Promise<void> {
+  if (!driver.companyId || !vehicleId) return;
+  if (isPresenceSessionEnded(driver.companyId, vehicleId)) return;
+  try {
+    assertOnlinePresenceWriteAllowed(driver.companyId, vehicleId, 'stampPresenceLastSeen');
+  } catch {
+    return;
+  }
+
+  const onlinePath = `online/${driver.companyId}/${vehicleId}`;
+  await ensureAuthUserForRtdbWrite(`stampPresenceLastSeen → ${onlinePath}`);
+
+  let lat = 0;
+  let lng = 0;
+  try {
+    const last = await getLastKnownCoords(120_000);
+    if (last) {
+      lat = last.latitude || 0;
+      lng = last.longitude || 0;
+    }
+  } catch {
+    // non-fatal — lastSeen stamp still clears the console stale badge
+  }
+
+  const now = Date.now();
+  const topStatus = status === 'Assigned' ? 'Picking' : status;
+  await update(ref(getDatabaseInstance(), onlinePath), {
+    vehiclestatus: topStatus,
+    VehicleStatus: topStatus,
+    driverid: parseDriverId(driver.id),
+    driverId: driver.id,
+    companyId: driver.companyId,
+    CompanyId: driver.companyId,
+    vehiclenumber: vehicleId,
+    vehicleId,
+    lastSeen: now,
+    ...(lat || lng ? { lat, lng } : {}),
+  });
+  await update(ref(getDatabaseInstance(), `${onlinePath}/current`), {
+    lastSeen: now,
+    vehiclestatus: topStatus,
+    VehicleStatus: topStatus,
+    online: true,
+    ...(lat || lng ? { lat, lng, Lat: lat, Lng: lng, hasGps: true } : {}),
+  });
+  lastPresenceWriteAt = now;
+  lastPresenceWriteError = null;
+  updatePresenceHeartbeatStatus(status);
+  console.log('[Presence] stampPresenceLastSeen OK', { vehicleId, status, hasGps: !!(lat || lng) });
 }
 
 function buildPresenceRecord(
@@ -409,7 +492,7 @@ export async function writeOnlinePresence(
     const authUser = await ensureAuthUserForRtdbWrite(`writeOnlinePresence → ${onlinePath}`);
     console.log('[Presence] writeOnlinePresence auth uid:', authUser.uid, 'status:', status);
 
-    const { lat, lng } = await getGps();
+    const { lat, lng } = await getGpsCachedFirst();
     const record = buildPresenceRecord(driver, vehicleId, status, lat, lng);
     const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
 
