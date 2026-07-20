@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, markSosResponderArrived, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, StageTransportError, syncJobStageOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, StageTransportError, syncJobStageOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -3993,13 +3993,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         throw new Error('No vehicle assigned — select a vehicle before hailing.');
       }
 
+      // Phase 5b — one clientTripId for this hail attempt (retries reuse it).
+      let clientTripId =
+        (await getData<string>(STORAGE_KEYS.pendingHailClientTripId))?.trim() || '';
+      if (!clientTripId) {
+        clientTripId = newClientTripId();
+        await storeData(STORAGE_KEYS.pendingHailClientTripId, clientTripId);
+      }
+
       const { jobId, updateSeq } = await createHailJobOnDispatch({
         companyId: driver.companyId,
         driverId: driver.id,
         vehicleId,
         tariffId: selectedTariff.id,
         pickup,
+        clientTripId,
       });
+      await storeData(STORAGE_KEYS.pendingHailClientTripId, null);
 
       const now = Date.now();
       const hailJob: ActiveJob = {
@@ -4022,6 +4032,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         bookedAtMs: now,
         expiresAt: now + 86400000,
         updateSeq,
+        clientTripId,
       };
 
       setHailActive(true);

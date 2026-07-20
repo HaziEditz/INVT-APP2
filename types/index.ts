@@ -163,6 +163,8 @@ export interface ActiveJob extends JobOffer {
   meterSnapshot?: MeterState | null;
   /** Server updateSeq — used for optimistic stage sync retries. */
   updateSeq?: number;
+  /** Phase 5b — client UUID for hail create-or-get / offline journal. */
+  clientTripId?: string;
 }
 
 export interface CompletedJob extends ActiveJob {

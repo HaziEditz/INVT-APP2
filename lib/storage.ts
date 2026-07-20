@@ -34,4 +34,6 @@ export const STORAGE_KEYS = {
   selectedTariffId: 'bw_selected_tariff',
   meterState: 'bw_meter_state',
   vehicleSessionReady: 'bw_vehicle_session_ready',
+  /** Phase 5b — pending hail clientTripId until create succeeds (retry-safe). */
+  pendingHailClientTripId: 'bw_pending_hail_client_trip_id',
 } as const;

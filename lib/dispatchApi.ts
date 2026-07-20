@@ -364,6 +364,21 @@ export async function createPreBooking(payload: Record<string, unknown>) {
   return dispatchPost('/api/pre-booking', payload);
 }
 
+/** Phase 5b — UUID for hail create-or-get / offline journal. */
+export function newClientTripId(): string {
+  const c = globalThis.crypto as { randomUUID?: () => string; getRandomValues?: (a: Uint8Array) => Uint8Array } | undefined;
+  if (c?.randomUUID) return c.randomUUID();
+  if (c?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    c.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return `ct-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export async function createHailJobOnDispatch(params: {
   companyId: string;
   driverId: string;
@@ -371,13 +386,16 @@ export async function createHailJobOnDispatch(params: {
   tariffId: string;
   pickup: { address: string; lat?: number; lng?: number };
   dropoff?: { address: string; lat?: number; lng?: number };
-}): Promise<{ jobId: string; bookingId: number; updateSeq: number }> {
+  /** Phase 5b — client UUID for idempotent create-or-get (retries / offline journal). */
+  clientTripId: string;
+}): Promise<{ jobId: string; bookingId: number; updateSeq: number; clientTripId: string; existing?: boolean }> {
   const body: Record<string, unknown> = {
     companyId: params.companyId,
     source: 'hail',
     driverId: params.driverId,
     vehicleId: params.vehicleId,
     tariffId: params.tariffId,
+    clientTripId: params.clientTripId,
     pickup: {
       address: params.pickup.address,
       lat: params.pickup.lat ?? 0,
@@ -394,15 +412,25 @@ export async function createHailJobOnDispatch(params: {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const data = await dispatchPost<{ ok?: boolean; jobId?: string | number; bookingId?: number }>(
-        '/api/job/create',
-        body,
-      );
+      const data = await dispatchPost<{
+        ok?: boolean;
+        jobId?: string | number;
+        bookingId?: number;
+        clientTripId?: string;
+        existing?: boolean;
+        idempotent?: boolean;
+      }>('/api/job/create', body);
       const jobId = String(data.jobId ?? data.bookingId ?? '').trim();
       if (!jobId || !/^\d+$/.test(jobId)) {
         throw new Error('Dispatch server did not return a valid booking ID');
       }
-      return { jobId, bookingId: parseInt(jobId, 10), updateSeq: 1 };
+      return {
+        jobId,
+        bookingId: parseInt(jobId, 10),
+        updateSeq: 1,
+        clientTripId: String(data.clientTripId || params.clientTripId),
+        existing: !!(data.existing || data.idempotent),
+      };
     } catch (err) {
       lastErr = err;
       if (attempt < 2) {
