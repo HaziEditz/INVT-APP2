@@ -22,6 +22,25 @@ export function dispatchJournalKey(jobId: string | number): string {
   return `job:${String(jobId || '').trim()}`;
 }
 
+/**
+ * Phase 5e — journal key for an active job, or null if it cannot be journalled.
+ * Prefers clientTripId (hail); falls back to job:{numericId} for dispatch.
+ */
+export function resolveJournalClientTripId(job: {
+  id?: string | number | null;
+  clientTripId?: string | null;
+}): string | null {
+  const clientTripId = String(job.clientTripId ?? '').trim();
+  if (clientTripId) return clientTripId;
+  const id = String(job.id ?? '').trim();
+  if (id.startsWith('local:')) {
+    const rest = id.slice('local:'.length).trim();
+    return rest || null;
+  }
+  if (/^\d+$/.test(id) && !isProvisionalBookingId(id)) return dispatchJournalKey(id);
+  return null;
+}
+
 export function normalizeBookingId(raw: unknown): string {
   const s = String(raw ?? '').trim();
   if (s.includes(',')) return s.split(',')[0].trim();

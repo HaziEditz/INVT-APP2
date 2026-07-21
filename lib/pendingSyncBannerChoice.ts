@@ -1,6 +1,6 @@
 export type PendingSyncBanner = {
   message: string;
-  reason: 'cancel' | 'no_show' | 'stages' | 'hail' | 'mixed';
+  reason: 'cancel' | 'no_show' | 'stages' | 'hail' | 'complete' | 'mixed';
   at: number;
 };
 

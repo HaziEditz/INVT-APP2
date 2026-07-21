@@ -1,8 +1,16 @@
 import NetInfo from '@react-native-community/netinfo';
-import { createHailJobOnDispatch, DispatchApiError, syncJobStageOnDispatch } from '@/lib/dispatchApi';
+import {
+  cancelJobAsDriver,
+  completeJobPayment,
+  createHailJobOnDispatch,
+  DispatchApiError,
+  reportNoShow,
+  syncJobStageOnDispatch,
+} from '@/lib/dispatchApi';
 import {
   listPendingHailCreates,
   listPendingStageFlushes,
+  listPendingTerminalFlushes,
   markTripJournalEventSynced,
   setTripJournalSyncState,
 } from '@/services/tripJournalService';
@@ -22,6 +30,11 @@ export type TripJournalFlushHooks = {
     status: string;
     version?: number;
   }) => void | Promise<void>;
+  /** Called after a terminal event (complete/cancel/no-show) syncs. */
+  onTerminalSynced?: (args: {
+    serverJobId: string;
+    type: 'Completed' | 'Cancelled' | 'NoShow';
+  }) => void | Promise<void>;
 };
 
 function isRetryableFlushError(err: unknown): boolean {
@@ -39,9 +52,92 @@ function stageStatusForEvent(type: string): string | null {
   return null;
 }
 
+function asNumber(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() && Number.isFinite(Number(v))) return Number(v);
+  return undefined;
+}
+
+function asString(v: unknown): string {
+  return String(v ?? '').trim();
+}
+
+async function flushTerminalEvent(args: {
+  jobId: string;
+  driverId: string;
+  companyId: string;
+  type: string;
+  payload?: Record<string, unknown>;
+}): Promise<void> {
+  const { jobId, driverId, companyId, type, payload = {} } = args;
+  if (type === 'Cancelled') {
+    await cancelJobAsDriver(jobId, driverId, companyId);
+    return;
+  }
+  if (type === 'NoShow') {
+    await reportNoShow(jobId, driverId, companyId);
+    return;
+  }
+  if (type === 'Completed') {
+    const fare = asNumber(payload.fare ?? payload.totalFare) ?? 0;
+    const distanceKm = asNumber(payload.distanceKm ?? payload.distance) ?? 0;
+    const paymentType = asString(payload.paymentType) || 'Cash';
+    const extras =
+      payload.extras && typeof payload.extras === 'object'
+        ? (payload.extras as Record<string, unknown>)
+        : undefined;
+    await completeJobPayment({
+      jobId,
+      bookingId: jobId,
+      driverId,
+      companyId,
+      paymentType,
+      fare,
+      totalFare: fare,
+      distanceKm,
+      distance: distanceKm,
+      extras,
+      councilPays: payload.councilPays,
+      passengerPays: payload.passengerPays,
+      tmCardNumber: payload.tmCardNumber,
+      tmCardName: payload.tmCardName,
+      tmCardExpiry: payload.tmCardExpiry,
+      accClientId: payload.accClientId,
+      accApprovalNo: payload.accApprovalNo,
+      accClaimNo: payload.accClaimNo,
+      stripeChargeId: payload.stripeChargeId,
+      stripePaymentIntentId: payload.stripePaymentIntentId,
+      voucherCode: payload.voucherCode,
+      voucherDiscount: payload.voucherDiscount,
+      tmVoucher: payload.tmVoucher,
+      paymentMethod: payload.paymentMethod ?? paymentType,
+      payload: {
+        fare,
+        totalFare: fare,
+        distanceKm,
+        distance: distanceKm,
+        paymentType,
+        extras,
+        councilPays: payload.councilPays,
+        passengerPays: payload.passengerPays,
+        tmCardNumber: payload.tmCardNumber,
+        tmCardName: payload.tmCardName,
+        tmCardExpiry: payload.tmCardExpiry,
+        accClientId: payload.accClientId,
+        accApprovalNo: payload.accApprovalNo,
+        accClaimNo: payload.accClaimNo,
+        stripeChargeId: payload.stripeChargeId,
+        stripePaymentIntentId: payload.stripePaymentIntentId,
+      },
+    });
+    return;
+  }
+  throw new Error(`unsupported terminal journal event: ${type}`);
+}
+
 /**
- * Phase 5c/5d — flush pending hail creates, then unsynced Arrived/OnBoard stages.
- * Does not call /api/syncOfflineTrip (full trip journal — 5e+).
+ * Phase 5c–5e — flush hail creates, Arrived/OnBoard stages, then terminal events.
+ * Does not call /api/syncOfflineTrip (full trip journal enrichment stays deferred).
  */
 export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promise<number> {
   const state = await NetInfo.fetch();
@@ -134,6 +230,44 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
         // Terminal: drop this event so we do not loop forever.
         await markTripJournalEventSynced(journal.clientTripId, ev.id);
         console.warn('[trip-journal] stage dropped (terminal)', { jobId, type: ev.type, error: msg });
+      }
+    }
+  }
+
+  const pendingTerminals = await listPendingTerminalFlushes();
+  for (const { journal, events } of pendingTerminals) {
+    const jobId = String(journal.serverJobId || '').trim();
+    const driverId = String(journal.driverId || '').trim();
+    const companyId = String(journal.companyId || '').trim();
+    if (!jobId || !driverId || !companyId) continue;
+
+    for (const ev of events) {
+      try {
+        await flushTerminalEvent({
+          jobId,
+          driverId,
+          companyId,
+          type: ev.type,
+          payload: ev.payload,
+        });
+        await markTripJournalEventSynced(journal.clientTripId, ev.id);
+        if (ev.type === 'Completed' || ev.type === 'Cancelled' || ev.type === 'NoShow') {
+          await hooks.onTerminalSynced?.({ serverJobId: jobId, type: ev.type });
+        }
+        flushed += 1;
+        console.log('[trip-journal] flushed terminal', { jobId, type: ev.type });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (isRetryableFlushError(err)) {
+          console.warn('[trip-journal] terminal will retry', { jobId, type: ev.type, error: msg });
+          break;
+        }
+        await markTripJournalEventSynced(journal.clientTripId, ev.id);
+        console.warn('[trip-journal] terminal dropped (terminal err)', {
+          jobId,
+          type: ev.type,
+          error: msg,
+        });
       }
     }
   }

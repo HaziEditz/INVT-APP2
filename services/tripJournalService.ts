@@ -1,5 +1,9 @@
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
-import { dispatchJournalKey, localJobIdFromClientTripId } from '@/lib/bookingId';
+import {
+  dispatchJournalKey,
+  localJobIdFromClientTripId,
+  resolveJournalClientTripId,
+} from '@/lib/bookingId';
 import { newClientTripId } from '@/lib/dispatchApi';
 import type {
   TripJournal,
@@ -117,7 +121,7 @@ export async function listPendingHailCreates(): Promise<TripJournal[]> {
   );
 }
 
-export { dispatchJournalKey };
+export { dispatchJournalKey, resolveJournalClientTripId };
 
 /** Phase 5d — ensure a journal row exists for an online-created dispatch job. */
 export async function ensureDispatchTripJournal(params: {
@@ -156,6 +160,75 @@ export async function ensureDispatchTripJournal(params: {
   });
 }
 
+/**
+ * Phase 5e — ensure a journal row for hail or dispatch so terminal events can append.
+ * Returns the journal clientTripId key.
+ */
+export async function ensureJournalForJob(params: {
+  jobId: string;
+  clientTripId?: string;
+  companyId: string;
+  driverId: string;
+  vehicleId: string;
+  source?: 'hail' | 'dispatch';
+}): Promise<string> {
+  const jobId = String(params.jobId || '').trim();
+  const key = resolveJournalClientTripId({
+    id: jobId,
+    clientTripId: params.clientTripId,
+  });
+  if (!key) throw new Error('job is not journalable');
+
+  const existing = await getTripJournal(key);
+  const numericId = /^\d+$/.test(jobId) ? jobId : undefined;
+  const source =
+    params.source ??
+    (key.startsWith('job:') ? 'dispatch' : 'hail');
+
+  if (existing) {
+    await upsertTripJournal({
+      ...existing,
+      serverJobId: existing.serverJobId || numericId,
+      companyId: params.companyId || existing.companyId,
+      driverId: params.driverId || existing.driverId,
+      vehicleId: params.vehicleId || existing.vehicleId,
+      syncState:
+        existing.serverJobId || numericId
+          ? existing.syncState === 'pending' || existing.syncState === 'creating'
+            ? existing.syncState
+            : 'synced'
+          : existing.syncState,
+    });
+    return key;
+  }
+
+  if (key.startsWith('job:') && numericId) {
+    await ensureDispatchTripJournal({
+      jobId: numericId,
+      companyId: params.companyId,
+      driverId: params.driverId,
+      vehicleId: params.vehicleId,
+    });
+    return key;
+  }
+
+  const now = Date.now();
+  await upsertTripJournal({
+    clientTripId: key,
+    localJobId: jobId.startsWith('local:') ? jobId : localJobIdFromClientTripId(key),
+    serverJobId: numericId,
+    companyId: params.companyId,
+    driverId: params.driverId,
+    vehicleId: params.vehicleId,
+    source,
+    syncState: numericId ? 'synced' : 'pending',
+    createdAt: now,
+    updatedAt: now,
+    events: [],
+  });
+  return key;
+}
+
 export async function appendTripJournalEvent(
   clientTripId: string,
   type: TripJournalEventType,
@@ -185,6 +258,7 @@ export async function markTripJournalEventSynced(
 }
 
 const STAGE_EVENT_TYPES = new Set<TripJournalEventType>(['Arrived', 'OnBoard']);
+const TERMINAL_EVENT_TYPES = new Set<TripJournalEventType>(['Completed', 'Cancelled', 'NoShow']);
 
 /** Journals with unsynced Arrived/OnBoard events and a numeric server job id. */
 export async function listPendingStageFlushes(): Promise<
@@ -203,9 +277,28 @@ export async function listPendingStageFlushes(): Promise<
   return out.sort((a, b) => a.journal.createdAt - b.journal.createdAt);
 }
 
+/** Phase 5e — unsynced Completed/Cancelled/NoShow with numeric server job id. */
+export async function listPendingTerminalFlushes(): Promise<
+  Array<{ journal: TripJournal; events: TripJournalEvent[] }>
+> {
+  const rows = await listTripJournals();
+  const out: Array<{ journal: TripJournal; events: TripJournalEvent[] }> = [];
+  for (const journal of rows) {
+    const jobId = String(journal.serverJobId || '').trim();
+    if (!jobId || !/^\d+$/.test(jobId)) continue;
+    const events = journal.events
+      .filter((e) => TERMINAL_EVENT_TYPES.has(e.type) && e.synced !== true)
+      .sort((a, b) => a.at - b.at);
+    if (events.length) out.push({ journal, events });
+  }
+  return out.sort((a, b) => a.journal.createdAt - b.journal.createdAt);
+}
+
 export async function hasPendingTripJournalWork(): Promise<boolean> {
   const hail = await listPendingHailCreates();
   if (hail.length) return true;
   const stages = await listPendingStageFlushes();
-  return stages.length > 0;
+  if (stages.length) return true;
+  const terminals = await listPendingTerminalFlushes();
+  return terminals.length > 0;
 }

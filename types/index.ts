@@ -245,14 +245,15 @@ export interface OfflineQueueItem {
   createdAt: number;
 }
 
-/** Phase 5c+ offline trip journal event types (5c uses HailCreate only). */
+/** Phase 5c–5e offline trip journal event types. */
 export type TripJournalEventType =
   | 'HailCreate'
   | 'Arrived'
   | 'OnBoard'
   | 'MeterOn'
   | 'Completed'
-  | 'Cancelled';
+  | 'Cancelled'
+  | 'NoShow';
 
 export type TripJournalSyncState = 'pending' | 'creating' | 'synced' | 'failed';
 

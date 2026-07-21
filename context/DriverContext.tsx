@@ -26,12 +26,13 @@ import {
   resolveServerBookingState,
   serverStatusIndex,
 } from '@/lib/jobServerSync';
-import { dispatchJournalKey, isProvisionalBookingId, isValidBookingId, localJobIdFromClientTripId, normalizeBookingId } from '@/lib/bookingId';
+import { dispatchJournalKey, isProvisionalBookingId, isValidBookingId, localJobIdFromClientTripId, normalizeBookingId, resolveJournalClientTripId } from '@/lib/bookingId';
 import { flushTripJournal } from '@/lib/tripJournalFlush';
 import {
   appendTripJournalEvent,
   createPendingHailJournal,
   ensureDispatchTripJournal,
+  ensureJournalForJob,
 } from '@/services/tripJournalService';
 import {
   loadPendingSyncBanner,
@@ -3812,6 +3813,42 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         }
       }
       if (completeFailed) {
+        // Phase 5e — journal terminal complete for journalable trips (no offline queue).
+        const journalKey = resolveJournalClientTripId(job);
+        if (journalKey) {
+          try {
+            const vehicleId = (await resolveVehicleId()) || '';
+            await ensureJournalForJob({
+              jobId: String(job.id),
+              clientTripId: job.clientTripId,
+              companyId: driver.companyId,
+              driverId: driver.id,
+              vehicleId,
+              source: job.source === 'hail' ? 'hail' : 'dispatch',
+            });
+            await appendTripJournalEvent(journalKey, 'Completed', {
+              action: 'complete',
+              jobId: job.id,
+              bookingId: job.id,
+              driverId: driver.id,
+              companyId: driver.companyId,
+              paymentType,
+              fare: totalFare,
+              totalFare,
+              distanceKm: closed.distanceKm,
+              distance: closed.distanceKm,
+              extras,
+              ...(tmDetails ?? {}),
+            });
+            await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
+            // Fall through to local clear (same as online success) — do not block payment UI.
+            completeFailed = false;
+          } catch (journalErr) {
+            console.warn('[Driver] journal complete failed; falling back to offline queue', journalErr);
+          }
+        }
+      }
+      if (completeFailed) {
         await enqueueOfflineItem({
           type: 'job_update',
           payload: {
@@ -3896,16 +3933,40 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       await cancelJobAsDriver(activeJob.id, driver.id, driver.companyId);
     } catch {
-      await enqueueOfflineItem({
-        type: 'job_update',
-        payload: {
-          action: 'cancel',
-          jobId: activeJob.id,
-          driverId: driver.id,
-          companyId: driver.companyId,
-        },
-      });
-      // Phase 5d — optimistic clear keeps a Syncing… banner until flush.
+      // Phase 5e — journal Cancelled for journalable trips; keep queue only as fallback.
+      const journalKey = resolveJournalClientTripId(activeJob);
+      let journalled = false;
+      if (journalKey) {
+        try {
+          const vehicleId = (await resolveVehicleId()) || '';
+          await ensureJournalForJob({
+            jobId: String(activeJob.id),
+            clientTripId: activeJob.clientTripId,
+            companyId: driver.companyId,
+            driverId: driver.id,
+            vehicleId,
+            source: activeJob.source === 'hail' ? 'hail' : 'dispatch',
+          });
+          await appendTripJournalEvent(journalKey, 'Cancelled', {
+            driverId: driver.id,
+            companyId: driver.companyId,
+          });
+          journalled = true;
+        } catch (journalErr) {
+          console.warn('[Driver] journal cancel failed; falling back to offline queue', journalErr);
+        }
+      }
+      if (!journalled) {
+        await enqueueOfflineItem({
+          type: 'job_update',
+          payload: {
+            action: 'cancel',
+            jobId: activeJob.id,
+            driverId: driver.id,
+            companyId: driver.companyId,
+          },
+        });
+      }
       await applySyncingBanner({ message: 'Syncing cancel…', reason: 'cancel', at: Date.now() });
     }
     await clearJobLocallyAfterTerminal();
@@ -3944,18 +4005,44 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           err instanceof TypeError ||
           (err instanceof Error && err.message.toLowerCase().includes('network')),
       });
-      await enqueueOfflineItem({
-        type: 'job_update',
-        payload: {
-          action: 'no_show',
-          jobId,
-          driverId,
-          companyId,
-        },
-      });
+      // Phase 5e — journal NoShow for journalable trips; keep queue only as fallback.
+      const journalKey = resolveJournalClientTripId(activeJob);
+      let journalled = false;
+      if (journalKey) {
+        try {
+          const vehicleId = (await resolveVehicleId()) || '';
+          await ensureJournalForJob({
+            jobId: String(jobId),
+            clientTripId: activeJob.clientTripId,
+            companyId,
+            driverId,
+            vehicleId,
+            source: activeJob.source === 'hail' ? 'hail' : 'dispatch',
+          });
+          await appendTripJournalEvent(journalKey, 'NoShow', {
+            driverId,
+            companyId,
+          });
+          journalled = true;
+        } catch (journalErr) {
+          console.warn('[Driver] journal no-show failed; falling back to offline queue', journalErr);
+        }
+      }
+      if (!journalled) {
+        await enqueueOfflineItem({
+          type: 'job_update',
+          payload: {
+            action: 'no_show',
+            jobId,
+            driverId,
+            companyId,
+          },
+        });
+      }
       await applySyncingBanner({ message: 'Syncing no-show…', reason: 'no_show', at: Date.now() });
-      console.warn('[no-show] queued offline job_update (no_show) — flush replays via /api/cancel', {
+      console.warn('[no-show] queued offline terminal (journal or queue) — flush via /api/cancel', {
         jobId,
+        journalled,
       });
     }
     await clearJobLocallyAfterTerminal();

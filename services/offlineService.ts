@@ -174,6 +174,10 @@ async function flushJobUpdate(
  * Replay queued driver actions against the real dispatch endpoints.
  * Historically this posted to `/api/offline-sync`, which does not exist —
  * the server’s `/api/syncOfflineTrip` is a different full-trip journal API.
+ *
+ * Phase 5e — complete/cancel/no_show for journalled trips append to the trip
+ * journal instead of this queue. Flush still supports legacy queued terminals
+ * and always handles decline/recall.
  */
 export async function enqueueOfflineItem(item: Omit<OfflineQueueItem, 'id' | 'createdAt'>) {
   const queue = (await getData<OfflineQueueItem[]>(STORAGE_KEYS.offlineQueue)) ?? [];
