@@ -17,6 +17,11 @@ export function localJobIdFromClientTripId(clientTripId: string): string {
   return `local:${String(clientTripId || '').trim()}`;
 }
 
+/** Phase 5d — stable trip-journal key for a numeric dispatch booking. */
+export function dispatchJournalKey(jobId: string | number): string {
+  return `job:${String(jobId || '').trim()}`;
+}
+
 export function normalizeBookingId(raw: unknown): string {
   const s = String(raw ?? '').trim();
   if (s.includes(',')) return s.split(',')[0].trim();

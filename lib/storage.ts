@@ -38,4 +38,6 @@ export const STORAGE_KEYS = {
   pendingHailClientTripId: 'bw_pending_hail_client_trip_id',
   /** Phase 5c — offline trip journals (hail create + later stage events). */
   tripJournal: 'bw_trip_journal',
+  /** Phase 5d — persistent Syncing… banner text until offline flush completes. */
+  pendingSyncBanner: 'bw_pending_sync_banner',
 } as const;

@@ -26,9 +26,19 @@ import {
   resolveServerBookingState,
   serverStatusIndex,
 } from '@/lib/jobServerSync';
-import { isProvisionalBookingId, isValidBookingId, localJobIdFromClientTripId, normalizeBookingId } from '@/lib/bookingId';
+import { dispatchJournalKey, isProvisionalBookingId, isValidBookingId, localJobIdFromClientTripId, normalizeBookingId } from '@/lib/bookingId';
 import { flushTripJournal } from '@/lib/tripJournalFlush';
-import { createPendingHailJournal } from '@/services/tripJournalService';
+import {
+  appendTripJournalEvent,
+  createPendingHailJournal,
+  ensureDispatchTripJournal,
+} from '@/services/tripJournalService';
+import {
+  loadPendingSyncBanner,
+  resolvePendingSyncBanner,
+  savePendingSyncBanner,
+  type PendingSyncBanner,
+} from '@/lib/pendingSyncBanner';
 import {
   clearChatNotification,
   clearDriverNotification,
@@ -198,6 +208,8 @@ interface DriverContextValue {
   activeVehicleBodyType: string;
   isOffline: boolean;
   connectionNotice: DriverConnectionNotice;
+  /** Phase 5d — persistent until cancel/no-show/stage journal flush completes. */
+  syncingBanner: string | null;
   setSelectedVehicleId: (id: string) => void;
   refreshVehicles: () => Promise<void>;
   refreshJobHistory: () => Promise<void>;
@@ -551,6 +563,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [isOffline, setIsOffline] = useState(false);
   const [connectionNotice, setConnectionNotice] =
     useState<DriverConnectionNotice>(null);
+  const [syncingBanner, setSyncingBanner] = useState<string | null>(null);
   const [hailActive, setHailActive] = useState(false);
   const [hailPickupAddress, setHailPickupAddress] = useState<string | null>(null);
   const [hailPickupLat, setHailPickupLat] = useState<number | undefined>();
@@ -603,6 +616,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const refreshActiveJobRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const reconcileOffersRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const flushPendingTripJournalRef = useRef<(() => Promise<void>) | null>(null);
+  const refreshSyncingBannerRef = useRef<(() => Promise<void>) | null>(null);
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
   const jobOfferRef = useRef<JobOffer | null>(null);
   const networkConnectedRef = useRef<boolean | null>(null);
@@ -806,6 +820,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           meterRef.current = m;
           setHailActive(true);
         }
+        const storedBanner = await loadPendingSyncBanner();
+        const resolved = (await resolvePendingSyncBanner()) ?? storedBanner;
+        setSyncingBanner(resolved?.message ?? null);
+        await savePendingSyncBanner(resolved);
       } catch (err) {
         console.error('[Driver] hydrate storage failed:', err);
       }
@@ -829,6 +847,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             }
             await reconcileOffersRef.current?.('netinfo-reconnect');
             await flushOfflineQueue();
+            await refreshSyncingBannerRef.current?.();
           }
         } catch (err) {
           console.error('[Driver] connectivity handler:', err);
@@ -2616,6 +2635,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
   refreshActiveJobRef.current = refreshActiveJobFromServer;
 
+  const applySyncingBanner = async (banner: PendingSyncBanner | null) => {
+    setSyncingBanner(banner?.message ?? null);
+    await savePendingSyncBanner(banner);
+  };
+
+  refreshSyncingBannerRef.current = async () => {
+    const resolved = await resolvePendingSyncBanner();
+    await applySyncingBanner(resolved);
+  };
+
   flushPendingTripJournalRef.current = async () => {
     if (!dispatchIsConnected(networkConnectedRef.current, rtdbConnectedRef.current)) return;
     await flushTripJournal({
@@ -2640,7 +2669,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           });
         }
       },
+      onStageSynced: async ({ serverJobId, version }) => {
+        const live = activeJobRef.current;
+        if (!live || String(live.id) !== String(serverJobId) || version == null) return;
+        setActiveJob((prev) => {
+          if (!prev || String(prev.id) !== String(serverJobId)) return prev;
+          const merged = { ...prev, updateSeq: version };
+          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+          return merged;
+        });
+      },
     });
+    await refreshSyncingBannerRef.current?.();
   };
 
   useSafeEffect(() => {
@@ -2704,6 +2744,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             void refreshActiveJobRef.current?.('rtdb-reconnect');
           }
           void reconcileOffersRef.current?.('rtdb-reconnect');
+          // Phase 5d — cancel/no-show queue may only clear when RTDB returns.
+          await flushOfflineQueue();
+          await refreshSyncingBannerRef.current?.();
         })();
       }
     });
@@ -3492,7 +3535,31 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       if (nextStage === 'arrived' || nextStage === 'onboard') {
-        await syncJobStageToDispatch(nextStage, { id: activeJob.id, updateSeq: activeJob.updateSeq });
+        const offline = !dispatchIsConnected(
+          networkConnectedRef.current,
+          rtdbConnectedRef.current,
+        );
+        const numericJob = /^\d+$/.test(String(activeJob.id));
+        if (offline && numericJob && !isProvisionalBookingId(activeJob.id)) {
+          // Phase 5d — optimistic local stage; flush via /api/job/stage on reconnect.
+          const vehicleId = (await resolveVehicleId()) || '';
+          await ensureDispatchTripJournal({
+            jobId: String(activeJob.id),
+            companyId: driver.companyId,
+            driverId: driver.id,
+            vehicleId,
+          });
+          await appendTripJournalEvent(
+            dispatchJournalKey(activeJob.id),
+            nextStage === 'arrived' ? 'Arrived' : 'OnBoard',
+            { updateSeq: activeJob.updateSeq ?? 0 },
+          );
+          await applySyncingBanner({ message: 'Syncing…', reason: 'stages', at: Date.now() });
+        } else if (!offline) {
+          await syncJobStageToDispatch(nextStage, { id: activeJob.id, updateSeq: activeJob.updateSeq });
+        } else if (isProvisionalBookingId(activeJob.id)) {
+          console.log('[Driver] skip offline stage journal for provisional hail', activeJob.id);
+        }
       }
 
       const now = Date.now();
@@ -3838,6 +3905,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           companyId: driver.companyId,
         },
       });
+      // Phase 5d — optimistic clear keeps a Syncing… banner until flush.
+      await applySyncingBanner({ message: 'Syncing cancel…', reason: 'cancel', at: Date.now() });
     }
     await clearJobLocallyAfterTerminal();
   };
@@ -3884,6 +3953,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           companyId,
         },
       });
+      await applySyncingBanner({ message: 'Syncing no-show…', reason: 'no_show', at: Date.now() });
       console.warn('[no-show] queued offline job_update (no_show) — flush replays via /api/cancel', {
         jobId,
       });
@@ -4073,6 +4143,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           },
         });
         await storeData(STORAGE_KEYS.pendingHailClientTripId, null);
+        await applySyncingBanner({ message: 'Syncing…', reason: 'hail', at: Date.now() });
         jobId = localJobIdFromClientTripId(clientTripId);
         updateSeq = undefined;
       } else {
@@ -4452,6 +4523,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         activeVehicleBodyType,
         isOffline,
         connectionNotice,
+        syncingBanner,
         setSelectedVehicleId,
         refreshVehicles,
         refreshJobHistory,

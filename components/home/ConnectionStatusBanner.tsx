@@ -3,20 +3,36 @@ import { useDriver } from '@/context/DriverContext';
 import { StyleSheet, Text, View } from 'react-native';
 
 export function ConnectionStatusBanner() {
-  const { connectionNotice } = useDriver();
-  if (!connectionNotice) return null;
+  const { connectionNotice, syncingBanner } = useDriver();
 
-  const offline = connectionNotice === 'offline';
+  // Syncing banner persists after optimistic cancel/no-show/stage until flush.
+  // Prefer connection notices while they are active; otherwise show Syncing….
+  if (connectionNotice) {
+    const offline = connectionNotice === 'offline';
+    return (
+      <View
+        accessibilityLiveRegion="polite"
+        accessibilityRole="alert"
+        style={[styles.banner, offline ? styles.offline : styles.online]}
+      >
+        <View style={[styles.dot, offline ? styles.offlineDot : styles.onlineDot]} />
+        <Text style={styles.text}>
+          {offline ? 'No connection to dispatch' : 'Back online'}
+        </Text>
+      </View>
+    );
+  }
+
+  if (!syncingBanner) return null;
+
   return (
     <View
       accessibilityLiveRegion="polite"
-      accessibilityRole="alert"
-      style={[styles.banner, offline ? styles.offline : styles.online]}
+      accessibilityRole="status"
+      style={[styles.banner, styles.syncing]}
     >
-      <View style={[styles.dot, offline ? styles.offlineDot : styles.onlineDot]} />
-      <Text style={styles.text}>
-        {offline ? 'No connection to dispatch' : 'Back online'}
-      </Text>
+      <View style={[styles.dot, styles.syncingDot]} />
+      <Text style={styles.text}>{syncingBanner}</Text>
     </View>
   );
 }
@@ -40,6 +56,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F2F20',
     borderBottomColor: Colors.success,
   },
+  syncing: {
+    backgroundColor: '#1A2433',
+    borderBottomColor: Colors.accent,
+  },
   dot: {
     width: 8,
     height: 8,
@@ -47,6 +67,7 @@ const styles = StyleSheet.create({
   },
   offlineDot: { backgroundColor: Colors.danger },
   onlineDot: { backgroundColor: Colors.success },
+  syncingDot: { backgroundColor: Colors.accent },
   text: {
     color: '#FFFFFF',
     fontSize: 13,
