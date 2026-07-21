@@ -36,4 +36,6 @@ export const STORAGE_KEYS = {
   vehicleSessionReady: 'bw_vehicle_session_ready',
   /** Phase 5b — pending hail clientTripId until create succeeds (retry-safe). */
   pendingHailClientTripId: 'bw_pending_hail_client_trip_id',
+  /** Phase 5c — offline trip journals (hail create + later stage events). */
+  tripJournal: 'bw_trip_journal',
 } as const;

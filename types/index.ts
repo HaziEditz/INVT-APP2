@@ -245,6 +245,49 @@ export interface OfflineQueueItem {
   createdAt: number;
 }
 
+/** Phase 5c+ offline trip journal event types (5c uses HailCreate only). */
+export type TripJournalEventType =
+  | 'HailCreate'
+  | 'Arrived'
+  | 'OnBoard'
+  | 'MeterOn'
+  | 'Completed'
+  | 'Cancelled';
+
+export type TripJournalSyncState = 'pending' | 'creating' | 'synced' | 'failed';
+
+export interface TripJournalEvent {
+  id: string;
+  type: TripJournalEventType;
+  at: number;
+  isoTimestamp: string;
+  payload?: Record<string, unknown>;
+  synced?: boolean;
+}
+
+export interface TripJournalHailCreate {
+  tariffId: string;
+  pickup: { address: string; lat?: number; lng?: number };
+  startedAt: number;
+}
+
+/** Persistent offline trip record keyed by clientTripId. */
+export interface TripJournal {
+  clientTripId: string;
+  localJobId: string;
+  serverJobId?: string;
+  companyId: string;
+  driverId: string;
+  vehicleId: string;
+  source: 'hail' | 'dispatch';
+  syncState: TripJournalSyncState;
+  createdAt: number;
+  updatedAt: number;
+  hailCreate?: TripJournalHailCreate;
+  events: TripJournalEvent[];
+  lastError?: string;
+}
+
 export interface CompanyInfo {
   id: string;
   name: string;

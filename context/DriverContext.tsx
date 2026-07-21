@@ -26,7 +26,9 @@ import {
   resolveServerBookingState,
   serverStatusIndex,
 } from '@/lib/jobServerSync';
-import { isValidBookingId, normalizeBookingId } from '@/lib/bookingId';
+import { isProvisionalBookingId, isValidBookingId, localJobIdFromClientTripId, normalizeBookingId } from '@/lib/bookingId';
+import { flushTripJournal } from '@/lib/tripJournalFlush';
+import { createPendingHailJournal } from '@/services/tripJournalService';
 import {
   clearChatNotification,
   clearDriverNotification,
@@ -600,6 +602,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const repairPresenceRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const refreshActiveJobRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const reconcileOffersRef = useRef<((reason?: string) => Promise<void>) | null>(null);
+  const flushPendingTripJournalRef = useRef<(() => Promise<void>) | null>(null);
   const lastOfferSeenRef = useRef<{ id: string; at: number } | null>(null);
   const jobOfferRef = useRef<JobOffer | null>(null);
   const networkConnectedRef = useRef<boolean | null>(null);
@@ -820,6 +823,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             if (shiftActiveRef.current) {
               void repairPresenceRef.current?.('netinfo-reconnect');
             }
+            await flushPendingTripJournalRef.current?.();
             if (activeJobRef.current?.id) {
               void refreshActiveJobRef.current?.('netinfo-reconnect');
             }
@@ -2525,6 +2529,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!driver?.companyId || !driver.id) return;
     const job = activeJobRef.current;
     if (!job?.id || !isValidBookingId(job.id)) return;
+    // Phase 5c — provisional offline hail has no server row until journal flush.
+    if (isProvisionalBookingId(job.id) || String(job.id).startsWith('local:')) {
+      console.log(`[Driver] ${reason}: skip server refresh for provisional hail ${job.id}`);
+      return;
+    }
     const hailTrip = isHailTripJob(job, hailActiveRef.current);
     try {
       const server = await resolveServerBookingState(driver.companyId, driver.id, job.id);
@@ -2607,6 +2616,33 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
   refreshActiveJobRef.current = refreshActiveJobFromServer;
 
+  flushPendingTripJournalRef.current = async () => {
+    if (!dispatchIsConnected(networkConnectedRef.current, rtdbConnectedRef.current)) return;
+    await flushTripJournal({
+      onHailCreated: async ({ clientTripId, serverJobId, updateSeq, vehicleId, companyId }) => {
+        const live = activeJobRef.current;
+        if (live?.clientTripId === clientTripId) {
+          const bound: ActiveJob = {
+            ...live,
+            id: serverJobId,
+            updateSeq,
+            clientTripId,
+          };
+          setActiveJob(bound);
+          activeJobIdRef.current = serverJobId;
+          activeJobRef.current = bound;
+          persistActiveJobAsync(bound);
+        }
+        if (driver && companyId && vehicleId) {
+          writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+          void patchOnlineCurrentJobId(companyId, vehicleId, serverJobId).catch((err) => {
+            console.warn('[Driver] patchOnlineCurrentJobId after journal flush failed:', err);
+          });
+        }
+      },
+    });
+  };
+
   useSafeEffect(() => {
     if (!driver?.companyId || !driver.id || !activeJob?.id) return;
     void refreshActiveJobFromServer('active-job-resume');
@@ -2662,10 +2698,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (shiftActiveRef.current) {
           void repairPresenceRef.current?.('rtdb-reconnect');
         }
-        if (activeJobRef.current?.id) {
-          void refreshActiveJobRef.current?.('rtdb-reconnect');
-        }
-        void reconcileOffersRef.current?.('rtdb-reconnect');
+        void (async () => {
+          await flushPendingTripJournalRef.current?.();
+          if (activeJobRef.current?.id) {
+            void refreshActiveJobRef.current?.('rtdb-reconnect');
+          }
+          void reconcileOffersRef.current?.('rtdb-reconnect');
+        })();
       }
     });
     return unsubRtdb;
@@ -3043,6 +3082,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (jobRef?.id && !isValidBookingId(jobRef.id)) {
         throw new Error(`Invalid booking id: ${jobRef.id}`);
       }
+      return;
+    }
+    // Phase 5c — local: provisional hail waits for journal flush before stage APIs.
+    if (isProvisionalBookingId(jobRef.id)) {
+      console.log(`[Driver] skip stage sync for provisional booking ${jobRef.id}`);
       return;
     }
 
@@ -4001,17 +4045,50 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         await storeData(STORAGE_KEYS.pendingHailClientTripId, clientTripId);
       }
 
-      const { jobId, updateSeq } = await createHailJobOnDispatch({
-        companyId: driver.companyId,
-        driverId: driver.id,
-        vehicleId,
-        tariffId: selectedTariff.id,
-        pickup,
-        clientTripId,
-      });
-      await storeData(STORAGE_KEYS.pendingHailClientTripId, null);
-
+      const offline = !dispatchIsConnected(
+        networkConnectedRef.current,
+        rtdbConnectedRef.current,
+      );
       const now = Date.now();
+      const pickupSnapshot = {
+        address: pickup.address,
+        lat: pickup.lat,
+        lng: pickup.lng,
+      };
+
+      let jobId: string;
+      let updateSeq: number | undefined;
+
+      if (offline) {
+        // Phase 5c — optimistic hail; flush create-or-get on reconnect.
+        await createPendingHailJournal({
+          clientTripId,
+          companyId: driver.companyId,
+          driverId: driver.id,
+          vehicleId,
+          hailCreate: {
+            tariffId: selectedTariff.id,
+            pickup: pickupSnapshot,
+            startedAt: now,
+          },
+        });
+        await storeData(STORAGE_KEYS.pendingHailClientTripId, null);
+        jobId = localJobIdFromClientTripId(clientTripId);
+        updateSeq = undefined;
+      } else {
+        const created = await createHailJobOnDispatch({
+          companyId: driver.companyId,
+          driverId: driver.id,
+          vehicleId,
+          tariffId: selectedTariff.id,
+          pickup: pickupSnapshot,
+          clientTripId,
+        });
+        await storeData(STORAGE_KEYS.pendingHailClientTripId, null);
+        jobId = created.jobId;
+        updateSeq = created.updateSeq;
+      }
+
       const hailJob: ActiveJob = {
         id: jobId,
         type: 'Taxi',
@@ -4048,10 +4125,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
       startMeterWatch();
 
-      writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
-      void patchOnlineCurrentJobId(driver.companyId, vehicleId, jobId).catch((err) => {
-        console.warn('[Driver] patchOnlineCurrentJobId after hail start failed:', err);
-      });
+      if (!offline) {
+        writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+        void patchOnlineCurrentJobId(driver.companyId, vehicleId, jobId).catch((err) => {
+          console.warn('[Driver] patchOnlineCurrentJobId after hail start failed:', err);
+        });
+      }
     } catch (err) {
       setHailPickupAddress(null);
       setHailPickupLat(undefined);
