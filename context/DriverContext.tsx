@@ -1891,12 +1891,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     if (!readyForJobsRef.current) {
+      console.log(
+        `[Driver] offer ${offer.id} on Offer tab — popup deferred until readyForJobs ` +
+          `(shift bootstrap / GPS still in progress)`,
+      );
       return;
     }
 
     setJobOffer(offer);
     void alertDriverToOffer(offer);
   };
+
+  // Offers that arrived during Away bootstrap (list only) get a popup once ready.
+  useSafeEffect(() => {
+    if (!shiftActive || !readyForJobs) return;
+    if (jobOfferRef.current?.id) return;
+    if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
+
+    let best: JobOffer | null = null;
+    for (const o of broadcastOffersRef.current.values()) {
+      if (o.expiresAt && o.expiresAt <= Date.now()) continue;
+      if (!best || (o.postedAt || 0) > (best.postedAt || 0)) best = o;
+    }
+    if (!best?.id) return;
+
+    console.log('[Driver] flush deferred offer popup after readyForJobs', best.id);
+    setJobOffer({ ...best, silent: false });
+    void alertDriverToOffer({ ...best, silent: false });
+  }, [shiftActive, readyForJobs], 'Driver-flushDeferredOfferPopup');
 
   const handleDriverNotification = async (val: Record<string, unknown>) => {
     if (!driver?.id) return;
@@ -2832,16 +2854,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await storeData(STORAGE_KEYS.shiftActive, true);
 
     try {
+      // Bootstrap session (Away — not auto-dispatch eligible). Available is written
+      // only after GPS/location + readyForJobs so the first offer cannot land while
+      // the popup gate is closed and lastSeen is already aging.
       console.log('[Shift] startShift — profile uid:', driver.uid, 'vehicle:', vehicleId);
       await startShiftOnline(driver, vehicleId);
 
       // GPS + fresh lastSeen before advertising offerable — same Firebase shape as
-      // hail-complete / goAvailable. Location was previously fire-and-forget after
-      // readyForJobs=true, so the first auto-dispatch ticks often saw 0,0 / no GPS.
+      // hail-complete / goAvailable. Previously startShiftOnline wrote Available then
+      // awaited GPS enrich while readyForJobs was still false → Offer-tab-only + network bounce.
       let trackingStarted = false;
       try {
         const { startBackgroundTracking } = await import('@/services/locationService');
-        console.log('[Shift] location tracking begin (before readyForJobs)');
+        console.log('[Shift] location tracking begin (before Available / readyForJobs)');
         trackingStarted = await startBackgroundTracking(
           driver.id,
           driver.companyId,

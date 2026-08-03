@@ -377,64 +377,12 @@ function buildPresenceRecord(
   };
 }
 
-function fmtNzDate(d: Date): string {
-  return d.toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-function fmtNzTime(d: Date): string {
-  return d.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-/** Enrich presence after minimal shift write — no onDisconnect (was clearing nodes too early). */
-async function enrichShiftPresenceInBackground(
-  driver: DriverProfile,
-  vehicleId: string,
-  startedAt: Date,
-): Promise<void> {
-  if (isPresenceSessionEnded(driver.companyId, vehicleId)) return;
-  const onlinePath = `online/${driver.companyId}/${vehicleId}`;
-  await ensureAuthUserForRtdbWrite(`enrichShiftPresence → ${onlinePath}`);
-
-  if (isPresenceSessionEnded(driver.companyId, vehicleId)) return;
-
-  const { lat, lng } = await getGps();
-  const record = buildPresenceRecord(driver, vehicleId, 'Available', lat, lng);
-  const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
-  const nowIso = startedAt.toISOString();
-
-  console.log('[Presence] enrich update /current →', `${onlinePath}/current`, {
-    companyId: driver.companyId,
-    vehicleId,
-  });
-  await update(presencePath, {
-    ...record,
-    shiftStarted: true,
-    shiftStartedAt: nowIso,
-  });
-  console.log('[Presence] enrich update /current OK');
-
-  console.log('[Presence] enrich update base →', onlinePath, {
-    companyId: driver.companyId,
-    vehicleId,
-  });
-  await update(ref(getDatabaseInstance(), onlinePath), {
-    VehicleStatus: 'Available',
-    status: 'Available',
-    online: true,
-    shiftStartedAt: nowIso,
-    logInDate: fmtNzDate(startedAt),
-    logInTime: fmtNzTime(startedAt),
-    vehiclenumber: vehicleId,
-    vehicleId,
-    updatedAt: nowIso,
-    lastSeen: Date.now(),
-    lat: lat || 0,
-    lng: lng || 0,
-  });
-  console.log('[Presence] enrich update base OK');
-}
-
-/** Start shift: minimal RTDB write first, then enrich when base writes succeed. */
+/**
+ * Bootstrap RTDB session for a new shift WITHOUT advertising Available.
+ * Available + fresh lastSeen/GPS are written later by startShift after location
+ * is ready and readyForJobs flips true — otherwise auto-dispatch can offer while
+ * the popup gate is still closed and lastSeen goes stale during GPS wait.
+ */
 export async function startShiftOnline(driver: DriverProfile, vehicleId: string): Promise<void> {
   clearPresenceSessionEnded(driver.companyId, vehicleId);
   const onlinePath = `online/${driver.companyId}/${vehicleId}`;
@@ -461,31 +409,30 @@ export async function startShiftOnline(driver: DriverProfile, vehicleId: string)
   const baseRef = ref(getDatabaseInstance(), onlinePath);
   const currentRef = ref(getDatabaseInstance(), `${onlinePath}/current`);
 
-  console.log('[Presence] startShiftOnline update base →', onlinePath, {
+  // Away = visible on console but NOT auto-dispatch eligible (Available is deferred).
+  console.log('[Presence] startShiftOnline bootstrap Away (Available deferred) →', onlinePath, {
     companyId: driver.companyId,
     vehicleId,
   });
   await update(baseRef, {
-    vehiclestatus: 'Available',
+    vehiclestatus: 'Away',
+    VehicleStatus: 'Away',
     driverId: driver.id,
     driverid: parseDriverId(driver.id),
     companyId: driver.companyId,
     CompanyId: driver.companyId,
     shiftStarted: true,
     zonequeue: 0,
+    lastSeen: Date.now(),
     ...(vehicleType ? { vehicletype: vehicleType, vehicleType } : {}),
     seatCapacity,
     seats: seatCapacity,
   });
   console.log('[Presence] startShiftOnline update base OK');
 
-  console.log('[Presence] startShiftOnline set /current →', `${onlinePath}/current`, {
-    companyId: driver.companyId,
-    vehicleId,
-  });
   await set(currentRef, {
-    vehiclestatus: 'Available',
-    VehicleStatus: 'Available',
+    vehiclestatus: 'Away',
+    VehicleStatus: 'Away',
     driverid: parseDriverId(driver.id),
     driverId: driver.id,
     companyId: driver.companyId,
@@ -497,10 +444,18 @@ export async function startShiftOnline(driver: DriverProfile, vehicleId: string)
     seatCapacity,
     seats: seatCapacity,
   });
-  console.log('[Presence] startShiftOnline set /current OK');
+  console.log('[Presence] startShiftOnline set /current OK (Away bootstrap)');
 
-  await enrichShiftPresenceInBackground(driver, vehicleId, startedAt);
-  console.log('[Presence] startShiftOnline complete', { onlinePath });
+  try {
+    await onDisconnect(currentRef).update({ lastSeen: Date.now() });
+  } catch (err) {
+    console.warn('[Presence] onDisconnect failed (non-fatal):', err);
+  }
+
+  console.log('[Presence] startShiftOnline complete — waiting for startShift Available stamp', {
+    onlinePath,
+    startedAt: startedAt.toISOString(),
+  });
 }
 
 /** Mirror GPS-detected zone onto online/{cid}/{vid} for dispatch Zone tab + queue. */
