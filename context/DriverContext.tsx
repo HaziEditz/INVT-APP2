@@ -106,12 +106,14 @@ import {
 } from '@/services/presenceService';
 import { subscribeCompanyTariffs } from '@/lib/companyTariffs';
 import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
-import { markBookingCompleted } from '@/lib/allbookings';
+import { markBookingCompleted, readBookingTripAddresses } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import {
+  applyTripFieldsToJob,
   closedJobFieldsForCompleteApi,
   closedJobFieldsForJournal,
 } from '@/lib/closedJobSync';
+import { readDropoffAddress, readPickupAddress } from '@/lib/jobAddressFields';
 import {
   bindPendingClosedJobServerId,
   flushPendingClosedJobs,
@@ -386,8 +388,8 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
   return {
     id: idStr || String(rawId || ''),
     type: (val.type as JobOffer['type']) ?? 'Taxi',
-    pickup: String(val.pickup ?? val.from ?? val.jobpickup ?? ''),
-    dropoff: String(val.dropoff ?? val.to ?? val.jobdropoff ?? ''),
+    pickup: readPickupAddress(val),
+    dropoff: readDropoffAddress(val),
     passengerName: val.passengerName
       ? String(val.passengerName)
       : val.name || val.jobname
@@ -3879,7 +3881,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       throw new Error('No active job to complete.');
     }
 
-    const closed: ActiveJob = {
+    let closed: ActiveJob = {
       ...job,
       stage: 'complete',
       fare: totalFare,
@@ -3892,6 +3894,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           )
         : job.durationMin,
     };
+
+    // Dispatch jobs: dropoff may be missing on ActiveJob if offer parse missed DropAddress.
+    if (
+      (!String(closed.dropoff || '').trim() || !String(closed.pickup || '').trim()) &&
+      driver.companyId &&
+      isValidBookingId(job.id) &&
+      !isProvisionalBookingId(job.id)
+    ) {
+      try {
+        const fromBooking = await readBookingTripAddresses(driver.companyId, String(job.id));
+        if (fromBooking) {
+          closed = applyTripFieldsToJob(closed, fromBooking);
+        }
+      } catch (err) {
+        console.warn('[Driver] readBookingTripAddresses at complete failed:', err);
+      }
+    }
 
     const completedAt = Date.now();
     setCompletionError(null);

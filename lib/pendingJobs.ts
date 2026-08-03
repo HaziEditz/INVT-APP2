@@ -3,6 +3,7 @@ import { getDatabaseInstance } from '@/lib/firebase';
 import { collectJobNotes } from '@/lib/jobNotes';
 import { parseSchedulingMetaFromRecord } from '@/lib/jobDisplayMeta';
 import { isDispatchWindowOpen } from '@/lib/dispatchWindow';
+import { readDropoffAddress, readPickupAddress } from '@/lib/jobAddressFields';
 import { jobMatchesDriverVehicle, serviceTypeToJobType } from '@/lib/jobMatching';
 import { parseFiniteFare } from '@/lib/tariffs';
 import { JobOffer, Vehicle } from '@/types';
@@ -33,8 +34,8 @@ export function parseJobOfferRecord(
   if (opts?.requirePending !== false && status && status !== 'pending') return null;
   if (opts?.requireDispatchWindow !== false && !isDispatchWindowOpen(val)) return null;
 
-  const pickup = String(val.PickAddress ?? val.pickAddress ?? val.pickup ?? '');
-  const dropoff = String(val.DropAddress ?? val.dropAddress ?? val.dropoff ?? '');
+  const pickup = readPickupAddress(val);
+  const dropoff = readDropoffAddress(val);
   if (!pickup && !dropoff) return null;
 
   const serviceRaw = String(val.ServiceType ?? val.serviceType ?? 'taxi');

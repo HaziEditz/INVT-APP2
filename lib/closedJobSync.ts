@@ -1,4 +1,5 @@
-import type { ActiveJob, PaymentExtras, TmPaymentDetails } from '@/types';
+import { firstNonEmptyString } from './jobAddressFields.ts';
+import type { ActiveJob, PaymentExtras, TmPaymentDetails } from '../types/index.ts';
 
 /** Fields Closed Jobs / history need that payment-only complete used to drop. */
 export type ClosedJobTripFields = {
@@ -100,20 +101,20 @@ export function applyTripFieldsToJob(
   fields: Partial<ClosedJobTripFields> | Record<string, unknown> | undefined,
 ): ActiveJob {
   if (!fields || typeof fields !== 'object') return job;
-  const pickup = String(
-    (fields as ClosedJobTripFields).pickup ??
-      (fields as Record<string, unknown>).pickupAddress ??
-      (fields as Record<string, unknown>).PickAddress ??
-      job.pickup ??
-      '',
+  const rec = fields as Record<string, unknown>;
+  // Empty string must not win over DropAddress / booking backfill (?? treats '' as set).
+  const pickup = firstNonEmptyString(
+    (fields as ClosedJobTripFields).pickup,
+    rec.pickupAddress,
+    rec.PickAddress,
+    job.pickup,
   );
-  const dropoff = String(
-    (fields as ClosedJobTripFields).dropoff ??
-      (fields as Record<string, unknown>).dropAddress ??
-      (fields as Record<string, unknown>).DropAddress ??
-      (fields as Record<string, unknown>).finalDropAddress ??
-      job.dropoff ??
-      '',
+  const dropoff = firstNonEmptyString(
+    (fields as ClosedJobTripFields).dropoff,
+    rec.dropAddress,
+    rec.DropAddress,
+    rec.finalDropAddress,
+    job.dropoff,
   );
   const pickupLat =
     numOrUndef((fields as ClosedJobTripFields).pickupLat) ??

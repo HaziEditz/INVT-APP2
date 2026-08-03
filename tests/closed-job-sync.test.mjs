@@ -68,6 +68,21 @@ test('applyTripFieldsToJob restores sparse jobs from journal payload', () => {
   assert.equal(restored.passengerName, 'Lee');
 });
 
+test('applyTripFieldsToJob ignores empty dropoff string and uses DropAddress', () => {
+  const sparse = {
+    id: '1',
+    type: 'Taxi',
+    stage: 'complete',
+    pickup: 'Pick St',
+    dropoff: '',
+  };
+  const restored = applyTripFieldsToJob(sparse, {
+    dropoff: '',
+    DropAddress: 'Drop St from booking',
+  });
+  assert.equal(restored.dropoff, 'Drop St from booking');
+});
+
 test('pendingClosedJobMatches binds clientTripId and server id', () => {
   const row = {
     companyId: '860869',

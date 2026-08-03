@@ -1,4 +1,4 @@
-import { markBookingCompleted } from '@/lib/allbookings';
+import { markBookingCompleted, readBookingTripAddresses } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { isProvisionalBookingId } from '@/lib/bookingId';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
@@ -75,10 +75,17 @@ export async function flushPendingClosedJobs(opts?: {
   let wrote = 0;
   for (const row of rows) {
     if (opts?.only && !pendingClosedJobMatches(row, opts.only)) continue;
-    const job = applyTripFieldsToJob(row.job, opts?.tripFields);
+    let job = applyTripFieldsToJob(row.job, opts?.tripFields);
     const jobId = String(job.id || row.localJobId || '').trim();
     if (!jobId || isProvisionalBookingId(jobId) || jobId.startsWith('hail_')) {
       continue;
+    }
+    // Dispatch dropoff often missing on ActiveJob — backfill from allbookings on flush.
+    if (!String(job.dropoff || '').trim() || !String(job.pickup || '').trim()) {
+      const fromBooking = await readBookingTripAddresses(row.companyId, jobId);
+      if (fromBooking) {
+        job = applyTripFieldsToJob(job, fromBooking);
+      }
     }
     try {
       await writeClosedJob(
