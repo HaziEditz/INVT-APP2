@@ -92,6 +92,7 @@ import {
   markPresenceSessionEnded,
   moveDriverToEndOfQueue,
   repairOnlinePresence,
+  setPresenceOfferPending,
   startPresenceHeartbeat,
   startShiftOnline,
   stopPresenceHeartbeat,
@@ -2729,6 +2730,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return () => stopPresenceHeartbeat();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driver?.companyId, driver?.id, shiftActive, selectedVehicleId], 'Driver-presence-heartbeat');
+
+  // Mid-offer heal is 10s; idle Available lastSeen normally only refreshes ~15–20s.
+  // Stamp every 5s while an offer is live, then revert when cleared.
+  useSafeEffect(() => {
+    const pending = !!(shiftActive && jobOffer?.id);
+    setPresenceOfferPending(pending);
+    return () => setPresenceOfferPending(false);
+  }, [shiftActive, jobOffer?.id], 'Driver-offer-presence-heartbeat');
 
   useSafeEffect(() => {
     if (!driver?.companyId) return;

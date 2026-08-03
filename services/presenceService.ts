@@ -8,6 +8,11 @@ import {
   markPresenceSessionEnded,
   assertOnlinePresenceWriteAllowed,
 } from '@/lib/presenceGuards';
+import {
+  PRESENCE_HEARTBEAT_MS,
+  PRESENCE_LASTSEEN_REPAIR_MS,
+  PRESENCE_OFFER_HEARTBEAT_MS,
+} from '@/lib/presenceHeartbeatPolicy';
 
 export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned' | 'Picking' | 'Arrived' | 'Active';
 
@@ -17,15 +22,13 @@ export {
   markPresenceSessionEnded,
 } from '@/lib/presenceGuards';
 
-const PRESENCE_HEARTBEAT_MS = 20_000;
-/** Repair when the server-side lastSeen is older than this — keeps the driver under the dispatch 30s stale badge. */
-const PRESENCE_LASTSEEN_REPAIR_MS = 15_000;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatCtx: {
   driver: DriverProfile;
   vehicleId: string;
   status: FirebaseDriverStatus;
 } | null = null;
+let offerPendingMode = false;
 let lastPresenceWriteAt = 0;
 let lastPresenceWriteError: string | null = null;
 
@@ -35,6 +38,8 @@ export function getPresenceWriteDiagnostics() {
     lastWriteError: lastPresenceWriteError,
     heartbeatActive: heartbeatTimer != null,
     heartbeatStatus: heartbeatCtx?.status ?? null,
+    offerPendingMode,
+    heartbeatIntervalMs: offerPendingMode ? PRESENCE_OFFER_HEARTBEAT_MS : PRESENCE_HEARTBEAT_MS,
   };
 }
 
@@ -69,6 +74,36 @@ export function stopPresenceHeartbeat() {
     heartbeatTimer = null;
   }
   heartbeatCtx = null;
+  offerPendingMode = false;
+}
+
+function presenceHeartbeatIntervalMs(): number {
+  return offerPendingMode ? PRESENCE_OFFER_HEARTBEAT_MS : PRESENCE_HEARTBEAT_MS;
+}
+
+function runPresenceHeartbeatTick() {
+  const ctx = heartbeatCtx;
+  if (!ctx) return;
+  if (offerPendingMode) {
+    // Always stamp — repair()'s 15s skip gate would defeat the 5s offer cadence.
+    void stampPresenceLastSeen(ctx.driver, ctx.vehicleId, ctx.status).catch((err) => {
+      console.warn('[Presence] offer-pending lastSeen stamp failed:', err);
+    });
+    return;
+  }
+  void repairOnlinePresence(ctx.driver, ctx.vehicleId, ctx.status, 'heartbeat').catch((err) => {
+    console.warn('[Presence] heartbeat repair failed:', err);
+  });
+}
+
+function armPresenceHeartbeatTimer() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (!heartbeatCtx) return;
+  void runPresenceHeartbeatTick();
+  heartbeatTimer = setInterval(runPresenceHeartbeatTick, presenceHeartbeatIntervalMs());
 }
 
 /** Periodic presence refresh while on shift — heals silent write failures / empty nodes after Metro reload. */
@@ -77,17 +112,25 @@ export function startPresenceHeartbeat(
   vehicleId: string,
   status: FirebaseDriverStatus,
 ) {
-  stopPresenceHeartbeat();
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
   heartbeatCtx = { driver, vehicleId, status };
-  const tick = () => {
-    const ctx = heartbeatCtx;
-    if (!ctx) return;
-    void repairOnlinePresence(ctx.driver, ctx.vehicleId, ctx.status, 'heartbeat').catch((err) => {
-      console.warn('[Presence] heartbeat repair failed:', err);
-    });
-  };
-  void tick();
-  heartbeatTimer = setInterval(tick, PRESENCE_HEARTBEAT_MS);
+  armPresenceHeartbeatTimer();
+}
+
+/**
+ * Fast lastSeen stamps while a live offer is on screen. Reverts to the normal
+ * 20s repair heartbeat when the offer is accepted, declined, or cleared.
+ */
+export function setPresenceOfferPending(pending: boolean) {
+  const next = !!pending;
+  if (offerPendingMode === next) return;
+  offerPendingMode = next;
+  console.log(`[Presence] offer-pending heartbeat ${next ? 'ON' : 'OFF'} (${presenceHeartbeatIntervalMs()}ms)`);
+  if (!heartbeatCtx) return;
+  armPresenceHeartbeatTimer();
 }
 
 export function updatePresenceHeartbeatStatus(status: FirebaseDriverStatus) {
