@@ -1,0 +1,32 @@
+import { getAppBuildLabel } from '@/lib/appBuildInfo';
+import { Colors } from '@/constants/theme';
+import { StyleSheet, Text, View, ViewStyle } from 'react-native';
+
+type Props = {
+  style?: ViewStyle;
+  /** Optional prefix, e.g. "Build" */
+  prefix?: string;
+};
+
+/** Small non-intrusive build marker (version + git short SHA). */
+export function AppBuildLabel({ style, prefix }: Props) {
+  const label = prefix ? `${prefix} ${getAppBuildLabel()}` : getAppBuildLabel();
+  return (
+    <View style={[styles.wrap, style]} accessibilityLabel={`App build ${getAppBuildLabel()}`}>
+      <Text style={styles.text}>{label}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  text: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+  },
+});

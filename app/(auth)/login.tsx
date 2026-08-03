@@ -1,3 +1,4 @@
+import { AppBuildLabel } from '@/components/AppBuildLabel';
 import { Input } from '@/components/Input';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
@@ -124,6 +125,8 @@ export default function LoginScreen() {
               <Text style={styles.secondaryText}>Become a Driver</Text>
             </TouchableOpacity>
           </Link>
+
+          <AppBuildLabel style={styles.buildLabel} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -160,4 +163,5 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   secondaryText: { color: Colors.text, fontSize: 16, fontWeight: '600' },
+  buildLabel: { marginTop: 8, marginBottom: 4 },
 });

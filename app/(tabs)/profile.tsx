@@ -1,3 +1,4 @@
+import { AppBuildLabel } from '@/components/AppBuildLabel';
 import { Button } from '@/components/Button';
 import { EarningsBreakdownCard } from '@/components/EarningsBreakdownCard';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -273,6 +274,8 @@ export default function ProfileScreen() {
           );
         }}
       />
+
+      <AppBuildLabel style={{ marginTop: 20, marginBottom: 8 }} />
     </ScreenScroll>
   );
 }
