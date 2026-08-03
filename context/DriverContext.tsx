@@ -108,6 +108,16 @@ import { subscribeCompanyTariffs } from '@/lib/companyTariffs';
 import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
 import { markBookingCompleted } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
+import {
+  closedJobFieldsForCompleteApi,
+  closedJobFieldsForJournal,
+} from '@/lib/closedJobSync';
+import {
+  bindPendingClosedJobServerId,
+  flushPendingClosedJobs,
+  removePendingClosedJob,
+  upsertPendingClosedJob,
+} from '@/lib/pendingClosedJob';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
 import { getCurrentCoords, refreshHailPickupLocation } from '@/services/locationService';
 import { patchOnlineCurrentJobId } from '@/lib/liveMeterPresence';
@@ -2691,6 +2701,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           activeJobRef.current = bound;
           persistActiveJobAsync(bound);
         }
+        await bindPendingClosedJobServerId({ clientTripId, serverJobId }).catch((err) => {
+          console.warn('[Driver] bindPendingClosedJobServerId failed:', err);
+        });
         if (driver && companyId && vehicleId) {
           writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
           void patchOnlineCurrentJobId(companyId, vehicleId, serverJobId).catch((err) => {
@@ -2708,6 +2721,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           return merged;
         });
       },
+      onTerminalSynced: async ({ serverJobId, clientTripId, type, payload }) => {
+        if (type !== 'Completed') return;
+        await bindPendingClosedJobServerId({ clientTripId, serverJobId }).catch(() => undefined);
+        await flushPendingClosedJobs({
+          only: { serverJobId, clientTripId },
+          tripFields: payload,
+        }).catch((err) => {
+          console.warn('[Driver] flushPendingClosedJobs after terminal failed:', err);
+        });
+      },
+    });
+    // Catch any pending closed snapshots whose journal already synced earlier.
+    await flushPendingClosedJobs().catch((err) => {
+      console.warn('[Driver] flushPendingClosedJobs failed:', err);
     });
     await refreshSyncingBannerRef.current?.();
   };
@@ -3793,6 +3820,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setJobOffer(null);
     lastOfferSeenRef.current = null;
 
+    const tripCompleteFields = closedJobFieldsForCompleteApi(closed);
     const completePayload = {
       jobId: job.id,
       bookingId: job.id,
@@ -3812,13 +3840,35 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         distance: closed.distanceKm,
         paymentType,
         extras,
+        ...tripCompleteFields,
       },
     };
 
     const persistClosedJobToFirebase = () => {
       void (async () => {
+        const vehicleId = (await resolveVehicleId()) || '';
+        const pending = {
+          companyId: driver.companyId,
+          driverId: driver.id,
+          driverName: driver.name,
+          vehicleId,
+          localJobId: String(job.id),
+          clientTripId: job.clientTripId || resolveJournalClientTripId(job) || undefined,
+          job: closed,
+          paymentType,
+          extras,
+          totalFare,
+          tmDetails,
+          completedAt,
+        };
+        // Always stage full trip snapshot (addresses etc.) so reconnect can retry
+        // when the one-shot Firebase write fails offline.
         try {
-          const vehicleId = await resolveVehicleId();
+          await upsertPendingClosedJob(pending);
+        } catch (err) {
+          console.warn('[Driver] upsertPendingClosedJob failed:', err);
+        }
+        try {
           await writeClosedJob(
             driver.companyId,
             driver.id,
@@ -3829,10 +3879,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             tmDetails,
             { driverName: driver.name, vehicleId },
           );
+          await removePendingClosedJob({
+            localJobId: String(job.id),
+            clientTripId: pending.clientTripId,
+            serverJobId: String(closed.id),
+          });
         } catch (err) {
-          console.warn('[Driver] writeClosedJob failed:', err);
+          console.warn('[Driver] writeClosedJob failed (will retry on flush):', err);
         }
-        if (job.id && !String(job.id).startsWith('hail_')) {
+        if (job.id && !String(job.id).startsWith('hail_') && !isProvisionalBookingId(job.id)) {
           try {
             await markBookingCompleted(driver.companyId, job.id, {
               fare: totalFare,
@@ -3840,6 +3895,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               driverId: driver.id,
               completedAt,
               distanceKm: closed.distanceKm,
+              pickup: closed.pickup,
+              dropoff: closed.dropoff,
+              passengerName: closed.passengerName,
+              passengerPhone: closed.passengerPhone,
             });
           } catch (err) {
             console.warn('[Driver] markBookingCompleted failed:', err);
@@ -3907,6 +3966,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               distance: closed.distanceKm,
               extras,
               ...(tmDetails ?? {}),
+              ...closedJobFieldsForJournal(closed),
             });
             await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
             // Fall through to local clear (same as online success) — do not block payment UI.
@@ -3934,6 +3994,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             // Preserve payment-specific fields for flush → /api/job/complete
             // (TM / ACC / Stripe / Account / Cash — opaque to the sync layer).
             ...(tmDetails ?? {}),
+            ...closedJobFieldsForJournal(closed),
           },
         });
         const msg =

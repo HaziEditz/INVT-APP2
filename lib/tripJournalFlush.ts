@@ -33,7 +33,9 @@ export type TripJournalFlushHooks = {
   /** Called after a terminal event (complete/cancel/no-show) syncs. */
   onTerminalSynced?: (args: {
     serverJobId: string;
+    clientTripId: string;
     type: 'Completed' | 'Cancelled' | 'NoShow';
+    payload?: Record<string, unknown>;
   }) => void | Promise<void>;
 };
 
@@ -86,6 +88,17 @@ async function flushTerminalEvent(args: {
       payload.extras && typeof payload.extras === 'object'
         ? (payload.extras as Record<string, unknown>)
         : undefined;
+    const pickupLat = asNumber(payload.pickupLat);
+    const pickupLng = asNumber(payload.pickupLng);
+    const dropLat = asNumber(payload.dropLat ?? payload.dropoffLat);
+    const dropLng = asNumber(payload.dropLng ?? payload.dropoffLng);
+    const finalDropAddress =
+      asString(payload.finalDropAddress) ||
+      asString(payload.dropoff) ||
+      asString(payload.DropAddress) ||
+      asString(payload.dropAddress) ||
+      undefined;
+    const driverComments = asString(payload.notes) || asString(payload.driverComments) || undefined;
     await completeJobPayment({
       jobId,
       bookingId: jobId,
@@ -128,6 +141,12 @@ async function flushTerminalEvent(args: {
         accClaimNo: payload.accClaimNo,
         stripeChargeId: payload.stripeChargeId,
         stripePaymentIntentId: payload.stripePaymentIntentId,
+        pickupLat,
+        pickupLng,
+        dropLat,
+        dropLng,
+        finalDropAddress,
+        driverComments,
       },
     });
     return;
@@ -252,7 +271,12 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
         });
         await markTripJournalEventSynced(journal.clientTripId, ev.id);
         if (ev.type === 'Completed' || ev.type === 'Cancelled' || ev.type === 'NoShow') {
-          await hooks.onTerminalSynced?.({ serverJobId: jobId, type: ev.type });
+          await hooks.onTerminalSynced?.({
+            serverJobId: jobId,
+            clientTripId: journal.clientTripId,
+            type: ev.type,
+            payload: ev.payload,
+          });
         }
         flushed += 1;
         console.log('[trip-journal] flushed terminal', { jobId, type: ev.type });

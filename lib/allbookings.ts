@@ -10,10 +10,16 @@ export async function markBookingCompleted(
     driverId: string;
     completedAt: number;
     distanceKm?: number;
+    pickup?: string;
+    dropoff?: string;
+    passengerName?: string;
+    passengerPhone?: string;
   },
 ): Promise<void> {
   if (!companyId || !bookingId) return;
   const database = getDatabaseInstance();
+  const pickup = String(payload.pickup || '').trim();
+  const dropoff = String(payload.dropoff || '').trim();
   await update(ref(database, `allbookings/${companyId}/${bookingId}`), {
     status: 'completed',
     jobstatus: 'completed',
@@ -25,5 +31,17 @@ export async function markBookingCompleted(
     completedAt: payload.completedAt,
     distanceKm: payload.distanceKm,
     updatedAt: payload.completedAt,
+    ...(pickup
+      ? { PickAddress: pickup, pickup, pickupAddress: pickup }
+      : {}),
+    ...(dropoff
+      ? { DropAddress: dropoff, dropoff, dropAddress: dropoff }
+      : {}),
+    ...(payload.passengerName
+      ? { PassengerName: payload.passengerName, passengerName: payload.passengerName }
+      : {}),
+    ...(payload.passengerPhone
+      ? { PassengerPhone: payload.passengerPhone, passengerPhone: payload.passengerPhone }
+      : {}),
   });
 }

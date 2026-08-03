@@ -40,4 +40,6 @@ export const STORAGE_KEYS = {
   tripJournal: 'bw_trip_journal',
   /** Phase 5d — persistent Syncing… banner text until offline flush completes. */
   pendingSyncBanner: 'bw_pending_sync_banner',
+  /** Offline complete — full closed-job snapshot (addresses etc.) until Firebase write succeeds. */
+  pendingClosedJobs: 'bw_pending_closed_jobs',
 } as const;
