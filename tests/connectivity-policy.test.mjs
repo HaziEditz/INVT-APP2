@@ -8,6 +8,7 @@ import {
   connectionNoticeForTransition,
   dispatchIsConnected,
   offerAcceptanceIsAllowed,
+  tripJournalFlushIsAllowed,
 } from '../lib/dispatchConnectionPolicy.ts';
 
 test('C4 suppresses returned offer only for its previous driver', () => {
@@ -71,4 +72,10 @@ test('C6 notice persists offline and announces recovery only after outage', () =
   assert.equal(connectionNoticeForTransition(true, false), 'offline');
   assert.equal(connectionNoticeForTransition(false, false), 'offline');
   assert.equal(connectionNoticeForTransition(false, true), 'back_online');
+});
+
+test('trip journal flush needs device network only (not RTDB)', () => {
+  assert.equal(tripJournalFlushIsAllowed(true), true);
+  assert.equal(tripJournalFlushIsAllowed(null), true);
+  assert.equal(tripJournalFlushIsAllowed(false), false);
 });

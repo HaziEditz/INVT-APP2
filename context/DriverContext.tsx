@@ -60,6 +60,7 @@ import {
   connectionNoticeForTransition,
   dispatchIsConnected,
   offerAcceptanceIsAllowed,
+  tripJournalFlushIsAllowed,
   type DispatchConnectionNotice,
 } from '@/lib/dispatchConnectionPolicy';
 import {
@@ -827,6 +828,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         const resolved = (await resolvePendingSyncBanner()) ?? storedBanner;
         setSyncingBanner(resolved?.message ?? null);
         await savePendingSyncBanner(resolved);
+        // Pending offline completes must not wait for a reconnect edge after remount.
+        void flushPendingTripJournalRef.current?.();
       } catch (err) {
         console.error('[Driver] hydrate storage failed:', err);
       }
@@ -2671,7 +2674,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   flushPendingTripJournalRef.current = async () => {
-    if (!dispatchIsConnected(networkConnectedRef.current, rtdbConnectedRef.current)) return;
+    // HTTP journal sync — do not wait for RTDB (that dual-gate left Active jobs stuck).
+    if (!tripJournalFlushIsAllowed(networkConnectedRef.current)) return;
     await flushTripJournal({
       onHailCreated: async ({ clientTripId, serverJobId, updateSeq, vehicleId, companyId }) => {
         const live = activeJobRef.current;
@@ -2910,6 +2914,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         onForegroundResume: () => {
           void repairPresenceRef.current?.('app-foreground');
           void refreshActiveJobRef.current?.('app-foreground');
+          // Soft reconnect often skips NetInfo/RTDB edges; foreground must flush
+          // offline completes so dispatch does not stay Active until remount.
+          void (async () => {
+            await flushPendingTripJournalRef.current?.();
+            await flushOfflineQueue();
+            await refreshSyncingBannerRef.current?.();
+          })();
         },
       }).catch((err) => console.warn('[Shift] shiftRuntime start failed:', err)),
     );
@@ -2932,6 +2943,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (activeJobRef.current?.id && isValidBookingId(activeJobRef.current.id)) {
       void refreshActiveJobFromServer('shift-start');
     }
+    // After crash/reopen, pending offline completes may still be journalled.
+    void (async () => {
+      await flushPendingTripJournalRef.current?.();
+      await flushOfflineQueue();
+      await refreshSyncingBannerRef.current?.();
+    })();
     return true;
   };
 
