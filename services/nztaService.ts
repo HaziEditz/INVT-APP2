@@ -5,6 +5,7 @@ import {
   NZTA_WEEKLY_LOCKOUT_HOURS,
   NZTA_WEEKLY_MAX_HOURS,
 } from '@/constants/theme';
+import { journalShiftEndLogFailure } from '@/lib/pendingShiftEnd';
 import { loadLastShiftEnd, writeShiftEndLog } from '@/lib/shiftLogs';
 import { getData, nztaHoursStorageKey, removeData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { notifyBreakReminder } from '@/services/notificationService';
@@ -344,18 +345,12 @@ export async function endShiftClock(
   uid: string,
   driverId: string,
   reason: EndShiftReason = 'manual',
+  opts?: { vehicleId?: string | null },
 ) {
   const state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(companyId, uid)));
   const now = Date.now();
   const elapsed = Math.max(state.workedMinutes, shiftElapsedMinutes(state));
-
-  await writeShiftEndLog(companyId, uid, {
-    shiftEndAt: now,
-    shiftStartAt: state.shiftStartedAt ?? state.lastShiftStartAt ?? undefined,
-    workedMinutes: elapsed,
-    weeklyWorkedMinutes: state.weeklyWorkedMinutes,
-    driverId,
-  });
+  const shiftStartAt = state.shiftStartedAt ?? state.lastShiftStartAt ?? undefined;
 
   let lockoutUntil: number | null = null;
   let lockoutReason: NztaLockoutReason = null;
@@ -367,7 +362,7 @@ export async function endShiftClock(
     lockoutReason = 'weekly_rest';
   }
 
-  // Persist session locally for resume (<10h) and lockout enforcement.
+  // Persist session locally FIRST — never gate end-shift UI on RTDB.
   const next: NztaHoursState = {
     ...state,
     shiftStartedAt: null,
@@ -385,6 +380,32 @@ export async function endShiftClock(
     breakDeferredUntil: null,
   };
   await saveNztaHours(companyId, uid, next);
+
+  try {
+    await writeShiftEndLog(companyId, uid, {
+      shiftEndAt: now,
+      shiftStartAt,
+      workedMinutes: elapsed,
+      weeklyWorkedMinutes: state.weeklyWorkedMinutes,
+      driverId,
+    });
+  } catch (err) {
+    console.warn('[NZTA] writeShiftEndLog failed — journaling for reconnect:', err);
+    await journalShiftEndLogFailure({
+      companyId,
+      uid,
+      driverId,
+      vehicleId: opts?.vehicleId,
+      reason,
+      shiftEndAt: now,
+      shiftStartAt,
+      workedMinutes: elapsed,
+      weeklyWorkedMinutes: state.weeklyWorkedMinutes,
+    }).catch((journalErr) => {
+      console.warn('[NZTA] journalShiftEndLogFailure failed:', journalErr);
+    });
+  }
+
   return next;
 }
 

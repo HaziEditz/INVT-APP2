@@ -118,6 +118,10 @@ import {
   removePendingClosedJob,
   upsertPendingClosedJob,
 } from '@/lib/pendingClosedJob';
+import {
+  flushPendingShiftEnds,
+  journalPresenceClearFailure,
+} from '@/lib/pendingShiftEnd';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
 import { getCurrentCoords, refreshHailPickupLocation } from '@/services/locationService';
 import { patchOnlineCurrentJobId } from '@/lib/liveMeterPresence';
@@ -2736,6 +2740,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await flushPendingClosedJobs().catch((err) => {
       console.warn('[Driver] flushPendingClosedJobs failed:', err);
     });
+    await flushPendingShiftEnds(driver).catch((err) => {
+      console.warn('[Driver] flushPendingShiftEnds failed:', err);
+    });
     await refreshSyncingBannerRef.current?.();
   };
 
@@ -3070,9 +3077,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     vehicleId: string | null,
     reason: EndShiftReason = 'manual',
   ): Promise<EndShiftSummary | null> => {
-    // 1) Synchronous lock + stop all writers BEFORE any await / server DELETE.
-    //    Heartbeat, GPS keep-alive, and listener repair must not recreate
-    //    online/{cid}/{vid} after the server clears presence.
+    // Local-first: stop writers + NZTA immediately. Network (presence / shiftLogs)
+    // is best-effort and journalled for reconnect — never blocks End Shift / log off.
     if (driverSnapshot?.companyId && vehicleId) {
       markPresenceSessionEnded(driverSnapshot.companyId, vehicleId);
     }
@@ -3083,35 +3089,82 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setReadyForJobs(false);
     readyForJobsRef.current = false;
 
-    const { stopBackgroundTracking } = await import('@/services/locationService');
-    await stopBackgroundTracking();
+    try {
+      const { stopBackgroundTracking } = await import('@/services/locationService');
+      await stopBackgroundTracking();
+    } catch (err) {
+      console.warn('[Driver] stopBackgroundTracking failed:', err);
+    }
 
     let summary: EndShiftSummary | null = null;
 
     if (driverSnapshot?.companyId && driverSnapshot.uid) {
-      const { captureEndShiftSummary } = await import('@/services/nztaService');
-      summary = await captureEndShiftSummary(driverSnapshot.companyId, driverSnapshot.uid);
+      try {
+        const { captureEndShiftSummary } = await import('@/services/nztaService');
+        summary = await captureEndShiftSummary(driverSnapshot.companyId, driverSnapshot.uid);
+      } catch (err) {
+        console.warn('[Driver] captureEndShiftSummary failed:', err);
+      }
+    }
+
+    // NZTA local persist first (endShiftClock journals shiftLogs if RTDB fails).
+    let shiftEndAt = Date.now();
+    if (driverSnapshot?.companyId && driverSnapshot.uid) {
+      try {
+        const { endShiftClock } = await import('@/services/nztaService');
+        const nextHours = await endShiftClock(
+          driverSnapshot.companyId,
+          driverSnapshot.uid,
+          driverSnapshot.id,
+          reason,
+          { vehicleId },
+        );
+        if (nextHours?.lastShiftEndAt) shiftEndAt = nextHours.lastShiftEndAt;
+      } catch (err) {
+        console.warn('[Driver] endShiftClock failed (local hours may be incomplete):', err);
+      }
     }
 
     if (driverSnapshot && vehicleId) {
+      const likelyOffline =
+        networkConnectedRef.current === false || rtdbConnectedRef.current === false;
+      let presenceOk = !likelyOffline;
       try {
         await clearOnlinePresence(driverSnapshot, vehicleId);
       } catch (err) {
         console.warn('[Driver] clearOnlinePresence failed:', err);
+        presenceOk = false;
       }
       if (driverSnapshot.companyId) {
-        update(ref(getDatabaseInstance(), `vehicles/${driverSnapshot.companyId}/${vehicleId}`), {
-          currentDriverId: null,
-        }).catch(() => undefined);
+        try {
+          await update(ref(getDatabaseInstance(), `vehicles/${driverSnapshot.companyId}/${vehicleId}`), {
+            currentDriverId: null,
+          });
+        } catch (err) {
+          console.warn('[Driver] clear vehicle currentDriverId failed:', err);
+          presenceOk = false;
+        }
+      }
+      // clearOnlinePresence swallows many RTDB errors — journal whenever we were offline
+      // or an explicit write failed so reconnect can finish the clear.
+      if ((!presenceOk || likelyOffline) && driverSnapshot.companyId && driverSnapshot.uid) {
+        await journalPresenceClearFailure({
+          companyId: driverSnapshot.companyId,
+          uid: driverSnapshot.uid,
+          driverId: driverSnapshot.id,
+          vehicleId,
+          reason,
+          shiftEndAt,
+        }).catch((err) => console.warn('[Driver] journalPresenceClearFailure failed:', err));
       }
     }
 
-    if (driverSnapshot?.companyId && driverSnapshot.uid) {
-      const { endShiftClock } = await import('@/services/nztaService');
-      await endShiftClock(driverSnapshot.companyId, driverSnapshot.uid, driverSnapshot.id, reason);
+    try {
+      const { stopShiftRuntime } = await import('@/services/shiftRuntimeService');
+      stopShiftRuntime();
+    } catch (err) {
+      console.warn('[Driver] stopShiftRuntime failed:', err);
     }
-    const { stopShiftRuntime } = await import('@/services/shiftRuntimeService');
-    stopShiftRuntime();
     return summary;
   };
 
@@ -3135,10 +3188,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       const vehicleId = await resolveVehicleId();
       const driverSnapshot = driver;
-      await endShiftRemote(driverSnapshot, vehicleId);
+      try {
+        await endShiftRemote(driverSnapshot, vehicleId);
+      } catch (err) {
+        // Remote is best-effort; always clear local shift offline.
+        console.warn('[Driver] endShiftRemote soft-failed:', err);
+      }
       endShiftLocal();
     } catch (err) {
-      console.error('[Driver] endShift failed:', err);
+      console.error('[Driver] endShift local clear failed:', err);
       Alert.alert('End shift failed', err instanceof Error ? err.message : 'Could not end shift');
     } finally {
       endShiftInProgressRef.current = false;
@@ -3162,7 +3220,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const vehicleId = await resolveVehicleId();
       const driverSnapshot = driver;
       const reason = opts?.reason ?? 'manual';
-      const summary = await endShiftRemote(driverSnapshot, vehicleId, reason);
+      let summary: EndShiftSummary | null = null;
+      try {
+        summary = await endShiftRemote(driverSnapshot, vehicleId, reason);
+      } catch (err) {
+        console.warn('[Driver] endShiftRemote soft-failed:', err);
+        if (driverSnapshot?.companyId && driverSnapshot.uid) {
+          try {
+            const { captureEndShiftSummary } = await import('@/services/nztaService');
+            summary = await captureEndShiftSummary(driverSnapshot.companyId, driverSnapshot.uid);
+          } catch {
+            summary = null;
+          }
+        }
+      }
 
       if (summary && !opts?.skipSummary && !opts?.force) {
         setEndShiftSummary(summary);
@@ -3177,7 +3248,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       console.error('[Driver] endShiftAndSignOut failed:', err);
-      Alert.alert('End shift failed', err instanceof Error ? err.message : 'Could not end shift');
+      // Last resort: still try local clear + sign-out so driver is not stuck offline.
+      try {
+        endShiftLocal();
+        await signOut();
+        router.replace('/(auth)/login');
+      } catch (fallbackErr) {
+        console.error('[Driver] endShiftAndSignOut fallback failed:', fallbackErr);
+        Alert.alert('End shift failed', err instanceof Error ? err.message : 'Could not end shift');
+      }
     } finally {
       endShiftInProgressRef.current = false;
       setEndShiftInProgress(false);

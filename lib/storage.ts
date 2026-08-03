@@ -42,4 +42,6 @@ export const STORAGE_KEYS = {
   pendingSyncBanner: 'bw_pending_sync_banner',
   /** Offline complete — full closed-job snapshot (addresses etc.) until Firebase write succeeds. */
   pendingClosedJobs: 'bw_pending_closed_jobs',
+  /** Offline end-shift — deferred Firebase shiftLogs + presence clear until reconnect. */
+  pendingShiftEnds: 'bw_pending_shift_ends',
 } as const;
