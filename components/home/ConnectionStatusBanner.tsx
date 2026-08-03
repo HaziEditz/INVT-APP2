@@ -1,5 +1,9 @@
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
+import {
+  CONNECTION_BANNER_ALERT_ROLE,
+  CONNECTION_BANNER_SYNCING_ROLE,
+} from '@/lib/connectionBannerA11y';
 import { StyleSheet, Text, View } from 'react-native';
 
 export function ConnectionStatusBanner() {
@@ -12,7 +16,7 @@ export function ConnectionStatusBanner() {
     return (
       <View
         accessibilityLiveRegion="polite"
-        accessibilityRole="alert"
+        accessibilityRole={CONNECTION_BANNER_ALERT_ROLE}
         style={[styles.banner, offline ? styles.offline : styles.online]}
       >
         <View style={[styles.dot, offline ? styles.offlineDot : styles.onlineDot]} />
@@ -28,7 +32,7 @@ export function ConnectionStatusBanner() {
   return (
     <View
       accessibilityLiveRegion="polite"
-      accessibilityRole="status"
+      accessibilityRole={CONNECTION_BANNER_SYNCING_ROLE}
       style={[styles.banner, styles.syncing]}
     >
       <View style={[styles.dot, styles.syncingDot]} />

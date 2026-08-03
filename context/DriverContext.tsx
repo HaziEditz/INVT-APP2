@@ -811,12 +811,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             await storeData(STORAGE_KEYS.activeJob, null);
           }
         }
-        // Do not restore shift as "online" on launch — driver must confirm vehicle each session.
+        // Do not restore shift as "online" on launch — driver must confirm vehicle
+        // and startShift each session. Always clear vehicleSessionReady too; leaving
+        // it true with shift off allowed the zombie tabs UI (logged-in Profile,
+        // Off main, no SOS/offers) after crash/reopen with no active job.
         await storeData(STORAGE_KEYS.shiftActive, false);
-        if (j && isValidBookingId(j.id)) {
-          // Mid-job reload: force vehicle re-confirm + startShift so dispatch API sync runs.
-          await storeData(STORAGE_KEYS.vehicleSessionReady, false);
-        }
+        await storeData(STORAGE_KEYS.vehicleSessionReady, false);
         const m = await getData<MeterState>(STORAGE_KEYS.meterState);
         if (m?.running && m.mode && m.breakdown) {
           setMeter(m);

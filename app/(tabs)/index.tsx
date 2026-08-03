@@ -214,7 +214,7 @@ export default function MainScreen() {
 
           {!shiftActive ? (
             <Text style={styles.offHint}>
-              You are off shift. Start a shift from Profile or vehicle selection.
+              You are off shift. Confirm your vehicle to start a shift.
             </Text>
           ) : null}
         </View>
