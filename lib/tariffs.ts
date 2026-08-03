@@ -1,4 +1,4 @@
-import { MeterFareBreakdown, Tariff } from '@/types';
+import type { MeterFareBreakdown, Tariff } from '@/types';
 
 export const NO_TARIFF_CONFIGURED: Tariff = {
   id: '__none__',
