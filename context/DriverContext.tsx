@@ -3912,6 +3912,36 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // Hail: upgrade bare GPS placeholders when online at payment time.
+    {
+      const { needsHailAddressResolve, resolveReadableAddress } = await import(
+        '@/lib/hailAddressResolve'
+      );
+      if (
+        needsHailAddressResolve(closed.pickup) ||
+        needsHailAddressResolve(closed.dropoff)
+      ) {
+        try {
+          const { reverseGeocodeCoords } = await import('@/services/locationService');
+          const pickup = await resolveReadableAddress(
+            { address: closed.pickup, lat: closed.pickupLat, lng: closed.pickupLng },
+            reverseGeocodeCoords,
+          );
+          const dropoff = await resolveReadableAddress(
+            {
+              address: closed.dropoff,
+              lat: closed.dropoffLat,
+              lng: closed.dropoffLng,
+            },
+            reverseGeocodeCoords,
+          );
+          closed = { ...closed, pickup, dropoff };
+        } catch (err) {
+          console.warn('[Driver] hail reverse-geocode at complete failed:', err);
+        }
+      }
+    }
+
     const completedAt = Date.now();
     setCompletionError(null);
     localCompletionRef.current = true;
@@ -4543,14 +4573,53 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       meterStopRef.current = null;
     }
 
+    // Capture drop at end (was incorrectly copying pickup address). Offline may
+    // store coord placeholders — reverse-geocode on reconnect / complete flush.
+    const { reverseGeocodeCoords, getCurrentCoords } = await import('@/services/locationService');
+    const {
+      needsHailAddressResolve,
+      resolveReadableAddress,
+    } = await import('@/lib/hailAddressResolve');
+    const online = dispatchIsConnected(
+      networkConnectedRef.current,
+      rtdbConnectedRef.current,
+    );
+    const dropCoords = await getCurrentCoords().catch(() => null);
+    let pickupAddress = hailPickupAddress || liveJob?.pickup || 'Street hail';
+    let dropoffAddress = 'Street hail';
+    let dropLat = dropCoords?.latitude;
+    let dropLng = dropCoords?.longitude;
+    if (dropCoords) {
+      dropoffAddress = `${dropCoords.latitude.toFixed(5)}, ${dropCoords.longitude.toFixed(5)}`;
+      if (online) {
+        dropoffAddress = await reverseGeocodeCoords(
+          dropCoords.latitude,
+          dropCoords.longitude,
+        ).catch(() => dropoffAddress);
+      }
+    } else if (hailPickupAddress) {
+      // Fallback only when GPS unavailable at end.
+      dropoffAddress = hailPickupAddress;
+      dropLat = hailPickupLat;
+      dropLng = hailPickupLng;
+    }
+    if (online && needsHailAddressResolve(pickupAddress)) {
+      pickupAddress = await resolveReadableAddress(
+        { address: pickupAddress, lat: hailPickupLat, lng: hailPickupLng },
+        reverseGeocodeCoords,
+      );
+    }
+
     const hailJob: ActiveJob = liveJob
       ? {
           ...liveJob,
           stage: 'complete',
-          pickup: hailPickupAddress || liveJob.pickup,
-          dropoff: hailPickupAddress || liveJob.dropoff,
+          pickup: pickupAddress,
+          dropoff: dropoffAddress,
           pickupLat: hailPickupLat ?? liveJob.pickupLat,
           pickupLng: hailPickupLng ?? liveJob.pickupLng,
+          dropoffLat: dropLat ?? liveJob.dropoffLat,
+          dropoffLng: dropLng ?? liveJob.dropoffLng,
           startedAt: snapshot?.startedAt ?? liveJob.startedAt,
           distanceKm: snapshot?.distanceKm ?? liveJob.distanceKm,
           durationMin: snapshot?.startedAt
@@ -4570,10 +4639,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       : {
           id: `hail_${snapshot?.startedAt ?? now}`,
           type: 'Taxi',
-          pickup: hailPickupAddress || 'Street hail',
-          dropoff: hailPickupAddress || 'Street hail',
+          pickup: pickupAddress,
+          dropoff: dropoffAddress,
           pickupLat: hailPickupLat,
           pickupLng: hailPickupLng,
+          dropoffLat: dropLat,
+          dropoffLng: dropLng,
           stage: 'complete',
           startedAt: snapshot?.startedAt ?? now,
           distanceKm: snapshot?.distanceKm ?? 0,

@@ -8,11 +8,18 @@ import {
   syncJobStageOnDispatch,
 } from '@/lib/dispatchApi';
 import {
+  needsHailAddressResolve,
+  resolveHailPickupSnapshot,
+  resolveReadableAddress,
+} from '@/lib/hailAddressResolve';
+import {
+  getTripJournal,
   listPendingHailCreates,
   listPendingStageFlushes,
   listPendingTerminalFlushes,
   markTripJournalEventSynced,
   setTripJournalSyncState,
+  upsertTripJournal,
 } from '@/services/tripJournalService';
 
 export type TripJournalFlushHooks = {
@@ -92,12 +99,24 @@ async function flushTerminalEvent(args: {
     const pickupLng = asNumber(payload.pickupLng);
     const dropLat = asNumber(payload.dropLat ?? payload.dropoffLat);
     const dropLng = asNumber(payload.dropLng ?? payload.dropoffLng);
-    const finalDropAddress =
+    let finalDropAddress =
       asString(payload.finalDropAddress) ||
       asString(payload.dropoff) ||
       asString(payload.DropAddress) ||
       asString(payload.dropAddress) ||
       undefined;
+    // Upgrade coord-like dropoff before complete API (finalDropAddress whitelist).
+    if (finalDropAddress && needsHailAddressResolve(finalDropAddress) && dropLat != null && dropLng != null) {
+      try {
+        const { reverseGeocodeCoords } = await import('@/services/locationService');
+        finalDropAddress = await resolveReadableAddress(
+          { address: finalDropAddress, lat: dropLat, lng: dropLng },
+          reverseGeocodeCoords,
+        );
+      } catch {
+        // keep placeholder
+      }
+    }
     const driverComments = asString(payload.notes) || asString(payload.driverComments) || undefined;
     await completeJobPayment({
       jobId,
@@ -172,12 +191,31 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
 
     await setTripJournalSyncState(clientTripId, 'creating', { lastError: undefined });
     try {
+      // Offline hail often stores bare "lat, lng" — reverse-geocode on reconnect.
+      let pickup = hail.pickup;
+      if (needsHailAddressResolve(pickup.address)) {
+        try {
+          const { reverseGeocodeCoords } = await import('@/services/locationService');
+          pickup = await resolveHailPickupSnapshot(pickup, reverseGeocodeCoords);
+          if (pickup.address !== hail.pickup.address) {
+            const live = await getTripJournal(clientTripId);
+            if (live?.hailCreate) {
+              await upsertTripJournal({
+                ...live,
+                hailCreate: { ...live.hailCreate, pickup },
+              });
+            }
+          }
+        } catch (geoErr) {
+          console.warn('[trip-journal] hail pickup reverse-geocode failed:', geoErr);
+        }
+      }
       const created = await createHailJobOnDispatch({
         companyId: journal.companyId,
         driverId: journal.driverId,
         vehicleId: journal.vehicleId,
         tariffId: hail.tariffId,
-        pickup: hail.pickup,
+        pickup,
         clientTripId,
       });
       await setTripJournalSyncState(clientTripId, 'synced', {

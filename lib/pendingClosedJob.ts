@@ -1,6 +1,10 @@
 import { markBookingCompleted, readBookingTripAddresses } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
 import { isProvisionalBookingId } from '@/lib/bookingId';
+import {
+  needsHailAddressResolve,
+  resolveReadableAddress,
+} from '@/lib/hailAddressResolve';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import {
   applyTripFieldsToJob,
@@ -85,6 +89,30 @@ export async function flushPendingClosedJobs(opts?: {
       const fromBooking = await readBookingTripAddresses(row.companyId, jobId);
       if (fromBooking) {
         job = applyTripFieldsToJob(job, fromBooking);
+      }
+    }
+    // Hail offline: upgrade bare "lat, lng" placeholders once reverse-geocode works.
+    if (
+      needsHailAddressResolve(job.pickup) ||
+      needsHailAddressResolve(job.dropoff)
+    ) {
+      try {
+        const { reverseGeocodeCoords } = await import('@/services/locationService');
+        const pickup = await resolveReadableAddress(
+          { address: job.pickup, lat: job.pickupLat, lng: job.pickupLng },
+          reverseGeocodeCoords,
+        );
+        const dropoff = await resolveReadableAddress(
+          {
+            address: job.dropoff,
+            lat: job.dropoffLat,
+            lng: job.dropoffLng,
+          },
+          reverseGeocodeCoords,
+        );
+        job = { ...job, pickup, dropoff };
+      } catch (geoErr) {
+        console.warn('[pendingClosedJob] reverse-geocode failed:', geoErr);
       }
     }
     try {
