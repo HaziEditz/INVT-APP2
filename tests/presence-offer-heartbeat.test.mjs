@@ -19,3 +19,14 @@ test('offer-pending heartbeat is faster than mid-offer 10s threshold', () => {
   // Pre-offer gate (25s) must sit above idle heartbeat so healthy parked drivers stay eligible.
   assert.ok(25_000 > PRESENCE_HEARTBEAT_MS);
 });
+
+test('offer-pending gate engages for modal OR broadcast exclusive offers', () => {
+  // Mirrors DriverContext: pending = shiftActive && (jobOffer?.id || broadcastOffers.length > 0)
+  const gate = (shiftActive, jobOfferId, broadcastCount) =>
+    !!(shiftActive && (jobOfferId || broadcastCount > 0));
+  assert.equal(gate(true, '8692608042', 0), true, 'modal offer alone');
+  assert.equal(gate(true, null, 1), true, 'Offer-tab broadcast alone (no modal)');
+  assert.equal(gate(true, '8692608042', 2), true, 'both');
+  assert.equal(gate(true, null, 0), false, 'shift with no offers');
+  assert.equal(gate(false, '8692608042', 1), false, 'shift off');
+});

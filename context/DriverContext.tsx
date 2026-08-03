@@ -92,6 +92,7 @@ import {
   markPresenceSessionEnded,
   moveDriverToEndOfQueue,
   repairOnlinePresence,
+  getPresenceWriteDiagnostics,
   setPresenceOfferPending,
   startPresenceHeartbeat,
   startShiftOnline,
@@ -2732,12 +2733,28 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [driver?.companyId, driver?.id, shiftActive, selectedVehicleId], 'Driver-presence-heartbeat');
 
   // Mid-offer heal is 10s; idle Available lastSeen normally only refreshes ~15–20s.
-  // Stamp every 5s while an offer is live, then revert when cleared.
+  // Stamp every 5s while any exclusive offer is live (modal jobOffer AND/OR
+  // broadcastOffers on the Offer tab). Previously only jobOffer was watched, so
+  // Offer-tab fanouts that never set the modal left the phone on the 20s idle cadence.
+  const broadcastOfferKey = broadcastOffers
+    .map((o) => String(o.id || ''))
+    .filter(Boolean)
+    .sort()
+    .join('|');
   useSafeEffect(() => {
-    const pending = !!(shiftActive && jobOffer?.id);
+    const pending = !!(shiftActive && (jobOffer?.id || broadcastOffers.length > 0));
+    const diag = getPresenceWriteDiagnostics();
+    console.log(
+      `[Presence] offer-pending gate pending=${pending} shift=${shiftActive} ` +
+        `jobOffer=${jobOffer?.id ?? 'none'} broadcast=${broadcastOffers.length}` +
+        `${broadcastOfferKey ? ` [${broadcastOfferKey}]` : ''} ` +
+        `heartbeatCtx=${diag.heartbeatActive ? 'up' : 'down'} ` +
+        `modeWas=${diag.offerPendingMode} intervalWas=${diag.heartbeatIntervalMs}ms`,
+    );
     setPresenceOfferPending(pending);
-    return () => setPresenceOfferPending(false);
-  }, [shiftActive, jobOffer?.id], 'Driver-offer-presence-heartbeat');
+    // No cleanup → false: dep churn (broadcast list refresh) must not briefly
+    // clear offer-pending before the next effect body re-enables it.
+  }, [shiftActive, jobOffer?.id, broadcastOfferKey], 'Driver-offer-presence-heartbeat');
 
   useSafeEffect(() => {
     if (!driver?.companyId) return;

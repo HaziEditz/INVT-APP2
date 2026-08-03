@@ -29,6 +29,7 @@ let heartbeatCtx: {
   status: FirebaseDriverStatus;
 } | null = null;
 let offerPendingMode = false;
+let offerPendingSinceMs = 0;
 let lastPresenceWriteAt = 0;
 let lastPresenceWriteError: string | null = null;
 
@@ -74,7 +75,9 @@ export function stopPresenceHeartbeat() {
     heartbeatTimer = null;
   }
   heartbeatCtx = null;
-  offerPendingMode = false;
+  // Keep offerPendingMode — startPresenceHeartbeat re-arms using this flag.
+  // Clearing it here dropped 5s stamps whenever the shift heartbeat effect
+  // re-ran (vehicle/driver dep churn) while a live offer was still on screen.
 }
 
 function presenceHeartbeatIntervalMs(): number {
@@ -86,6 +89,11 @@ function runPresenceHeartbeatTick() {
   if (!ctx) return;
   if (offerPendingMode) {
     // Always stamp — repair()'s 15s skip gate would defeat the 5s offer cadence.
+    const since = offerPendingSinceMs ? Date.now() - offerPendingSinceMs : null;
+    console.log(
+      `[Presence] offer-pending stamp tick t+${since != null ? Math.round(since / 1000) + 's' : '?'} ` +
+        `vehicleId=${ctx.vehicleId} status=${ctx.status}`,
+    );
     void stampPresenceLastSeen(ctx.driver, ctx.vehicleId, ctx.status).catch((err) => {
       console.warn('[Presence] offer-pending lastSeen stamp failed:', err);
     });
@@ -117,6 +125,12 @@ export function startPresenceHeartbeat(
     heartbeatTimer = null;
   }
   heartbeatCtx = { driver, vehicleId, status };
+  if (offerPendingMode) {
+    console.log(
+      `[Presence] startPresenceHeartbeat while offer-pending — arming ${PRESENCE_OFFER_HEARTBEAT_MS}ms ` +
+        `vehicleId=${vehicleId}`,
+    );
+  }
   armPresenceHeartbeatTimer();
 }
 
@@ -126,10 +140,27 @@ export function startPresenceHeartbeat(
  */
 export function setPresenceOfferPending(pending: boolean) {
   const next = !!pending;
-  if (offerPendingMode === next) return;
+  if (offerPendingMode === next) {
+    // Mode unchanged — still re-arm if ON and ctx exists but timer died.
+    if (next && heartbeatCtx && !heartbeatTimer) {
+      console.warn('[Presence] offer-pending ON but timer missing — re-arming');
+      armPresenceHeartbeatTimer();
+    }
+    return;
+  }
   offerPendingMode = next;
-  console.log(`[Presence] offer-pending heartbeat ${next ? 'ON' : 'OFF'} (${presenceHeartbeatIntervalMs()}ms)`);
-  if (!heartbeatCtx) return;
+  offerPendingSinceMs = next ? Date.now() : 0;
+  console.log(
+    `[Presence] offer-pending heartbeat ${next ? 'ON' : 'OFF'} (${presenceHeartbeatIntervalMs()}ms)` +
+      (next ? ` since=${new Date(offerPendingSinceMs).toISOString()}` : '') +
+      ` ctx=${heartbeatCtx ? `vehicleId=${heartbeatCtx.vehicleId}` : 'null'}`,
+  );
+  if (!heartbeatCtx) {
+    console.warn(
+      '[Presence] offer-pending mode set but heartbeatCtx is null — stamps will NOT fire until startPresenceHeartbeat',
+    );
+    return;
+  }
   armPresenceHeartbeatTimer();
 }
 
