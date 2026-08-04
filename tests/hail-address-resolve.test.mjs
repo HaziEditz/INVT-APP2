@@ -62,3 +62,14 @@ test('resolveHailPickupSnapshot upgrades journal pickup on reconnect', async () 
   assert.equal(next.address, '1 Customs Street East');
   assert.equal(next.lat, -36.84846);
 });
+
+test('resolveReadableAddress: hanging geocode keeps placeholder (hard timeout)', async () => {
+  const started = Date.now();
+  const resolved = await resolveReadableAddress(
+    { address: '-36.84846, 174.76333', lat: -36.84846, lng: 174.76333 },
+    () => new Promise(() => {}),
+    { timeoutMs: 80 },
+  );
+  assert.equal(resolved, '-36.84846, 174.76333');
+  assert.ok(Date.now() - started < 400);
+});

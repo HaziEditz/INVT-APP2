@@ -4,9 +4,20 @@
  * against a ghost Active trip on dispatch.
  */
 
+/** Never block hail Complete / End Trip on reverse-geocode. */
+export const GEOCODE_TIMEOUT_MS = 2_500;
+
 export type JournalEventLike = {
   type: string;
   synced?: boolean;
+};
+
+export type JournalRowLike = {
+  source?: string;
+  syncState?: string;
+  serverJobId?: string | null;
+  hailCreate?: unknown;
+  events: JournalEventLike[];
 };
 
 /** Unsynced Arrived/OnBoard still outstanding for this journal. */
@@ -37,9 +48,65 @@ export function isRetryableTerminalFlushError(err: unknown): boolean {
   if (status >= 500 || status === 0 || status === 408 || status === 429) return true;
   if (code === 'version_conflict') return true;
   if (code === 'invalid_transition') return true;
+  // Ambiguous client/server races — keep retrying (never silently drop).
+  if (code === 'bad_request' || code === 'not_found' || status === 404 || status === 409) {
+    return true;
+  }
   // Non-DispatchApiError (network) — retry.
   if (!('status' in (err as object))) return true;
   return false;
+}
+
+/** Completed must never be marked synced on ambiguous failure. */
+export function shouldDropTerminalOnFlushError(eventType: string, err: unknown): boolean {
+  if (eventType === 'Completed') return false;
+  return !isRetryableTerminalFlushError(err);
+}
+
+/** Unsynced terminals waiting on hail create bind (no numeric serverJobId yet). */
+export function journalHasOrphanTerminals(row: JournalRowLike): boolean {
+  const jobId = String(row.serverJobId || '').trim();
+  if (jobId && /^\d+$/.test(jobId)) return false;
+  return row.events.some(
+    (e) =>
+      (e.type === 'Completed' || e.type === 'Cancelled' || e.type === 'NoShow') &&
+      e.synced !== true,
+  );
+}
+
+/** Failed hail create that still has create intent or orphan Completed. */
+export function journalIsFailedHailStillPending(row: JournalRowLike): boolean {
+  if (row.source !== 'hail') return false;
+  if (row.syncState !== 'failed') return false;
+  if (row.hailCreate && !String(row.serverJobId || '').trim()) return true;
+  return journalHasOrphanTerminals(row);
+}
+
+/** Pure pending-work decision used by hasPendingTripJournalWork. */
+export function hasPendingTripJournalWorkFromRows(args: {
+  pendingHailCreates: number;
+  pendingStages: number;
+  pendingTerminalsWithServerId: number;
+  orphanTerminalJournals: number;
+  failedHailStillPending: number;
+}): boolean {
+  return (
+    args.pendingHailCreates > 0 ||
+    args.pendingStages > 0 ||
+    args.pendingTerminalsWithServerId > 0 ||
+    args.orphanTerminalJournals > 0 ||
+    args.failedHailStillPending > 0
+  );
+}
+
+/** Miss→Away must not fire while Syncing / pending trip journal work. */
+export function shouldSuppressMissAway(pendingTripSync: boolean): boolean {
+  return !!pendingTripSync;
+}
+
+/** Expired deferred offers: purge — never promote to timed-out decline→Away. */
+export function shouldPurgeExpiredDeferredOffer(expiresAt: number | undefined, now = Date.now()): boolean {
+  return typeof expiresAt === 'number' && Number.isFinite(expiresAt) && expiresAt <= now;
 }
 
 /** Stage events may drop invalid_transition (e.g. Arrived when already Active). */

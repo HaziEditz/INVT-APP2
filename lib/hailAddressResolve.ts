@@ -3,6 +3,9 @@
  * Re-resolve those placeholders once connectivity returns.
  */
 
+import { withTimeout } from './asyncTimeout.ts';
+import { GEOCODE_TIMEOUT_MS } from './tripJournalFlushPolicy.ts';
+
 export type LatLng = { lat: number; lng: number };
 
 export type HailPickupSnapshot = {
@@ -63,6 +66,7 @@ export async function resolveReadableAddress(
     lng?: number | null;
   },
   reverseGeocode: ReverseGeocodeFn,
+  opts?: { timeoutMs?: number },
 ): Promise<string> {
   const current = String(args.address || '').trim();
   if (!needsHailAddressResolve(current) && current) return current;
@@ -70,15 +74,22 @@ export async function resolveReadableAddress(
   const coords = coordsFromAddressOrFields(current, args.lat, args.lng);
   if (!coords) return current;
 
+  const timeoutMs = opts?.timeoutMs ?? GEOCODE_TIMEOUT_MS;
   try {
-    const resolved = String(await reverseGeocode(coords.lat, coords.lng) || '').trim();
+    const resolved = String(
+      (await withTimeout(
+        reverseGeocode(coords.lat, coords.lng),
+        timeoutMs,
+        'reverseGeocode',
+      )) || '',
+    ).trim();
     if (resolved && !isCoordLikeAddress(resolved) && !needsHailAddressResolve(resolved)) {
       return resolved;
     }
     // reverseGeocodeCoords itself falls back to coords — keep trying later.
     if (resolved && !isCoordLikeAddress(resolved)) return resolved;
   } catch {
-    // offline / geocoder unavailable
+    // timeout / offline / geocoder unavailable — keep placeholder
   }
   return current || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
 }
@@ -86,10 +97,12 @@ export async function resolveReadableAddress(
 export async function resolveHailPickupSnapshot(
   pickup: HailPickupSnapshot,
   reverseGeocode: ReverseGeocodeFn,
+  opts?: { timeoutMs?: number },
 ): Promise<HailPickupSnapshot> {
   const address = await resolveReadableAddress(
     { address: pickup.address, lat: pickup.lat, lng: pickup.lng },
     reverseGeocode,
+    opts,
   );
   return { ...pickup, address };
 }

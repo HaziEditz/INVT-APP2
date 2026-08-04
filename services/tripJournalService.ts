@@ -5,6 +5,11 @@ import {
   resolveJournalClientTripId,
 } from '@/lib/bookingId';
 import { newClientTripId } from '@/lib/dispatchApi';
+import {
+  hasPendingTripJournalWorkFromRows,
+  journalHasOrphanTerminals,
+  journalIsFailedHailStillPending,
+} from '@/lib/tripJournalFlushPolicy';
 import type {
   TripJournal,
   TripJournalEvent,
@@ -116,7 +121,7 @@ export async function listPendingHailCreates(): Promise<TripJournal[]> {
     (j) =>
       j.source === 'hail' &&
       !!j.hailCreate &&
-      (j.syncState === 'pending' || j.syncState === 'creating') &&
+      (j.syncState === 'pending' || j.syncState === 'creating' || j.syncState === 'failed') &&
       !j.serverJobId,
   );
 }
@@ -295,10 +300,21 @@ export async function listPendingTerminalFlushes(): Promise<
 }
 
 export async function hasPendingTripJournalWork(): Promise<boolean> {
+  const rows = await listTripJournals();
   const hail = await listPendingHailCreates();
-  if (hail.length) return true;
   const stages = await listPendingStageFlushes();
-  if (stages.length) return true;
   const terminals = await listPendingTerminalFlushes();
-  return terminals.length > 0;
+  let orphanTerminalJournals = 0;
+  let failedHailStillPending = 0;
+  for (const row of rows) {
+    if (journalHasOrphanTerminals(row)) orphanTerminalJournals += 1;
+    if (journalIsFailedHailStillPending(row)) failedHailStillPending += 1;
+  }
+  return hasPendingTripJournalWorkFromRows({
+    pendingHailCreates: hail.length,
+    pendingStages: stages.length,
+    pendingTerminalsWithServerId: terminals.length,
+    orphanTerminalJournals,
+    failedHailStillPending,
+  });
 }

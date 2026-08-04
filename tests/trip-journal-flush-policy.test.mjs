@@ -10,6 +10,7 @@ import {
   localStageHintFromJournalEvents,
   presenceWhilePendingTripSync,
   shouldBlockOffersForPendingTripSync,
+  shouldDropTerminalOnFlushError,
 } from '../lib/tripJournalFlushPolicy.ts';
 
 test('journalHasUnsyncedStages blocks terminal until Arrived/OnBoard clear', () => {
@@ -43,7 +44,7 @@ test('localStageHintFromJournalEvents prefers onboard when Completed present', (
   assert.equal(localStageHintFromJournalEvents([]), 'pickup');
 });
 
-test('Completed invalid_transition is retryable (must not drop terminal)', () => {
+test('Completed invalid_transition / ambiguous failures are retryable (must not drop)', () => {
   assert.equal(
     isRetryableTerminalFlushError({ status: 409, errorCode: 'invalid_transition' }),
     true,
@@ -54,7 +55,11 @@ test('Completed invalid_transition is retryable (must not drop terminal)', () =>
   );
   assert.equal(
     isRetryableTerminalFlushError({ status: 400, errorCode: 'bad_request' }),
-    false,
+    true,
+  );
+  assert.equal(
+    isRetryableTerminalFlushError({ status: 404, errorCode: 'not_found' }),
+    true,
   );
   assert.equal(isRetryableTerminalFlushError(new Error('Network request failed')), true);
 });
@@ -89,6 +94,11 @@ test('pending journal keeps presence Busy and blocks auto-dispatch offers', () =
   );
   assert.equal(shouldBlockOffersForPendingTripSync(true), true);
   assert.equal(shouldBlockOffersForPendingTripSync(false), false);
+});
+
+test('shouldDropTerminalOnFlushError: Completed never dropped', () => {
+  assert.equal(shouldDropTerminalOnFlushError('Completed', { status: 400 }), false);
+  assert.equal(shouldDropTerminalOnFlushError('Cancelled', { status: 403, errorCode: 'forbidden' }), true);
 });
 
 test('two offline completes: each journal stages must clear before its terminal', () => {

@@ -13,10 +13,12 @@ import {
 } from '@/lib/hailAddressResolve';
 import { catchUpJobStagesOnDispatch } from '@/lib/jobServerSync';
 import {
+  GEOCODE_TIMEOUT_MS,
   isRetryableStageFlushError,
   isRetryableTerminalFlushError,
   journalHasUnsyncedStages,
   localStageHintFromJournalEvents,
+  shouldDropTerminalOnFlushError,
 } from '@/lib/tripJournalFlushPolicy';
 import {
   getTripJournal,
@@ -27,6 +29,7 @@ import {
   setTripJournalSyncState,
   upsertTripJournal,
 } from '@/services/tripJournalService';
+import type { TripJournal } from '@/types';
 
 export type TripJournalFlushHooks = {
   /** Called after server assigns numeric jobId for a journalled hail. */
@@ -102,13 +105,14 @@ async function flushTerminalEvent(args: {
       asString(payload.DropAddress) ||
       asString(payload.dropAddress) ||
       undefined;
-    // Upgrade coord-like dropoff before complete API (finalDropAddress whitelist).
+    // Upgrade coord-like dropoff before complete API — hard-timeout so Complete never hangs.
     if (finalDropAddress && needsHailAddressResolve(finalDropAddress) && dropLat != null && dropLng != null) {
       try {
         const { reverseGeocodeCoords } = await import('@/services/locationService');
         finalDropAddress = await resolveReadableAddress(
           { address: finalDropAddress, lat: dropLat, lng: dropLng },
           reverseGeocodeCoords,
+          { timeoutMs: GEOCODE_TIMEOUT_MS },
         );
       } catch {
         // keep placeholder
@@ -170,6 +174,96 @@ async function flushTerminalEvent(args: {
   throw new Error(`unsupported terminal journal event: ${type}`);
 }
 
+async function flushTerminalEventsForJournal(
+  journal: TripJournal,
+  hooks: TripJournalFlushHooks,
+): Promise<number> {
+  const jobId = String(journal.serverJobId || '').trim();
+  const driverId = String(journal.driverId || '').trim();
+  const companyId = String(journal.companyId || '').trim();
+  if (!jobId || !/^\d+$/.test(jobId) || !driverId || !companyId) return 0;
+
+  const live = (await getTripJournal(journal.clientTripId)) ?? journal;
+  if (journalHasUnsyncedStages(live.events)) {
+    console.warn('[trip-journal] skip terminal until stages flush', {
+      jobId,
+      clientTripId: journal.clientTripId,
+    });
+    return 0;
+  }
+
+  const events = live.events
+    .filter(
+      (e) =>
+        (e.type === 'Completed' || e.type === 'Cancelled' || e.type === 'NoShow') &&
+        e.synced !== true,
+    )
+    .sort((a, b) => a.at - b.at);
+
+  let flushed = 0;
+  for (const ev of events) {
+    try {
+      if (ev.type === 'Completed') {
+        // Catch up Arrived/Active before complete (mirrors online finalizePayment).
+        const hint = localStageHintFromJournalEvents(live.events);
+        const catchUpStage = hint === 'complete' ? 'onboard' : hint;
+        if (catchUpStage === 'arrived' || catchUpStage === 'onboard') {
+          try {
+            const caught = await catchUpJobStagesOnDispatch(
+              jobId,
+              driverId,
+              catchUpStage,
+              asNumber(ev.payload?.updateSeq),
+              { companyId },
+            );
+            if (caught.synced.length) {
+              console.log('[trip-journal] catch-up before complete', {
+                jobId,
+                synced: caught.synced,
+              });
+            }
+          } catch (catchErr) {
+            console.warn('[trip-journal] catch-up before complete failed:', catchErr);
+          }
+        }
+      }
+
+      await flushTerminalEvent({
+        jobId,
+        driverId,
+        companyId,
+        type: ev.type,
+        payload: ev.payload,
+      });
+      await markTripJournalEventSynced(journal.clientTripId, ev.id);
+      if (ev.type === 'Completed' || ev.type === 'Cancelled' || ev.type === 'NoShow') {
+        await hooks.onTerminalSynced?.({
+          serverJobId: jobId,
+          clientTripId: journal.clientTripId,
+          type: ev.type,
+          payload: ev.payload,
+        });
+      }
+      flushed += 1;
+      console.log('[trip-journal] flushed terminal', { jobId, type: ev.type });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!shouldDropTerminalOnFlushError(ev.type, err)) {
+        // Completed: never mark synced on ambiguous failure.
+        console.warn('[trip-journal] terminal will retry', { jobId, type: ev.type, error: msg });
+        break;
+      }
+      await markTripJournalEventSynced(journal.clientTripId, ev.id);
+      console.warn('[trip-journal] terminal dropped (non-retryable)', {
+        jobId,
+        type: ev.type,
+        error: msg,
+      });
+    }
+  }
+  return flushed;
+}
+
 /**
  * Phase 5c–5e — flush hail creates, Arrived/OnBoard stages, then terminal events.
  * Does not call /api/syncOfflineTrip (full trip journal enrichment stays deferred).
@@ -179,6 +273,8 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
   if (!state.isConnected) return 0;
 
   let flushed = 0;
+  /** Journals that bound a server job this pass — Complete immediately after create. */
+  const justBound: TripJournal[] = [];
 
   const pendingHail = await listPendingHailCreates();
   for (const journal of pendingHail) {
@@ -188,12 +284,14 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
 
     await setTripJournalSyncState(clientTripId, 'creating', { lastError: undefined });
     try {
-      // Offline hail often stores bare "lat, lng" — reverse-geocode on reconnect.
+      // Offline hail often stores bare "lat, lng" — reverse-geocode on reconnect (hard timeout).
       let pickup = hail.pickup;
       if (needsHailAddressResolve(pickup.address)) {
         try {
           const { reverseGeocodeCoords } = await import('@/services/locationService');
-          pickup = await resolveHailPickupSnapshot(pickup, reverseGeocodeCoords);
+          pickup = await resolveHailPickupSnapshot(pickup, reverseGeocodeCoords, {
+            timeoutMs: GEOCODE_TIMEOUT_MS,
+          });
           if (pickup.address !== hail.pickup.address) {
             const live = await getTripJournal(clientTripId);
             if (live?.hailCreate) {
@@ -215,7 +313,7 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
         pickup,
         clientTripId,
       });
-      await setTripJournalSyncState(clientTripId, 'synced', {
+      const bound = await setTripJournalSyncState(clientTripId, 'synced', {
         serverJobId: created.jobId,
         lastError: undefined,
       });
@@ -232,6 +330,7 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
         jobId: created.jobId,
         existing: !!created.existing,
       });
+      if (bound) justBound.push(bound);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // Hail create: always retry transport / version; permanent API errors fail the row.
@@ -243,6 +342,12 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
       await setTripJournalSyncState(clientTripId, 'failed', { lastError: msg });
       console.warn('[trip-journal] hail create failed permanently', { clientTripId, error: msg });
     }
+  }
+
+  // Same flush pass: after hail create binds, attempt Completed immediately
+  // (before other journals' stages) so Active jobs are not left orphaned.
+  for (const bound of justBound) {
+    flushed += await flushTerminalEventsForJournal(bound, hooks);
   }
 
   const pendingStages = await listPendingStageFlushes();
@@ -290,83 +395,14 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
   }
 
   const pendingTerminals = await listPendingTerminalFlushes();
-  for (const { journal, events } of pendingTerminals) {
-    const jobId = String(journal.serverJobId || '').trim();
-    const driverId = String(journal.driverId || '').trim();
-    const companyId = String(journal.companyId || '').trim();
-    if (!jobId || !driverId || !companyId) continue;
-
-    // Never flush Completed/Cancelled while this journal still has unsynced stages.
-    const live = (await getTripJournal(journal.clientTripId)) ?? journal;
-    if (journalHasUnsyncedStages(live.events)) {
-      console.warn('[trip-journal] skip terminal until stages flush', {
-        jobId,
-        clientTripId: journal.clientTripId,
-      });
-      continue;
-    }
-
-    for (const ev of events) {
-      try {
-        if (ev.type === 'Completed') {
-          // Catch up Arrived/Active before complete (mirrors online finalizePayment).
-          const hint = localStageHintFromJournalEvents(live.events);
-          const catchUpStage = hint === 'complete' ? 'onboard' : hint;
-          if (catchUpStage === 'arrived' || catchUpStage === 'onboard') {
-            try {
-              const caught = await catchUpJobStagesOnDispatch(
-                jobId,
-                driverId,
-                catchUpStage,
-                asNumber(ev.payload?.updateSeq),
-                { companyId },
-              );
-              if (caught.synced.length) {
-                console.log('[trip-journal] catch-up before complete', {
-                  jobId,
-                  synced: caught.synced,
-                });
-              }
-            } catch (catchErr) {
-              console.warn('[trip-journal] catch-up before complete failed:', catchErr);
-            }
-          }
-        }
-
-        await flushTerminalEvent({
-          jobId,
-          driverId,
-          companyId,
-          type: ev.type,
-          payload: ev.payload,
-        });
-        await markTripJournalEventSynced(journal.clientTripId, ev.id);
-        if (ev.type === 'Completed' || ev.type === 'Cancelled' || ev.type === 'NoShow') {
-          await hooks.onTerminalSynced?.({
-            serverJobId: jobId,
-            clientTripId: journal.clientTripId,
-            type: ev.type,
-            payload: ev.payload,
-          });
-        }
-        flushed += 1;
-        console.log('[trip-journal] flushed terminal', { jobId, type: ev.type });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (isRetryableTerminalFlushError(err)) {
-          // Do NOT drop Completed on invalid_transition — retry after stages/catch-up.
-          console.warn('[trip-journal] terminal will retry', { jobId, type: ev.type, error: msg });
-          break;
-        }
-        await markTripJournalEventSynced(journal.clientTripId, ev.id);
-        console.warn('[trip-journal] terminal dropped (non-retryable)', {
-          jobId,
-          type: ev.type,
-          error: msg,
-        });
-      }
-    }
+  const justBoundIds = new Set(justBound.map((j) => j.clientTripId));
+  for (const { journal } of pendingTerminals) {
+    if (justBoundIds.has(journal.clientTripId)) continue; // already attempted same pass
+    flushed += await flushTerminalEventsForJournal(journal, hooks);
   }
 
   return flushed;
 }
+
+/** Exported for hang-simulation tests — geocode budget used by flush/endHail. */
+export { GEOCODE_TIMEOUT_MS };

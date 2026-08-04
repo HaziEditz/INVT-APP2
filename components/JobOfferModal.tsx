@@ -17,32 +17,49 @@ export function JobOfferModal() {
     activeJob,
     paymentJob,
     isOffline,
+    syncingBanner,
+    pendingTripSync,
   } = useDriver();
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [accepting, setAccepting] = useState(false);
   const timedOutRef = useRef(false);
+  /** Offer clock ran out while Syncing/trip hold — purge without miss→Away. */
+  const expiredWhileHeldRef = useRef(false);
 
   useSafeEffect(() => {
     if (!jobOffer) {
       timedOutRef.current = false;
+      expiredWhileHeldRef.current = false;
       return;
     }
     const tick = () => {
       try {
-        if (hailActive || activeJob || paymentJob) {
+        const left = Math.max(0, Math.ceil((jobOffer.expiresAt - Date.now()) / 1000));
+        setSecondsLeft(left);
+        // Suppress miss→Away while on a trip OR while Syncing / pending journal work.
+        if (hailActive || activeJob || paymentJob || pendingTripSync || !!syncingBanner) {
+          if (left <= 0) expiredWhileHeldRef.current = true;
           console.log('[away-debug] JobOfferModal timer suppressed', {
             jobId: jobOffer.id,
             hailActive: !!hailActive,
             activeJob: !!activeJob,
             paymentJob: !!paymentJob,
-            secondsLeft: Math.ceil((jobOffer.expiresAt - Date.now()) / 1000),
+            pendingTripSync: !!pendingTripSync,
+            syncingBanner: !!syncingBanner,
+            secondsLeft: left,
+            expiredWhileHeld: expiredWhileHeldRef.current,
           });
           return;
         }
-        const left = Math.max(0, Math.ceil((jobOffer.expiresAt - Date.now()) / 1000));
-        setSecondsLeft(left);
         if (left <= 0 && !timedOutRef.current) {
           timedOutRef.current = true;
+          if (expiredWhileHeldRef.current) {
+            console.log('[away-debug] JobOfferModal purge expired-while-held (no Away)', {
+              jobId: jobOffer.id,
+            });
+            declineOffer().catch((err) => console.error('[JobOfferModal] decline', err));
+            return;
+          }
           console.log('[away-debug] JobOfferModal timer → declineOffer timedOut', {
             jobId: jobOffer.id,
             fromQueue: !!jobOffer.fromQueue,
@@ -57,11 +74,22 @@ export function JobOfferModal() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [jobOffer, declineOffer, hailActive, activeJob, paymentJob], 'JobOfferModal-timer');
+  }, [jobOffer, declineOffer, hailActive, activeJob, paymentJob, pendingTripSync, syncingBanner], 'JobOfferModal-timer');
 
   // Hide while offline (accept is a live claim) but keep the timer effect above so a
   // missed exclusive offer still times out → Away even during a brief disconnect.
-  if (!jobOffer || hailActive || !!activeJob || !!paymentJob || isOffline) return null;
+  // Also hide while syncing/pending trip work so a deferred expired offer cannot flash.
+  if (
+    !jobOffer ||
+    hailActive ||
+    !!activeJob ||
+    !!paymentJob ||
+    isOffline ||
+    pendingTripSync ||
+    !!syncingBanner
+  ) {
+    return null;
+  }
 
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
   const acceptDisabled = accepting || isOffline;

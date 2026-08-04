@@ -136,6 +136,11 @@ import {
   runOnlineStageWithJournalFallback,
 } from '@/lib/weakSignalPolicy';
 import {
+  GEOCODE_TIMEOUT_MS,
+  shouldPurgeExpiredDeferredOffer,
+  shouldSuppressMissAway,
+} from '@/lib/tripJournalFlushPolicy';
+import {
   enqueuePendingShiftEnd,
   flushPendingShiftEnds,
 } from '@/lib/pendingShiftEnd';
@@ -246,6 +251,8 @@ interface DriverContextValue {
   connectionNotice: DriverConnectionNotice;
   /** Phase 5d — persistent until cancel/no-show/stage journal flush completes. */
   syncingBanner: string | null;
+  /** Unsynced hail/stages/terminals (incl. orphan Completed) — suppress miss→Away. */
+  pendingTripSync: boolean;
   setSelectedVehicleId: (id: string) => void;
   refreshVehicles: () => Promise<void>;
   refreshJobHistory: () => Promise<void>;
@@ -600,6 +607,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [connectionNotice, setConnectionNotice] =
     useState<DriverConnectionNotice>(null);
   const [syncingBanner, setSyncingBanner] = useState<string | null>(null);
+  const [pendingTripSync, setPendingTripSync] = useState(false);
   const [hailActive, setHailActive] = useState(false);
   const [hailPickupAddress, setHailPickupAddress] = useState<string | null>(null);
   const [hailPickupLat, setHailPickupLat] = useState<number | undefined>();
@@ -681,6 +689,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       const pending = await hasPendingTripJournalWork();
       pendingTripSyncBlocksOffersRef.current = pending;
+      setPendingTripSync(pending);
       return pending;
     } catch {
       return pendingTripSyncBlocksOffersRef.current;
@@ -689,6 +698,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const markPendingTripSyncBlocking = () => {
     pendingTripSyncBlocksOffersRef.current = true;
+    setPendingTripSync(true);
   };
 
   const updateDispatchConnection = useCallback(
@@ -1961,14 +1971,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   // Offers that arrived during Away bootstrap (list only) get a popup once ready.
+  // Expired deferred offers are purged — never promoted into a timed-out miss→Away.
   useSafeEffect(() => {
     if (!shiftActive || !readyForJobs) return;
     if (jobOfferRef.current?.id) return;
     if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
+    if (pendingTripSyncBlocksOffersRef.current) return;
 
+    const now = Date.now();
     let best: JobOffer | null = null;
-    for (const o of broadcastOffersRef.current.values()) {
-      if (o.expiresAt && o.expiresAt <= Date.now()) continue;
+    for (const [offerId, o] of broadcastOffersRef.current) {
+      if (shouldPurgeExpiredDeferredOffer(o.expiresAt, now)) {
+        console.log('[Driver] purge expired deferred offer (no miss→Away)', offerId);
+        removeBroadcastOffer(offerId);
+        suppressedOfferIdsRef.current.add(offerId);
+        continue;
+      }
       if (!best || (o.postedAt || 0) > (best.postedAt || 0)) best = o;
     }
     if (!best?.id) return;
@@ -1976,7 +1994,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     console.log('[Driver] flush deferred offer popup after readyForJobs', best.id);
     setJobOffer({ ...best, silent: false });
     void alertDriverToOffer({ ...best, silent: false });
-  }, [shiftActive, readyForJobs], 'Driver-flushDeferredOfferPopup');
+  }, [shiftActive, readyForJobs, pendingTripSync], 'Driver-flushDeferredOfferPopup');
 
   const handleDriverNotification = async (val: Record<string, unknown>) => {
     if (!driver?.id) return;
@@ -3579,7 +3597,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         driverSetAway = timedOut;
       }
       removeBroadcastOffer(offerSnapshot.id);
-      if (shiftActive && driverSetAway && !driverHasConfirmedActiveTrip()) {
+      const suppressMissAway = shouldSuppressMissAway(
+        pendingTripSyncBlocksOffersRef.current || !!syncingBanner,
+      );
+      if (
+        shiftActive &&
+        driverSetAway &&
+        !driverHasConfirmedActiveTrip() &&
+        !suppressMissAway
+      ) {
         console.log('[away-debug] declineOffer → setAwayAfterMissedOffer (timed-out exclusive offer)');
         await setAwayAfterMissedOffer();
       } else {
@@ -3588,6 +3614,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           timedOut,
           driverSetAway,
           hasTrip: driverHasConfirmedActiveTrip(),
+          suppressMissAway,
         });
       }
     }
@@ -4638,9 +4665,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (dropCoords) {
       dropoffAddress = `${dropCoords.latitude.toFixed(5)}, ${dropCoords.longitude.toFixed(5)}`;
       if (online) {
-        dropoffAddress = await reverseGeocodeCoords(
-          dropCoords.latitude,
-          dropCoords.longitude,
+        // Hard-timeout: never block End Hail / Complete on reverse-geocode.
+        dropoffAddress = await withTimeout(
+          reverseGeocodeCoords(dropCoords.latitude, dropCoords.longitude),
+          GEOCODE_TIMEOUT_MS,
+          'endHail.reverseGeocode.drop',
         ).catch(() => dropoffAddress);
       }
     } else if (hailPickupAddress) {
@@ -4653,6 +4682,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       pickupAddress = await resolveReadableAddress(
         { address: pickupAddress, lat: hailPickupLat, lng: hailPickupLng },
         reverseGeocodeCoords,
+        { timeoutMs: GEOCODE_TIMEOUT_MS },
       );
     }
 
@@ -4969,6 +4999,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         isOffline,
         connectionNotice,
         syncingBanner,
+        pendingTripSync,
         setSelectedVehicleId,
         refreshVehicles,
         refreshJobHistory,
