@@ -5,6 +5,7 @@ import {
   NZTA_WEEKLY_LOCKOUT_HOURS,
   NZTA_WEEKLY_MAX_HOURS,
 } from '@/constants/theme';
+import { attemptWithTimeout, END_SHIFT_RTDB_TIMEOUT_MS } from '@/lib/asyncTimeout';
 import { journalShiftEndLogFailure } from '@/lib/pendingShiftEnd';
 import { loadLastShiftEnd, writeShiftEndLog } from '@/lib/shiftLogs';
 import { getData, nztaHoursStorageKey, removeData, storeData, STORAGE_KEYS } from '@/lib/storage';
@@ -340,13 +341,19 @@ export async function captureEndShiftSummary(companyId: string, uid: string): Pr
   };
 }
 
-export async function endShiftClock(
+/** Local NZTA end-shift only — never touches RTDB (Profile path uses this via endShiftRemoteFlow). */
+export async function persistLocalNztaEndShift(
   companyId: string,
   uid: string,
   driverId: string,
   reason: EndShiftReason = 'manual',
-  opts?: { vehicleId?: string | null },
-) {
+): Promise<{
+  state: NztaHoursState;
+  shiftEndAt: number;
+  shiftStartAt?: number;
+  workedMinutes: number;
+  weeklyWorkedMinutes: number;
+}> {
   const state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(companyId, uid)));
   const now = Date.now();
   const elapsed = Math.max(state.workedMinutes, shiftElapsedMinutes(state));
@@ -362,7 +369,6 @@ export async function endShiftClock(
     lockoutReason = 'weekly_rest';
   }
 
-  // Persist session locally FIRST — never gate end-shift UI on RTDB.
   const next: NztaHoursState = {
     ...state,
     shiftStartedAt: null,
@@ -380,33 +386,74 @@ export async function endShiftClock(
     breakDeferredUntil: null,
   };
   await saveNztaHours(companyId, uid, next);
+  return {
+    state: next,
+    shiftEndAt: now,
+    shiftStartAt,
+    workedMinutes: elapsed,
+    weeklyWorkedMinutes: state.weeklyWorkedMinutes,
+  };
+}
 
-  try {
-    await writeShiftEndLog(companyId, uid, {
-      shiftEndAt: now,
-      shiftStartAt,
-      workedMinutes: elapsed,
-      weeklyWorkedMinutes: state.weeklyWorkedMinutes,
-      driverId,
-    });
-  } catch (err) {
-    console.warn('[NZTA] writeShiftEndLog failed — journaling for reconnect:', err);
+/**
+ * Local NZTA end + best-effort shiftLogs write (hard timeout).
+ * Prefer runEndShiftRemoteFlow from the Profile button path.
+ */
+export async function endShiftClock(
+  companyId: string,
+  uid: string,
+  driverId: string,
+  reason: EndShiftReason = 'manual',
+  opts?: { vehicleId?: string | null; skipRemoteWrite?: boolean; remoteTimeoutMs?: number },
+) {
+  const local = await persistLocalNztaEndShift(companyId, uid, driverId, reason);
+
+  if (opts?.skipRemoteWrite) {
     await journalShiftEndLogFailure({
       companyId,
       uid,
       driverId,
       vehicleId: opts?.vehicleId,
       reason,
-      shiftEndAt: now,
-      shiftStartAt,
-      workedMinutes: elapsed,
-      weeklyWorkedMinutes: state.weeklyWorkedMinutes,
+      shiftEndAt: local.shiftEndAt,
+      shiftStartAt: local.shiftStartAt,
+      workedMinutes: local.workedMinutes,
+      weeklyWorkedMinutes: local.weeklyWorkedMinutes,
+    }).catch((journalErr) => {
+      console.warn('[NZTA] journalShiftEndLogFailure failed:', journalErr);
+    });
+    return local.state;
+  }
+
+  const timeoutMs = opts?.remoteTimeoutMs ?? END_SHIFT_RTDB_TIMEOUT_MS;
+  const ok = await attemptWithTimeout(
+    writeShiftEndLog(companyId, uid, {
+      shiftEndAt: local.shiftEndAt,
+      shiftStartAt: local.shiftStartAt,
+      workedMinutes: local.workedMinutes,
+      weeklyWorkedMinutes: local.weeklyWorkedMinutes,
+      driverId,
+    }),
+    timeoutMs,
+    'writeShiftEndLog',
+  );
+  if (!ok) {
+    await journalShiftEndLogFailure({
+      companyId,
+      uid,
+      driverId,
+      vehicleId: opts?.vehicleId,
+      reason,
+      shiftEndAt: local.shiftEndAt,
+      shiftStartAt: local.shiftStartAt,
+      workedMinutes: local.workedMinutes,
+      weeklyWorkedMinutes: local.weeklyWorkedMinutes,
     }).catch((journalErr) => {
       console.warn('[NZTA] journalShiftEndLogFailure failed:', journalErr);
     });
   }
 
-  return next;
+  return local.state;
 }
 
 export async function tickWorkedMinutes(companyId: string, uid: string, addMinutes = 1) {

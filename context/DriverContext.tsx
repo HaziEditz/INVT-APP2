@@ -120,10 +120,17 @@ import {
   removePendingClosedJob,
   upsertPendingClosedJob,
 } from '@/lib/pendingClosedJob';
+import { withTimeout } from '@/lib/asyncTimeout';
+import { runEndShiftRemoteFlow } from '@/lib/endShiftRemoteFlow';
 import {
+  shouldDetachActiveJobOnEndTrip,
+  shouldOfflineJournalComplete,
+} from '@/lib/offlineCompletePolicy';
+import {
+  enqueuePendingShiftEnd,
   flushPendingShiftEnds,
-  journalPresenceClearFailure,
 } from '@/lib/pendingShiftEnd';
+import { writeShiftEndLog } from '@/lib/shiftLogs';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
 import { getCurrentCoords, refreshHailPickupLocation } from '@/services/locationService';
 import { patchOnlineCurrentJobId } from '@/lib/liveMeterPresence';
@@ -3079,8 +3086,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     vehicleId: string | null,
     reason: EndShiftReason = 'manual',
   ): Promise<EndShiftSummary | null> => {
-    // Local-first: stop writers + NZTA immediately. Network (presence / shiftLogs)
-    // is best-effort and journalled for reconnect — never blocks End Shift / log off.
+    // Flip local shift UI immediately — remote RTDB must never gate End Shift / log off.
     if (driverSnapshot?.companyId && vehicleId) {
       markPresenceSessionEnded(driverSnapshot.companyId, vehicleId);
     }
@@ -3091,83 +3097,91 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setReadyForJobs(false);
     readyForJobsRef.current = false;
 
-    try {
-      const { stopBackgroundTracking } = await import('@/services/locationService');
-      await stopBackgroundTracking();
-    } catch (err) {
-      console.warn('[Driver] stopBackgroundTracking failed:', err);
+    const likelyOffline =
+      networkConnectedRef.current === false || rtdbConnectedRef.current === false;
+
+    if (!driverSnapshot?.companyId || !driverSnapshot.uid) {
+      try {
+        const { stopBackgroundTracking } = await import('@/services/locationService');
+        await stopBackgroundTracking();
+      } catch {
+        /* ignore */
+      }
+      try {
+        const { stopShiftRuntime } = await import('@/services/shiftRuntimeService');
+        stopShiftRuntime();
+      } catch {
+        /* ignore */
+      }
+      return null;
     }
 
-    let summary: EndShiftSummary | null = null;
+    const companyId = driverSnapshot.companyId;
+    const uid = driverSnapshot.uid;
+    const driverId = driverSnapshot.id;
 
-    if (driverSnapshot?.companyId && driverSnapshot.uid) {
-      try {
-        const { captureEndShiftSummary } = await import('@/services/nztaService');
-        summary = await captureEndShiftSummary(driverSnapshot.companyId, driverSnapshot.uid);
-      } catch (err) {
-        console.warn('[Driver] captureEndShiftSummary failed:', err);
-      }
-    }
-
-    // NZTA local persist first (endShiftClock journals shiftLogs if RTDB fails).
-    let shiftEndAt = Date.now();
-    if (driverSnapshot?.companyId && driverSnapshot.uid) {
-      try {
-        const { endShiftClock } = await import('@/services/nztaService');
-        const nextHours = await endShiftClock(
-          driverSnapshot.companyId,
-          driverSnapshot.uid,
-          driverSnapshot.id,
-          reason,
-          { vehicleId },
-        );
-        if (nextHours?.lastShiftEndAt) shiftEndAt = nextHours.lastShiftEndAt;
-      } catch (err) {
-        console.warn('[Driver] endShiftClock failed (local hours may be incomplete):', err);
-      }
-    }
-
-    if (driverSnapshot && vehicleId) {
-      const likelyOffline =
-        networkConnectedRef.current === false || rtdbConnectedRef.current === false;
-      let presenceOk = !likelyOffline;
-      try {
-        await clearOnlinePresence(driverSnapshot, vehicleId);
-      } catch (err) {
-        console.warn('[Driver] clearOnlinePresence failed:', err);
-        presenceOk = false;
-      }
-      if (driverSnapshot.companyId) {
-        try {
-          await update(ref(getDatabaseInstance(), `vehicles/${driverSnapshot.companyId}/${vehicleId}`), {
+    return runEndShiftRemoteFlow(
+      {
+        companyId,
+        uid,
+        driverId,
+        vehicleId,
+        reason,
+        likelyOffline,
+      },
+      {
+        stopBackgroundTracking: async () => {
+          const { stopBackgroundTracking } = await import('@/services/locationService');
+          await stopBackgroundTracking();
+        },
+        captureEndShiftSummary: async (cid, id) => {
+          const { captureEndShiftSummary } = await import('@/services/nztaService');
+          return captureEndShiftSummary(cid, id);
+        },
+        persistLocalNztaEnd: async (args) => {
+          const { persistLocalNztaEndShift } = await import('@/services/nztaService');
+          const local = await persistLocalNztaEndShift(
+            args.companyId,
+            args.uid,
+            args.driverId,
+            args.reason,
+          );
+          return {
+            shiftEndAt: local.shiftEndAt,
+            shiftStartAt: local.shiftStartAt,
+            workedMinutes: local.workedMinutes,
+            weeklyWorkedMinutes: local.weeklyWorkedMinutes,
+          };
+        },
+        writeShiftEndLog: async (args) => {
+          await writeShiftEndLog(args.companyId, args.uid, {
+            shiftEndAt: args.shiftEndAt,
+            shiftStartAt: args.shiftStartAt,
+            workedMinutes: args.workedMinutes,
+            weeklyWorkedMinutes: args.weeklyWorkedMinutes,
+            driverId: args.driverId,
+          });
+        },
+        clearOnlinePresence: async (vid) => {
+          await clearOnlinePresence(driverSnapshot, vid);
+        },
+        clearVehicleCurrentDriver: async (cid, vid) => {
+          await update(ref(getDatabaseInstance(), `vehicles/${cid}/${vid}`), {
             currentDriverId: null,
           });
-        } catch (err) {
-          console.warn('[Driver] clear vehicle currentDriverId failed:', err);
-          presenceOk = false;
-        }
-      }
-      // clearOnlinePresence swallows many RTDB errors — journal whenever we were offline
-      // or an explicit write failed so reconnect can finish the clear.
-      if ((!presenceOk || likelyOffline) && driverSnapshot.companyId && driverSnapshot.uid) {
-        await journalPresenceClearFailure({
-          companyId: driverSnapshot.companyId,
-          uid: driverSnapshot.uid,
-          driverId: driverSnapshot.id,
-          vehicleId,
-          reason,
-          shiftEndAt,
-        }).catch((err) => console.warn('[Driver] journalPresenceClearFailure failed:', err));
-      }
-    }
-
-    try {
-      const { stopShiftRuntime } = await import('@/services/shiftRuntimeService');
-      stopShiftRuntime();
-    } catch (err) {
-      console.warn('[Driver] stopShiftRuntime failed:', err);
-    }
-    return summary;
+        },
+        journalDeferredShiftEnd: async (args) => {
+          await enqueuePendingShiftEnd(args);
+        },
+        stopShiftRuntime: async () => {
+          const { stopShiftRuntime } = await import('@/services/shiftRuntimeService');
+          stopShiftRuntime();
+        },
+        markPresenceSessionEnded: (cid, vid) => {
+          markPresenceSessionEnded(cid, vid);
+        },
+      },
+    );
   };
 
   const waitForEndShiftSummaryAck = () =>
@@ -3181,6 +3195,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     endShiftSummaryAckRef.current = null;
   };
 
+  const resolveVehicleIdLocalFirst = async (): Promise<string> => {
+    const local = (selectedVehicleId ?? driver?.vehicleId ?? '').trim().toUpperCase();
+    if (local) return local;
+    return withTimeout(resolveVehicleId(), 2_000, 'resolveVehicleId').catch(() => '');
+  };
+
   const endShift = async () => {
     if (blockIfTripInProgress()) return;
     if (endShiftInProgressRef.current) return;
@@ -3188,10 +3208,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     endShiftInProgressRef.current = true;
     setEndShiftInProgress(true);
     try {
-      const vehicleId = await resolveVehicleId();
+      const vehicleId = await resolveVehicleIdLocalFirst();
       const driverSnapshot = driver;
       try {
-        await endShiftRemote(driverSnapshot, vehicleId);
+        await endShiftRemote(driverSnapshot, vehicleId || null);
       } catch (err) {
         // Remote is best-effort; always clear local shift offline.
         console.warn('[Driver] endShiftRemote soft-failed:', err);
@@ -3219,12 +3239,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     endShiftInProgressRef.current = true;
     setEndShiftInProgress(true);
     try {
-      const vehicleId = await resolveVehicleId();
+      const vehicleId = await resolveVehicleIdLocalFirst();
       const driverSnapshot = driver;
       const reason = opts?.reason ?? 'manual';
       let summary: EndShiftSummary | null = null;
       try {
-        summary = await endShiftRemote(driverSnapshot, vehicleId, reason);
+        summary = await endShiftRemote(driverSnapshot, vehicleId || null, reason);
       } catch (err) {
         console.warn('[Driver] endShiftRemote soft-failed:', err);
         if (driverSnapshot?.companyId && driverSnapshot.uid) {
@@ -3243,7 +3263,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       endShiftLocal();
-      await signOut();
+      // firebaseSignOut can hang offline — never block return to login.
+      await withTimeout(signOut(), 4_000, 'signOut').catch((err) => {
+        console.warn('[Driver] signOut timed out/failed (continuing to login):', err);
+      });
       router.replace('/(auth)/login');
       if (opts?.message) {
         Alert.alert('Shift limit', opts.message);
@@ -3253,7 +3276,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       // Last resort: still try local clear + sign-out so driver is not stuck offline.
       try {
         endShiftLocal();
-        await signOut();
+        await withTimeout(signOut(), 4_000, 'signOut').catch(() => undefined);
         router.replace('/(auth)/login');
       } catch (fallbackErr) {
         console.error('[Driver] endShiftAndSignOut fallback failed:', fallbackErr);
@@ -3895,49 +3918,57 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         : job.durationMin,
     };
 
-    // Dispatch jobs: dropoff may be missing on ActiveJob if offer parse missed DropAddress.
-    if (
-      (!String(closed.dropoff || '').trim() || !String(closed.pickup || '').trim()) &&
-      driver.companyId &&
-      isValidBookingId(job.id) &&
-      !isProvisionalBookingId(job.id)
-    ) {
-      try {
-        const fromBooking = await readBookingTripAddresses(driver.companyId, String(job.id));
-        if (fromBooking) {
-          closed = applyTripFieldsToJob(closed, fromBooking);
-        }
-      } catch (err) {
-        console.warn('[Driver] readBookingTripAddresses at complete failed:', err);
-      }
-    }
+    const offlineComplete = shouldOfflineJournalComplete(
+      networkConnectedRef.current,
+      rtdbConnectedRef.current,
+    );
 
-    // Hail: upgrade bare GPS placeholders when online at payment time.
-    {
-      const { needsHailAddressResolve, resolveReadableAddress } = await import(
-        '@/lib/hailAddressResolve'
-      );
+    // Online only — Firebase get / reverse-geocode hang offline and blocked Complete.
+    if (!offlineComplete) {
+      // Dispatch jobs: dropoff may be missing on ActiveJob if offer parse missed DropAddress.
       if (
-        needsHailAddressResolve(closed.pickup) ||
-        needsHailAddressResolve(closed.dropoff)
+        (!String(closed.dropoff || '').trim() || !String(closed.pickup || '').trim()) &&
+        driver.companyId &&
+        isValidBookingId(job.id) &&
+        !isProvisionalBookingId(job.id)
       ) {
         try {
-          const { reverseGeocodeCoords } = await import('@/services/locationService');
-          const pickup = await resolveReadableAddress(
-            { address: closed.pickup, lat: closed.pickupLat, lng: closed.pickupLng },
-            reverseGeocodeCoords,
-          );
-          const dropoff = await resolveReadableAddress(
-            {
-              address: closed.dropoff,
-              lat: closed.dropoffLat,
-              lng: closed.dropoffLng,
-            },
-            reverseGeocodeCoords,
-          );
-          closed = { ...closed, pickup, dropoff };
+          const fromBooking = await readBookingTripAddresses(driver.companyId, String(job.id));
+          if (fromBooking) {
+            closed = applyTripFieldsToJob(closed, fromBooking);
+          }
         } catch (err) {
-          console.warn('[Driver] hail reverse-geocode at complete failed:', err);
+          console.warn('[Driver] readBookingTripAddresses at complete failed:', err);
+        }
+      }
+
+      // Hail: upgrade bare GPS placeholders when online at payment time.
+      {
+        const { needsHailAddressResolve, resolveReadableAddress } = await import(
+          '@/lib/hailAddressResolve'
+        );
+        if (
+          needsHailAddressResolve(closed.pickup) ||
+          needsHailAddressResolve(closed.dropoff)
+        ) {
+          try {
+            const { reverseGeocodeCoords } = await import('@/services/locationService');
+            const pickup = await resolveReadableAddress(
+              { address: closed.pickup, lat: closed.pickupLat, lng: closed.pickupLng },
+              reverseGeocodeCoords,
+            );
+            const dropoff = await resolveReadableAddress(
+              {
+                address: closed.dropoff,
+                lat: closed.dropoffLat,
+                lng: closed.dropoffLng,
+              },
+              reverseGeocodeCoords,
+            );
+            closed = { ...closed, pickup, dropoff };
+          } catch (err) {
+            console.warn('[Driver] hail reverse-geocode at complete failed:', err);
+          }
         }
       }
     }
@@ -3974,7 +4005,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const persistClosedJobToFirebase = () => {
       void (async () => {
-        const vehicleId = (await resolveVehicleId()) || '';
+        const vehicleId = offlineComplete
+          ? (selectedVehicleId ?? driver.vehicleId ?? '').trim().toUpperCase()
+          : (await resolveVehicleId()) || '';
         const pending = {
           companyId: driver.companyId,
           driverId: driver.id,
@@ -3995,6 +4028,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           await upsertPendingClosedJob(pending);
         } catch (err) {
           console.warn('[Driver] upsertPendingClosedJob failed:', err);
+        }
+        if (offlineComplete) {
+          // Do not await Firebase writes offline — flushPendingClosedJobs on reconnect.
+          return;
         }
         try {
           await writeClosedJob(
@@ -4035,53 +4072,114 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       })();
     };
 
-    try {
-      let completeErr: unknown;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          await completeJobPayment(completePayload);
-          completeErr = null;
-          break;
-        } catch (err) {
-          completeErr = err;
-          const retryableTransport =
-            err instanceof StageTransportError && attempt === 0;
-          if (!retryableTransport) break;
-          console.warn('[Driver] completeJobPayment transport retry after timeout');
-          await new Promise((r) => setTimeout(r, 600));
-        }
+    if (offlineComplete) {
+      // Mirror offline Arrived/OnBoard: journal Completed, clear UI — no HTTP/Firebase awaits.
+      const journalKey = resolveJournalClientTripId(job);
+      if (!journalKey) {
+        localCompletionRef.current = false;
+        throw new Error('Cannot complete offline — missing trip journal key.');
       }
-      if (completeErr) throw completeErr;
-    } catch (err) {
-      console.error('[Driver] completeJobPayment failed:', err);
-      let completeFailed = true;
-      if (err instanceof DispatchApiError && err.status === 409 && job.id && driver.id) {
-        try {
-          const catchUpStage = job.stage === 'complete' ? 'onboard' : job.stage;
-          await catchUpJobStagesOnDispatch(job.id, driver.id, catchUpStage, job.updateSeq, {
-            companyId: driver.companyId,
-          });
-          await completeJobPayment(completePayload);
-          completeFailed = false;
-        } catch (retryErr) {
-          err = retryErr;
-        }
-      }
-      if (completeFailed) {
-        // Phase 5e — journal terminal complete for journalable trips (no offline queue).
-        const journalKey = resolveJournalClientTripId(job);
-        if (journalKey) {
+      const vehicleId =
+        (selectedVehicleId ?? driver.vehicleId ?? '').trim().toUpperCase() ||
+        (await withTimeout(resolveVehicleId(), 2_000, 'resolveVehicleId').catch(() => ''));
+      await ensureJournalForJob({
+        jobId: String(job.id),
+        clientTripId: job.clientTripId,
+        companyId: driver.companyId,
+        driverId: driver.id,
+        vehicleId,
+        source: job.source === 'hail' ? 'hail' : 'dispatch',
+      });
+      await appendTripJournalEvent(journalKey, 'Completed', {
+        action: 'complete',
+        jobId: job.id,
+        bookingId: job.id,
+        driverId: driver.id,
+        companyId: driver.companyId,
+        paymentType,
+        fare: totalFare,
+        totalFare,
+        distanceKm: closed.distanceKm,
+        distance: closed.distanceKm,
+        extras,
+        ...(tmDetails ?? {}),
+        ...closedJobFieldsForJournal(closed),
+      });
+      await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
+    } else {
+      try {
+        let completeErr: unknown;
+        for (let attempt = 0; attempt < 2; attempt++) {
           try {
-            const vehicleId = (await resolveVehicleId()) || '';
-            await ensureJournalForJob({
-              jobId: String(job.id),
-              clientTripId: job.clientTripId,
+            await completeJobPayment(completePayload);
+            completeErr = null;
+            break;
+          } catch (err) {
+            completeErr = err;
+            const retryableTransport =
+              err instanceof StageTransportError && attempt === 0;
+            if (!retryableTransport) break;
+            console.warn('[Driver] completeJobPayment transport retry after timeout');
+            await new Promise((r) => setTimeout(r, 600));
+          }
+        }
+        if (completeErr) throw completeErr;
+      } catch (err) {
+        console.error('[Driver] completeJobPayment failed:', err);
+        let completeFailed = true;
+        if (err instanceof DispatchApiError && err.status === 409 && job.id && driver.id) {
+          try {
+            const catchUpStage = job.stage === 'complete' ? 'onboard' : job.stage;
+            await catchUpJobStagesOnDispatch(job.id, driver.id, catchUpStage, job.updateSeq, {
               companyId: driver.companyId,
-              driverId: driver.id,
-              vehicleId,
-              source: job.source === 'hail' ? 'hail' : 'dispatch',
             });
-            await appendTripJournalEvent(journalKey, 'Completed', {
+            await completeJobPayment(completePayload);
+            completeFailed = false;
+          } catch (retryErr) {
+            err = retryErr;
+          }
+        }
+        if (completeFailed) {
+          // Phase 5e — journal terminal complete for journalable trips (no offline queue).
+          const journalKey = resolveJournalClientTripId(job);
+          if (journalKey) {
+            try {
+              const vehicleId = (await resolveVehicleId()) || '';
+              await ensureJournalForJob({
+                jobId: String(job.id),
+                clientTripId: job.clientTripId,
+                companyId: driver.companyId,
+                driverId: driver.id,
+                vehicleId,
+                source: job.source === 'hail' ? 'hail' : 'dispatch',
+              });
+              await appendTripJournalEvent(journalKey, 'Completed', {
+                action: 'complete',
+                jobId: job.id,
+                bookingId: job.id,
+                driverId: driver.id,
+                companyId: driver.companyId,
+                paymentType,
+                fare: totalFare,
+                totalFare,
+                distanceKm: closed.distanceKm,
+                distance: closed.distanceKm,
+                extras,
+                ...(tmDetails ?? {}),
+                ...closedJobFieldsForJournal(closed),
+              });
+              await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
+              // Fall through to local clear (same as online success) — do not block payment UI.
+              completeFailed = false;
+            } catch (journalErr) {
+              console.warn('[Driver] journal complete failed; falling back to offline queue', journalErr);
+            }
+          }
+        }
+        if (completeFailed) {
+          await enqueueOfflineItem({
+            type: 'job_update',
+            payload: {
               action: 'complete',
               jobId: job.id,
               bookingId: job.id,
@@ -4093,44 +4191,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               distanceKm: closed.distanceKm,
               distance: closed.distanceKm,
               extras,
+              // Preserve payment-specific fields for flush → /api/job/complete
+              // (TM / ACC / Stripe / Account / Cash — opaque to the sync layer).
               ...(tmDetails ?? {}),
               ...closedJobFieldsForJournal(closed),
-            });
-            await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
-            // Fall through to local clear (same as online success) — do not block payment UI.
-            completeFailed = false;
-          } catch (journalErr) {
-            console.warn('[Driver] journal complete failed; falling back to offline queue', journalErr);
-          }
+            },
+          });
+          const msg =
+            `Dispatch server did not confirm completion (${completionErrorMessage(err)}). ` +
+            'Job saved locally — tap Retry when back online.';
+          setCompletionError(msg);
+          localCompletionRef.current = false;
+          throw new Error(msg);
         }
-      }
-      if (completeFailed) {
-        await enqueueOfflineItem({
-          type: 'job_update',
-          payload: {
-            action: 'complete',
-            jobId: job.id,
-            bookingId: job.id,
-            driverId: driver.id,
-            companyId: driver.companyId,
-            paymentType,
-            fare: totalFare,
-            totalFare,
-            distanceKm: closed.distanceKm,
-            distance: closed.distanceKm,
-            extras,
-            // Preserve payment-specific fields for flush → /api/job/complete
-            // (TM / ACC / Stripe / Account / Cash — opaque to the sync layer).
-            ...(tmDetails ?? {}),
-            ...closedJobFieldsForJournal(closed),
-          },
-        });
-        const msg =
-          `Dispatch server did not confirm completion (${completionErrorMessage(err)}). ` +
-          'Job saved locally — tap Retry when back online.';
-        setCompletionError(msg);
-        localCompletionRef.current = false;
-        throw new Error(msg);
       }
     }
 
@@ -4159,7 +4232,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     refreshJobHistory().catch(() => undefined);
 
     if (driver && shiftActive) {
-      await syncPresenceAfterTripClear();
+      if (offlineComplete) {
+        void syncPresenceAfterTripClear();
+      } else {
+        await syncPresenceAfterTripClear();
+      }
     }
     releaseQueuedOffersAfterTrip();
   };
@@ -4713,14 +4790,28 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             ? Math.round((now - snapshot.startedAt) / 60000)
             : activeJob.durationMin,
         };
-        setActiveJob(updated);
         setPaymentJob(updated);
         setJobOffer(null);
         lastOfferSeenRef.current = null;
         setMeter(null);
         meterRef.current = null;
-        persistActiveJobAsync(updated);
-        if (snapshot) persistMeterAsync(snapshot);
+        // Offline: detach like hail endHail so the trip panel clears before payment.
+        if (
+          shouldDetachActiveJobOnEndTrip(
+            networkConnectedRef.current,
+            rtdbConnectedRef.current,
+          )
+        ) {
+          setActiveJob(null);
+          activeJobIdRef.current = null;
+          activeJobRef.current = null;
+          await storeData(STORAGE_KEYS.activeJob, null);
+          await storeData(STORAGE_KEYS.meterState, null);
+        } else {
+          setActiveJob(updated);
+          persistActiveJobAsync(updated);
+          if (snapshot) persistMeterAsync(snapshot);
+        }
       }
     } catch (err) {
       console.error('[Driver] endTrip failed:', err);

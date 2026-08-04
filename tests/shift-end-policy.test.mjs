@@ -50,3 +50,5 @@ test('offline end-shift journals when remote shift log write fails', () => {
   assert.equal(row.needsPresenceClear, false);
   assert.equal(pendingShiftEndStillOpen(row), true);
 });
+
+// Full Profile-button orchestration lives in tests/end-shift-remote-flow.test.mjs.
