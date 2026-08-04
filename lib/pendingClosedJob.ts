@@ -145,6 +145,8 @@ export async function flushPendingClosedJobs(opts?: {
             ? (job.meterSnapshot.breakdown as unknown as Record<string, unknown>)
             : undefined,
           vehicleType: vehicleType || undefined,
+          accountId: job.accountId,
+          accountName: job.accountName,
         });
       } catch (err) {
         console.warn('[pendingClosedJob] markBookingCompleted failed:', err);

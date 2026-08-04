@@ -4273,6 +4273,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               dropoff: closed.dropoff,
               passengerName: closed.passengerName,
               passengerPhone: closed.passengerPhone,
+              accountId: closed.accountId,
+              accountName: closed.accountName,
             });
           } catch (err) {
             console.warn('[Driver] markBookingCompleted failed:', err);

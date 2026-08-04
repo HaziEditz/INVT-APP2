@@ -40,6 +40,8 @@ export async function markBookingCompleted(
     stepTimes?: Record<string, unknown>;
     fareBreakdown?: Record<string, unknown> | null;
     vehicleType?: string;
+    accountId?: string;
+    accountName?: string;
   },
 ): Promise<void> {
   if (!companyId || !bookingId) return;
@@ -47,6 +49,8 @@ export async function markBookingCompleted(
   const pickup = String(payload.pickup || '').trim();
   const dropoff = String(payload.dropoff || '').trim();
   const vehicleType = String(payload.vehicleType || '').trim();
+  const accountId = String(payload.accountId || '').trim();
+  const accountName = String(payload.accountName || '').trim();
   const breakdown =
     payload.fareBreakdown && typeof payload.fareBreakdown === 'object'
       ? payload.fareBreakdown
@@ -82,5 +86,21 @@ export async function markBookingCompleted(
       ? { fareBreakdown: breakdown, FareBreakdown: breakdown }
       : {}),
     ...(vehicleType ? { VehicleType: vehicleType, vehicleType } : {}),
+    ...(accountId
+      ? {
+          Account_id: accountId,
+          AccountId: accountId,
+          jobAccountId: accountId,
+          accountId,
+        }
+      : {}),
+    ...(accountName
+      ? {
+          Account_Name: accountName,
+          AccountName: accountName,
+          jobAccountName: accountName,
+          accountName,
+        }
+      : {}),
   });
 }

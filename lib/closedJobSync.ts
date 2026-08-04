@@ -91,6 +91,12 @@ export function closedJobFieldsForJournal(job: ActiveJob): Record<string, unknow
     tariffChanges: job.tariffChanges,
     vehicleType,
     VehicleType: vehicleType,
+    accountId: job.accountId,
+    accountName: job.accountName,
+    Account_id: job.accountId,
+    Account_Name: job.accountName,
+    jobAccountId: job.accountId,
+    jobAccountName: job.accountName,
     fareBreakdown: breakdown,
     FareBreakdown: breakdown,
     flagFall: breakdown?.flagFall,
@@ -189,6 +195,18 @@ export function applyTripFieldsToJob(
     strOrUndef(rec.vehicleType) ??
     strOrUndef(rec.VehicleType) ??
     (job as ActiveJob & { vehicleType?: string }).vehicleType;
+  const accountId =
+    strOrUndef(rec.accountId) ??
+    strOrUndef(rec.Account_id) ??
+    strOrUndef(rec.AccountId) ??
+    strOrUndef(rec.jobAccountId) ??
+    job.accountId;
+  const accountName =
+    strOrUndef(rec.accountName) ??
+    strOrUndef(rec.Account_Name) ??
+    strOrUndef(rec.AccountName) ??
+    strOrUndef(rec.jobAccountName) ??
+    job.accountName;
   const distanceKm =
     numOrUndef(rec.distanceKm) ??
     numOrUndef(
@@ -229,6 +247,8 @@ export function applyTripFieldsToJob(
     durationMin,
     tariffChanges,
     ...(vehicleType ? { vehicleType } : {}),
+    ...(accountId ? { accountId } : {}),
+    ...(accountName ? { accountName } : {}),
   };
 }
 

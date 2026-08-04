@@ -80,11 +80,17 @@ test('closedJobFieldsForCompleteApi uses server whitelist keys', () => {
 });
 
 test('closedJobFieldsForJournal includes meter + vehicle for offline rebuild', () => {
-  const payload = closedJobFieldsForJournal(sampleJob);
+  const payload = closedJobFieldsForJournal({
+    ...sampleJob,
+    accountId: 'acct-1',
+    accountName: 'Acme Co',
+  });
   assert.equal(payload.VehicleType, 'Sedan');
   assert.ok(payload.meterSnapshot);
   assert.equal(payload.fareBreakdown.total, 9.3);
   assert.deepEqual(payload.stepTimes, { onboardAt: 1 });
+  assert.equal(payload.Account_id, 'acct-1');
+  assert.equal(payload.Account_Name, 'Acme Co');
 });
 
 test('applyTripFieldsToJob restores sparse jobs from journal payload', () => {

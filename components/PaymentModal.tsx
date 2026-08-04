@@ -130,6 +130,7 @@ export function PaymentModal() {
   const [accountSearch, setAccountSearch] = useState('');
   const [accountHits, setAccountHits] = useState<DriverAccountSearchHit[]>([]);
   const [accountSearching, setAccountSearching] = useState(false);
+  const [accountSearchError, setAccountSearchError] = useState('');
   const accountSearchSeq = useRef(0);
   const [accClaimNo, setAccClaimNo] = useState('');
   const [accPoNo, setAccPoNo] = useState('');
@@ -173,6 +174,7 @@ export function PaymentModal() {
     setAccountName(String(paymentJob.accountName || '').trim());
     setAccountSearch('');
     setAccountHits([]);
+    setAccountSearchError('');
     setAccClaimNo('');
     setAccPoNo('');
     setTmCardNumber('');
@@ -184,24 +186,35 @@ export function PaymentModal() {
     if (paymentType !== 'Account' || accountLockedFromDispatch || accountId) {
       setAccountHits([]);
       setAccountSearching(false);
+      setAccountSearchError('');
       return;
     }
     const q = accountSearch.trim();
     if (q.length < 2) {
       setAccountHits([]);
+      setAccountSearchError('');
       return;
     }
     const seq = ++accountSearchSeq.current;
     setAccountSearching(true);
+    setAccountSearchError('');
     const t = setTimeout(() => {
       void searchBusinessAccounts(q)
         .then((hits) => {
           if (seq !== accountSearchSeq.current) return;
           setAccountHits(hits);
+          setAccountSearchError(
+            hits.length === 0 ? 'No matching business accounts found.' : '',
+          );
         })
-        .catch(() => {
+        .catch((err) => {
           if (seq !== accountSearchSeq.current) return;
           setAccountHits([]);
+          const msg =
+            err instanceof Error && err.message
+              ? err.message
+              : 'Account search failed. Check connection and try again.';
+          setAccountSearchError(msg);
         })
         .finally(() => {
           if (seq === accountSearchSeq.current) setAccountSearching(false);
@@ -437,6 +450,9 @@ export function PaymentModal() {
                 />
                 {accountSearching ? (
                   <ActivityIndicator color={Colors.accent} style={{ marginVertical: 8 }} />
+                ) : null}
+                {accountSearchError ? (
+                  <Text style={styles.accountSearchError}>{accountSearchError}</Text>
                 ) : null}
                 {accountHits.map((hit) => {
                   const id = String(hit.Id ?? '');
@@ -980,6 +996,12 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 13,
     marginBottom: 4,
+  },
+  accountSearchError: {
+    color: Colors.warning,
+    fontSize: 13,
+    fontWeight: '600',
+    marginVertical: 4,
   },
   accountHit: {
     paddingVertical: 12,

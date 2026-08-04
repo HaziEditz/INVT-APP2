@@ -35,6 +35,13 @@ test('readAccountFieldsFromRecord accepts jobAccount* and Account_* mirrors', ()
     }),
     { accountId: 'abc', accountName: 'Acme Co' },
   );
+  assert.deepEqual(
+    readAccountFieldsFromRecord({
+      AccountId: 'xyz',
+      AccountName: 'Pascal Co',
+    }),
+    { accountId: 'xyz', accountName: 'Pascal Co' },
+  );
 });
 
 test('pending sync keeps Busy even when Away intent is set', () => {
