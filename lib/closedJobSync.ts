@@ -52,9 +52,18 @@ export function extractClosedJobTripFields(job: ActiveJob): ClosedJobTripFields 
   };
 }
 
+function jobVehicleTypeLabel(job: ActiveJob): string | undefined {
+  return (
+    strOrUndef((job as ActiveJob & { vehicleType?: string }).vehicleType) ??
+    strOrUndef(job.vehicleTypeRequired)
+  );
+}
+
 /** Journal Completed payload extras so flush can rebuild a closed snapshot. */
 export function closedJobFieldsForJournal(job: ActiveJob): Record<string, unknown> {
   const f = extractClosedJobTripFields(job);
+  const vehicleType = jobVehicleTypeLabel(job);
+  const breakdown = job.meterSnapshot?.breakdown;
   return {
     pickup: f.pickup,
     dropoff: f.dropoff,
@@ -80,13 +89,25 @@ export function closedJobFieldsForJournal(job: ActiveJob): Record<string, unknow
     distanceKm: job.distanceKm,
     durationMin: job.durationMin,
     tariffChanges: job.tariffChanges,
+    vehicleType,
+    VehicleType: vehicleType,
+    fareBreakdown: breakdown,
+    FareBreakdown: breakdown,
+    flagFall: breakdown?.flagFall,
+    distanceCharge: breakdown?.distanceCharge,
+    waitingCharge: breakdown?.waitingCharge,
+    waitingMinutes: breakdown?.waitingMinutes,
+    tariffId: job.meterSnapshot?.tariffId,
+    tariffName: job.meterSnapshot?.tariffName,
   };
 }
 
 /** HTTP complete payload extras accepted by server whitelist (+ address mirrors). */
 export function closedJobFieldsForCompleteApi(job: ActiveJob): Record<string, unknown> {
   const f = extractClosedJobTripFields(job);
-  return {
+  const vehicleType = jobVehicleTypeLabel(job);
+  const breakdown = job.meterSnapshot?.breakdown;
+  const out: Record<string, unknown> = {
     pickupLat: f.pickupLat,
     pickupLng: f.pickupLng,
     dropLat: f.dropoffLat,
@@ -94,6 +115,31 @@ export function closedJobFieldsForCompleteApi(job: ActiveJob): Record<string, un
     finalDropAddress: f.dropoff || undefined,
     driverComments: f.notes || undefined,
   };
+  if (f.stepTimes && typeof f.stepTimes === 'object') out.stepTimes = f.stepTimes;
+  if (vehicleType) {
+    out.VehicleType = vehicleType;
+    out.vehicleType = vehicleType;
+  }
+  if (breakdown && typeof breakdown === 'object') {
+    out.fareBreakdown = breakdown;
+    out.FareBreakdown = breakdown;
+    if (breakdown.flagFall != null) out.flagFall = breakdown.flagFall;
+    if (breakdown.distanceCharge != null) out.distanceCharge = breakdown.distanceCharge;
+    if (breakdown.waitingCharge != null) {
+      out.waitingCharge = breakdown.waitingCharge;
+      out.waitingCost = breakdown.waitingCharge;
+    }
+    if (breakdown.waitingMinutes != null) {
+      out.waitingMinutes = breakdown.waitingMinutes;
+      out.waitingTimeMinutes = breakdown.waitingMinutes;
+    }
+  }
+  const tariffId = job.meterSnapshot?.tariffId;
+  const tariffName = job.meterSnapshot?.tariffName;
+  if (tariffId) out.tariffId = tariffId;
+  if (tariffName) out.tariffName = tariffName;
+  if (job.tariffChanges?.length) out.tariffChanges = job.tariffChanges;
+  return out;
 }
 
 export function applyTripFieldsToJob(
@@ -135,6 +181,27 @@ export function applyTripFieldsToJob(
     numOrUndef((fields as Record<string, unknown>).dropLng) ??
     job.dropoffLng;
 
+  const meterSnapshot =
+    rec.meterSnapshot && typeof rec.meterSnapshot === 'object'
+      ? (rec.meterSnapshot as ActiveJob['meterSnapshot'])
+      : job.meterSnapshot;
+  const vehicleType =
+    strOrUndef(rec.vehicleType) ??
+    strOrUndef(rec.VehicleType) ??
+    (job as ActiveJob & { vehicleType?: string }).vehicleType;
+  const distanceKm =
+    numOrUndef(rec.distanceKm) ??
+    numOrUndef(
+      meterSnapshot && typeof meterSnapshot === 'object'
+        ? (meterSnapshot as { distanceKm?: unknown }).distanceKm
+        : undefined,
+    ) ??
+    job.distanceKm;
+  const durationMin = numOrUndef(rec.durationMin) ?? job.durationMin;
+  const tariffChanges = Array.isArray(rec.tariffChanges)
+    ? (rec.tariffChanges as ActiveJob['tariffChanges'])
+    : job.tariffChanges;
+
   return {
     ...job,
     pickup,
@@ -151,9 +218,17 @@ export function applyTripFieldsToJob(
     type: ((fields as ClosedJobTripFields).type as ActiveJob['type']) ?? job.type,
     source: ((fields as ClosedJobTripFields).source as ActiveJob['source']) ?? job.source,
     stepTimes:
-      ((fields as ClosedJobTripFields).stepTimes as ActiveJob['stepTimes']) ?? job.stepTimes,
+      ((fields as ClosedJobTripFields).stepTimes as ActiveJob['stepTimes']) ??
+      (rec.stepTimes && typeof rec.stepTimes === 'object'
+        ? (rec.stepTimes as ActiveJob['stepTimes'])
+        : job.stepTimes),
     clientTripId:
       strOrUndef((fields as ClosedJobTripFields).clientTripId) ?? job.clientTripId,
+    meterSnapshot,
+    distanceKm,
+    durationMin,
+    tariffChanges,
+    ...(vehicleType ? { vehicleType } : {}),
   };
 }
 

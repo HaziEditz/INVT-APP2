@@ -161,6 +161,8 @@ export interface ActiveJob extends JobOffer {
   stepTimes: JobStepTimes;
   tariffChanges: TariffChangeRecord[];
   meterSnapshot?: MeterState | null;
+  /** Vehicle type on the assigned vehicle (hail / closed-job snapshot). */
+  vehicleType?: string;
   /** Server updateSeq — used for optimistic stage sync retries. */
   updateSeq?: number;
   /** Phase 5b — client UUID for hail create-or-get / offline journal. */

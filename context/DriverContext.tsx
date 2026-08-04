@@ -4596,6 +4596,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               tariffId: selectedTariff.id,
               pickup: pickupSnapshot,
               clientTripId,
+              vehicleType:
+                activeVehicle?.vehicleType ||
+                activeVehicle?.displayType ||
+                activeVehicle?.bodyType ||
+                undefined,
             }),
           createPendingJournal: createPendingHail,
         });
@@ -4611,6 +4616,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      const hailVehicleType =
+        activeVehicle?.vehicleType ||
+        activeVehicle?.displayType ||
+        activeVehicle?.bodyType ||
+        undefined;
       const hailJob: ActiveJob = {
         id: jobId,
         type: 'Taxi',
@@ -4632,6 +4642,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         expiresAt: now + 86400000,
         updateSeq,
         clientTripId,
+        ...(hailVehicleType
+          ? { vehicleType: hailVehicleType, vehicleTypeRequired: hailVehicleType }
+          : {}),
       };
 
       setHailActive(true);

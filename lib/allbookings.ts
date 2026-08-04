@@ -37,17 +37,26 @@ export async function markBookingCompleted(
     dropoff?: string;
     passengerName?: string;
     passengerPhone?: string;
+    stepTimes?: Record<string, unknown>;
+    fareBreakdown?: Record<string, unknown> | null;
+    vehicleType?: string;
   },
 ): Promise<void> {
   if (!companyId || !bookingId) return;
   const database = getDatabaseInstance();
   const pickup = String(payload.pickup || '').trim();
   const dropoff = String(payload.dropoff || '').trim();
+  const vehicleType = String(payload.vehicleType || '').trim();
+  const breakdown =
+    payload.fareBreakdown && typeof payload.fareBreakdown === 'object'
+      ? payload.fareBreakdown
+      : undefined;
   await update(ref(database, `allbookings/${companyId}/${bookingId}`), {
     status: 'completed',
     jobstatus: 'completed',
     BookingStatus: 'Completed',
     fare: payload.fare,
+    TotalFare: payload.fare,
     paymentType: payload.paymentType,
     paymentMethod: payload.paymentType,
     driverId: payload.driverId,
@@ -66,5 +75,12 @@ export async function markBookingCompleted(
     ...(payload.passengerPhone
       ? { PassengerPhone: payload.passengerPhone, passengerPhone: payload.passengerPhone }
       : {}),
+    ...(payload.stepTimes && typeof payload.stepTimes === 'object'
+      ? { stepTimes: payload.stepTimes }
+      : {}),
+    ...(breakdown
+      ? { fareBreakdown: breakdown, FareBreakdown: breakdown }
+      : {}),
+    ...(vehicleType ? { VehicleType: vehicleType, vehicleType } : {}),
   });
 }

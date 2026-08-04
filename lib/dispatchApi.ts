@@ -410,6 +410,8 @@ export async function createHailJobOnDispatch(params: {
   dropoff?: { address: string; lat?: number; lng?: number };
   /** Phase 5b — client UUID for idempotent create-or-get (retries / offline journal). */
   clientTripId: string;
+  /** Vehicle type from the driver's selected vehicle (Closed Job / dispatch). */
+  vehicleType?: string;
 }): Promise<{ jobId: string; bookingId: number; updateSeq: number; clientTripId: string; existing?: boolean }> {
   const body: Record<string, unknown> = {
     companyId: params.companyId,
@@ -430,6 +432,11 @@ export async function createHailJobOnDispatch(params: {
     },
     passengers: 1,
   };
+  const vehicleType = String(params.vehicleType || '').trim();
+  if (vehicleType) {
+    body.vehicleType = vehicleType;
+    body.VehicleType = vehicleType;
+  }
 
   // Single timed attempt — DriverContext journals pending hail on transport timeout.
   const headers = await driverApiHeaders();

@@ -127,6 +127,9 @@ export async function flushPendingClosedJobs(opts?: {
         { driverName: row.driverName, vehicleId: row.vehicleId },
       );
       try {
+        const vehicleType = String(
+          job.vehicleType || job.vehicleTypeRequired || '',
+        ).trim();
         await markBookingCompleted(row.companyId, jobId, {
           fare: row.totalFare,
           paymentType: row.paymentType,
@@ -137,6 +140,11 @@ export async function flushPendingClosedJobs(opts?: {
           dropoff: job.dropoff,
           passengerName: job.passengerName,
           passengerPhone: job.passengerPhone,
+          stepTimes: job.stepTimes as unknown as Record<string, unknown>,
+          fareBreakdown: job.meterSnapshot?.breakdown
+            ? (job.meterSnapshot.breakdown as unknown as Record<string, unknown>)
+            : undefined,
+          vehicleType: vehicleType || undefined,
         });
       } catch (err) {
         console.warn('[pendingClosedJob] markBookingCompleted failed:', err);

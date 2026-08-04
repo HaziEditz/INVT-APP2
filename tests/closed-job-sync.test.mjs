@@ -24,6 +24,30 @@ const sampleJob = {
   source: 'dispatch',
   clientTripId: 'ct-1',
   stepTimes: { onboardAt: 1 },
+  distanceKm: 2.5,
+  vehicleType: 'Sedan',
+  meterSnapshot: {
+    running: false,
+    paused: false,
+    mode: 'moving',
+    startedAt: 1,
+    pausedMs: 0,
+    movingMs: 1000,
+    waitingMs: 60000,
+    distanceKm: 2.5,
+    tariffId: 't1',
+    tariffName: 'Day',
+    tariffChanges: [],
+    breakdown: {
+      flagFall: 3.5,
+      distanceKm: 2.5,
+      distanceCharge: 5,
+      waitingMinutes: 1,
+      waitingCharge: 0.8,
+      total: 9.3,
+    },
+    fare: 9.3,
+  },
 };
 
 test('extractClosedJobTripFields keeps pickup/dropoff for closed jobs', () => {
@@ -48,6 +72,19 @@ test('closedJobFieldsForCompleteApi uses server whitelist keys', () => {
   assert.equal(api.dropLat, -36.85);
   assert.equal(api.finalDropAddress, '88 Karangahape Rd');
   assert.equal(api.driverComments, 'Gate code 1');
+  assert.equal(api.VehicleType, 'Sedan');
+  assert.deepEqual(api.stepTimes, { onboardAt: 1 });
+  assert.equal(api.fareBreakdown.flagFall, 3.5);
+  assert.equal(api.waitingCost, 0.8);
+  assert.equal(api.tariffName, 'Day');
+});
+
+test('closedJobFieldsForJournal includes meter + vehicle for offline rebuild', () => {
+  const payload = closedJobFieldsForJournal(sampleJob);
+  assert.equal(payload.VehicleType, 'Sedan');
+  assert.ok(payload.meterSnapshot);
+  assert.equal(payload.fareBreakdown.total, 9.3);
+  assert.deepEqual(payload.stepTimes, { onboardAt: 1 });
 });
 
 test('applyTripFieldsToJob restores sparse jobs from journal payload', () => {
@@ -81,6 +118,23 @@ test('applyTripFieldsToJob ignores empty dropoff string and uses DropAddress', (
     DropAddress: 'Drop St from booking',
   });
   assert.equal(restored.dropoff, 'Drop St from booking');
+});
+
+test('applyTripFieldsToJob rebuilds meterSnapshot and vehicleType from journal', () => {
+  const sparse = {
+    id: '1',
+    type: 'Taxi',
+    stage: 'complete',
+    pickup: 'A',
+    dropoff: 'B',
+    stepTimes: {},
+    distanceKm: 0,
+  };
+  const restored = applyTripFieldsToJob(sparse, closedJobFieldsForJournal(sampleJob));
+  assert.equal(restored.vehicleType, 'Sedan');
+  assert.equal(restored.meterSnapshot?.breakdown?.total, 9.3);
+  assert.deepEqual(restored.stepTimes, { onboardAt: 1 });
+  assert.equal(restored.distanceKm, 2.5);
 });
 
 test('pendingClosedJobMatches binds clientTripId and server id', () => {

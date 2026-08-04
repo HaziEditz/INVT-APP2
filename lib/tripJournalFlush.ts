@@ -119,6 +119,23 @@ async function flushTerminalEvent(args: {
       }
     }
     const driverComments = asString(payload.notes) || asString(payload.driverComments) || undefined;
+    const stepTimes =
+      payload.stepTimes && typeof payload.stepTimes === 'object'
+        ? payload.stepTimes
+        : undefined;
+    const meterSnapshot =
+      payload.meterSnapshot && typeof payload.meterSnapshot === 'object'
+        ? (payload.meterSnapshot as Record<string, unknown>)
+        : undefined;
+    const fareBreakdown =
+      (payload.fareBreakdown && typeof payload.fareBreakdown === 'object'
+        ? payload.fareBreakdown
+        : undefined) ??
+      (meterSnapshot?.breakdown && typeof meterSnapshot.breakdown === 'object'
+        ? meterSnapshot.breakdown
+        : undefined);
+    const vehicleType =
+      asString(payload.VehicleType) || asString(payload.vehicleType) || undefined;
     await completeJobPayment({
       jobId,
       bookingId: jobId,
@@ -167,6 +184,32 @@ async function flushTerminalEvent(args: {
         dropLng,
         finalDropAddress,
         driverComments,
+        stepTimes,
+        fareBreakdown,
+        FareBreakdown: fareBreakdown,
+        VehicleType: vehicleType,
+        vehicleType,
+        flagFall: payload.flagFall ?? (fareBreakdown as { flagFall?: unknown } | undefined)?.flagFall,
+        distanceCharge:
+          payload.distanceCharge ??
+          (fareBreakdown as { distanceCharge?: unknown } | undefined)?.distanceCharge,
+        waitingCharge:
+          payload.waitingCharge ??
+          (fareBreakdown as { waitingCharge?: unknown } | undefined)?.waitingCharge,
+        waitingCost:
+          payload.waitingCost ??
+          payload.waitingCharge ??
+          (fareBreakdown as { waitingCharge?: unknown } | undefined)?.waitingCharge,
+        waitingTimeMinutes:
+          payload.waitingTimeMinutes ??
+          payload.waitingMinutes ??
+          (fareBreakdown as { waitingMinutes?: unknown } | undefined)?.waitingMinutes,
+        waitingMinutes:
+          payload.waitingMinutes ??
+          (fareBreakdown as { waitingMinutes?: unknown } | undefined)?.waitingMinutes,
+        tariffId: payload.tariffId ?? meterSnapshot?.tariffId,
+        tariffName: payload.tariffName ?? meterSnapshot?.tariffName,
+        tariffChanges: payload.tariffChanges,
       },
     });
     return;
