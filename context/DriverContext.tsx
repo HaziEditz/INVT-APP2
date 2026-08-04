@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, StageTransportError, syncJobStageOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, syncJobStageOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -126,6 +126,13 @@ import {
   shouldDetachActiveJobOnEndTrip,
   shouldOfflineJournalComplete,
 } from '@/lib/offlineCompletePolicy';
+import {
+  COMPLETE_ENRICH_TIMEOUT_MS,
+  STAGE_VERIFY_TIMEOUT_MS,
+  runOnlineCompleteWithJournalFallback,
+  runOnlineHailCreateWithJournalFallback,
+  runOnlineStageWithJournalFallback,
+} from '@/lib/weakSignalPolicy';
 import {
   enqueuePendingShiftEnd,
   flushPendingShiftEnds,
@@ -3740,9 +3747,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           rtdbConnectedRef.current,
         );
         const numericJob = /^\d+$/.test(String(activeJob.id));
-        if (offline && numericJob && !isProvisionalBookingId(activeJob.id)) {
-          // Phase 5d — optimistic local stage; flush via /api/job/stage on reconnect.
-          const vehicleId = (await resolveVehicleId()) || '';
+        const journalStageLocal = async () => {
+          const vehicleId =
+            (selectedVehicleId ?? driver.vehicleId ?? '').trim().toUpperCase() ||
+            (await withTimeout(resolveVehicleId(), 2_000, 'resolveVehicleId').catch(() => ''));
           await ensureDispatchTripJournal({
             jobId: String(activeJob.id),
             companyId: driver.companyId,
@@ -3755,8 +3763,36 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             { updateSeq: activeJob.updateSeq ?? 0 },
           );
           await applySyncingBanner({ message: 'Syncing…', reason: 'stages', at: Date.now() });
-        } else if (!offline) {
-          await syncJobStageToDispatch(nextStage, { id: activeJob.id, updateSeq: activeJob.updateSeq });
+        };
+
+        if (offline && numericJob && !isProvisionalBookingId(activeJob.id)) {
+          // Phase 5d — optimistic local stage; flush via /api/job/stage on reconnect.
+          await journalStageLocal();
+        } else if (!offline && numericJob && !isProvisionalBookingId(activeJob.id)) {
+          // Weak cellular: NetInfo may still say online — timeout → journal (not hang).
+          const expectedBookingStatus = nextStage === 'arrived' ? 'Arrived' : 'Active';
+          await runOnlineStageWithJournalFallback({
+            syncStage: async () => {
+              await syncJobStageToDispatch(nextStage, {
+                id: activeJob.id,
+                updateSeq: activeJob.updateSeq,
+              });
+            },
+            journalStage: journalStageLocal,
+            verifyFirebase: async () => {
+              const verified = await withTimeout(
+                verifyJobStageOnFirebase(
+                  driver.companyId,
+                  activeJob.id,
+                  expectedBookingStatus,
+                  activeJob.updateSeq,
+                ),
+                STAGE_VERIFY_TIMEOUT_MS,
+                'verifyJobStageOnFirebase',
+              );
+              return !!verified.verified;
+            },
+          });
         } else if (isProvisionalBookingId(activeJob.id)) {
           console.log('[Driver] skip offline stage journal for provisional hail', activeJob.id);
         }
@@ -3790,54 +3826,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       persistActiveJobAsync(updated);
     } catch (err) {
       console.error('[Driver] advanceStage failed:', err);
-      const order: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
-      const idx = order.indexOf(activeJob.stage);
-      const nextStage = order[Math.min(idx + 1, order.length - 1)];
-      const expectedBookingStatus =
-        nextStage === 'arrived' ? 'Arrived' : nextStage === 'onboard' ? 'Active' : '';
-
-      if (
-        driver.companyId &&
-        expectedBookingStatus &&
-        (err instanceof StageTransportError || err instanceof DispatchApiError)
-      ) {
-        const verified = await verifyJobStageOnFirebase(
-          driver.companyId,
-          activeJob.id,
-          expectedBookingStatus,
-          activeJob.updateSeq,
-        );
-        if (verified.verified) {
-          const now = Date.now();
-          const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
-          if (nextStage === 'arrived') stepTimes.arrivedAt = now;
-          if (nextStage === 'onboard') {
-            stepTimes.onboardAt = now;
-            if (shouldStartMeterForBooking(bookingRawRef.current, activeJob)) {
-              startMeterForJob();
-            }
-          }
-          const recoveredFixedFare = !shouldStartMeterForBooking(bookingRawRef.current, activeJob)
-            ? readFixedFareAmount(bookingRawRef.current, activeJob)
-            : undefined;
-          const recovered: ActiveJob = {
-            ...activeJob,
-            stage: nextStage,
-            stepTimes,
-            meterSnapshot: activeJob.meterSnapshot,
-            fare: recoveredFixedFare ?? activeJob.fare,
-            fixedFare: recoveredFixedFare ?? activeJob.fixedFare,
-            estimatedFare: recoveredFixedFare ?? activeJob.estimatedFare,
-            isFixedPrice: activeJob.isFixedPrice || !shouldStartMeterForBooking(bookingRawRef.current, activeJob),
-            distanceKm: activeJob.distanceKm,
-            ...(verified.updateSeq != null ? { updateSeq: verified.updateSeq } : {}),
-          };
-          setActiveJob(recovered);
-          persistActiveJobAsync(recovered);
-          return;
-        }
-      }
-
       const msg =
         err instanceof DispatchApiError
           ? `${err.message}${err.errorCode ? ` (${err.errorCode})` : ''}`
@@ -3923,53 +3911,53 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       rtdbConnectedRef.current,
     );
 
-    // Online only — Firebase get / reverse-geocode hang offline and blocked Complete.
+    // Online enrich is best-effort with a hard cap — weak RTDB/geocode must not block Complete.
     if (!offlineComplete) {
-      // Dispatch jobs: dropoff may be missing on ActiveJob if offer parse missed DropAddress.
-      if (
-        (!String(closed.dropoff || '').trim() || !String(closed.pickup || '').trim()) &&
-        driver.companyId &&
-        isValidBookingId(job.id) &&
-        !isProvisionalBookingId(job.id)
-      ) {
-        try {
-          const fromBooking = await readBookingTripAddresses(driver.companyId, String(job.id));
-          if (fromBooking) {
-            closed = applyTripFieldsToJob(closed, fromBooking);
-          }
-        } catch (err) {
-          console.warn('[Driver] readBookingTripAddresses at complete failed:', err);
-        }
-      }
-
-      // Hail: upgrade bare GPS placeholders when online at payment time.
-      {
-        const { needsHailAddressResolve, resolveReadableAddress } = await import(
-          '@/lib/hailAddressResolve'
+      try {
+        await withTimeout(
+          (async () => {
+            if (
+              (!String(closed.dropoff || '').trim() || !String(closed.pickup || '').trim()) &&
+              driver.companyId &&
+              isValidBookingId(job.id) &&
+              !isProvisionalBookingId(job.id)
+            ) {
+              const fromBooking = await readBookingTripAddresses(
+                driver.companyId,
+                String(job.id),
+              );
+              if (fromBooking) {
+                closed = applyTripFieldsToJob(closed, fromBooking);
+              }
+            }
+            const { needsHailAddressResolve, resolveReadableAddress } = await import(
+              '@/lib/hailAddressResolve'
+            );
+            if (
+              needsHailAddressResolve(closed.pickup) ||
+              needsHailAddressResolve(closed.dropoff)
+            ) {
+              const { reverseGeocodeCoords } = await import('@/services/locationService');
+              const pickup = await resolveReadableAddress(
+                { address: closed.pickup, lat: closed.pickupLat, lng: closed.pickupLng },
+                reverseGeocodeCoords,
+              );
+              const dropoff = await resolveReadableAddress(
+                {
+                  address: closed.dropoff,
+                  lat: closed.dropoffLat,
+                  lng: closed.dropoffLng,
+                },
+                reverseGeocodeCoords,
+              );
+              closed = { ...closed, pickup, dropoff };
+            }
+          })(),
+          COMPLETE_ENRICH_TIMEOUT_MS,
+          'completeAddressEnrich',
         );
-        if (
-          needsHailAddressResolve(closed.pickup) ||
-          needsHailAddressResolve(closed.dropoff)
-        ) {
-          try {
-            const { reverseGeocodeCoords } = await import('@/services/locationService');
-            const pickup = await resolveReadableAddress(
-              { address: closed.pickup, lat: closed.pickupLat, lng: closed.pickupLng },
-              reverseGeocodeCoords,
-            );
-            const dropoff = await resolveReadableAddress(
-              {
-                address: closed.dropoff,
-                lat: closed.dropoffLat,
-                lng: closed.dropoffLng,
-              },
-              reverseGeocodeCoords,
-            );
-            closed = { ...closed, pickup, dropoff };
-          } catch (err) {
-            console.warn('[Driver] hail reverse-geocode at complete failed:', err);
-          }
-        }
+      } catch (err) {
+        console.warn('[Driver] complete address enrich skipped (timeout/fail):', err);
       }
     }
 
@@ -4003,9 +3991,76 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       },
     };
 
+    const journalCompletedLocal = async () => {
+      const journalKey = resolveJournalClientTripId(job);
+      if (!journalKey) {
+        throw new Error('Cannot journal complete — missing trip journal key.');
+      }
+      const vehicleId =
+        (selectedVehicleId ?? driver.vehicleId ?? '').trim().toUpperCase() ||
+        (await withTimeout(resolveVehicleId(), 2_000, 'resolveVehicleId').catch(() => ''));
+      await ensureJournalForJob({
+        jobId: String(job.id),
+        clientTripId: job.clientTripId,
+        companyId: driver.companyId,
+        driverId: driver.id,
+        vehicleId,
+        source: job.source === 'hail' ? 'hail' : 'dispatch',
+      });
+      await appendTripJournalEvent(journalKey, 'Completed', {
+        action: 'complete',
+        jobId: job.id,
+        bookingId: job.id,
+        driverId: driver.id,
+        companyId: driver.companyId,
+        paymentType,
+        fare: totalFare,
+        totalFare,
+        distanceKm: closed.distanceKm,
+        distance: closed.distanceKm,
+        extras,
+        ...(tmDetails ?? {}),
+        ...closedJobFieldsForJournal(closed),
+      });
+      await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
+    };
+
+    let deferredFirebasePersist = offlineComplete;
+
+    if (offlineComplete) {
+      try {
+        await journalCompletedLocal();
+      } catch (err) {
+        localCompletionRef.current = false;
+        throw err instanceof Error ? err : new Error('Cannot complete offline.');
+      }
+    } else {
+      const outcome = await runOnlineCompleteWithJournalFallback({
+        completePayment: async () => {
+          await completeJobPayment(completePayload);
+        },
+        journalComplete: journalCompletedLocal,
+        catchUpAndRetry: async () => {
+          if (!job.id || !driver.id) throw new Error('missing job/driver for catch-up');
+          const catchUpStage = job.stage === 'complete' ? 'onboard' : job.stage;
+          await withTimeout(
+            catchUpJobStagesOnDispatch(job.id, driver.id, catchUpStage, job.updateSeq, {
+              companyId: driver.companyId,
+            }),
+            COMPLETE_ENRICH_TIMEOUT_MS,
+            'catchUpJobStagesOnDispatch',
+          );
+          await completeJobPayment(completePayload);
+        },
+      });
+      if (outcome === 'journal_fallback') {
+        deferredFirebasePersist = true;
+      }
+    }
+
     const persistClosedJobToFirebase = () => {
       void (async () => {
-        const vehicleId = offlineComplete
+        const vehicleId = deferredFirebasePersist
           ? (selectedVehicleId ?? driver.vehicleId ?? '').trim().toUpperCase()
           : (await resolveVehicleId()) || '';
         const pending = {
@@ -4022,15 +4077,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           tmDetails,
           completedAt,
         };
-        // Always stage full trip snapshot (addresses etc.) so reconnect can retry
-        // when the one-shot Firebase write fails offline.
         try {
           await upsertPendingClosedJob(pending);
         } catch (err) {
           console.warn('[Driver] upsertPendingClosedJob failed:', err);
         }
-        if (offlineComplete) {
-          // Do not await Firebase writes offline — flushPendingClosedJobs on reconnect.
+        if (deferredFirebasePersist) {
+          // Offline / weak-signal journal path — flushPendingClosedJobs on reconnect.
           return;
         }
         try {
@@ -4072,141 +4125,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       })();
     };
 
-    if (offlineComplete) {
-      // Mirror offline Arrived/OnBoard: journal Completed, clear UI — no HTTP/Firebase awaits.
-      const journalKey = resolveJournalClientTripId(job);
-      if (!journalKey) {
-        localCompletionRef.current = false;
-        throw new Error('Cannot complete offline — missing trip journal key.');
-      }
-      const vehicleId =
-        (selectedVehicleId ?? driver.vehicleId ?? '').trim().toUpperCase() ||
-        (await withTimeout(resolveVehicleId(), 2_000, 'resolveVehicleId').catch(() => ''));
-      await ensureJournalForJob({
-        jobId: String(job.id),
-        clientTripId: job.clientTripId,
-        companyId: driver.companyId,
-        driverId: driver.id,
-        vehicleId,
-        source: job.source === 'hail' ? 'hail' : 'dispatch',
-      });
-      await appendTripJournalEvent(journalKey, 'Completed', {
-        action: 'complete',
-        jobId: job.id,
-        bookingId: job.id,
-        driverId: driver.id,
-        companyId: driver.companyId,
-        paymentType,
-        fare: totalFare,
-        totalFare,
-        distanceKm: closed.distanceKm,
-        distance: closed.distanceKm,
-        extras,
-        ...(tmDetails ?? {}),
-        ...closedJobFieldsForJournal(closed),
-      });
-      await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
-    } else {
-      try {
-        let completeErr: unknown;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            await completeJobPayment(completePayload);
-            completeErr = null;
-            break;
-          } catch (err) {
-            completeErr = err;
-            const retryableTransport =
-              err instanceof StageTransportError && attempt === 0;
-            if (!retryableTransport) break;
-            console.warn('[Driver] completeJobPayment transport retry after timeout');
-            await new Promise((r) => setTimeout(r, 600));
-          }
-        }
-        if (completeErr) throw completeErr;
-      } catch (err) {
-        console.error('[Driver] completeJobPayment failed:', err);
-        let completeFailed = true;
-        if (err instanceof DispatchApiError && err.status === 409 && job.id && driver.id) {
-          try {
-            const catchUpStage = job.stage === 'complete' ? 'onboard' : job.stage;
-            await catchUpJobStagesOnDispatch(job.id, driver.id, catchUpStage, job.updateSeq, {
-              companyId: driver.companyId,
-            });
-            await completeJobPayment(completePayload);
-            completeFailed = false;
-          } catch (retryErr) {
-            err = retryErr;
-          }
-        }
-        if (completeFailed) {
-          // Phase 5e — journal terminal complete for journalable trips (no offline queue).
-          const journalKey = resolveJournalClientTripId(job);
-          if (journalKey) {
-            try {
-              const vehicleId = (await resolveVehicleId()) || '';
-              await ensureJournalForJob({
-                jobId: String(job.id),
-                clientTripId: job.clientTripId,
-                companyId: driver.companyId,
-                driverId: driver.id,
-                vehicleId,
-                source: job.source === 'hail' ? 'hail' : 'dispatch',
-              });
-              await appendTripJournalEvent(journalKey, 'Completed', {
-                action: 'complete',
-                jobId: job.id,
-                bookingId: job.id,
-                driverId: driver.id,
-                companyId: driver.companyId,
-                paymentType,
-                fare: totalFare,
-                totalFare,
-                distanceKm: closed.distanceKm,
-                distance: closed.distanceKm,
-                extras,
-                ...(tmDetails ?? {}),
-                ...closedJobFieldsForJournal(closed),
-              });
-              await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
-              // Fall through to local clear (same as online success) — do not block payment UI.
-              completeFailed = false;
-            } catch (journalErr) {
-              console.warn('[Driver] journal complete failed; falling back to offline queue', journalErr);
-            }
-          }
-        }
-        if (completeFailed) {
-          await enqueueOfflineItem({
-            type: 'job_update',
-            payload: {
-              action: 'complete',
-              jobId: job.id,
-              bookingId: job.id,
-              driverId: driver.id,
-              companyId: driver.companyId,
-              paymentType,
-              fare: totalFare,
-              totalFare,
-              distanceKm: closed.distanceKm,
-              distance: closed.distanceKm,
-              extras,
-              // Preserve payment-specific fields for flush → /api/job/complete
-              // (TM / ACC / Stripe / Account / Cash — opaque to the sync layer).
-              ...(tmDetails ?? {}),
-              ...closedJobFieldsForJournal(closed),
-            },
-          });
-          const msg =
-            `Dispatch server did not confirm completion (${completionErrorMessage(err)}). ` +
-            'Job saved locally — tap Retry when back online.';
-          setCompletionError(msg);
-          localCompletionRef.current = false;
-          throw new Error(msg);
-        }
-      }
-    }
-
     persistClosedJobToFirebase();
 
     void playInAppNotificationSound('general');
@@ -4232,7 +4150,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     refreshJobHistory().catch(() => undefined);
 
     if (driver && shiftActive) {
-      if (offlineComplete) {
+      if (offlineComplete || deferredFirebasePersist) {
         void syncPresenceAfterTripClear();
       } else {
         await syncPresenceAfterTripClear();
@@ -4549,9 +4467,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       let jobId: string;
       let updateSeq: number | undefined;
+      /** True when hail create was journalled (airplane or weak-signal timeout). */
+      let hailDeferredSync = offline;
 
-      if (offline) {
-        // Phase 5c — optimistic hail; flush create-or-get on reconnect.
+      const createPendingHail = async () => {
         await createPendingHailJournal({
           clientTripId,
           companyId: driver.companyId,
@@ -4565,20 +4484,37 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         });
         await storeData(STORAGE_KEYS.pendingHailClientTripId, null);
         await applySyncingBanner({ message: 'Syncing…', reason: 'hail', at: Date.now() });
+      };
+
+      if (offline) {
+        // Phase 5c — optimistic hail; flush create-or-get on reconnect.
+        await createPendingHail();
         jobId = localJobIdFromClientTripId(clientTripId);
         updateSeq = undefined;
       } else {
-        const created = await createHailJobOnDispatch({
-          companyId: driver.companyId,
-          driverId: driver.id,
-          vehicleId,
-          tariffId: selectedTariff.id,
-          pickup: pickupSnapshot,
-          clientTripId,
+        // Weak cellular: createHail is timed; on hang/fail → same pending journal as offline.
+        const hailOutcome = await runOnlineHailCreateWithJournalFallback({
+          createHail: async () =>
+            createHailJobOnDispatch({
+              companyId: driver.companyId,
+              driverId: driver.id,
+              vehicleId,
+              tariffId: selectedTariff.id,
+              pickup: pickupSnapshot,
+              clientTripId,
+            }),
+          createPendingJournal: createPendingHail,
         });
-        await storeData(STORAGE_KEYS.pendingHailClientTripId, null);
-        jobId = created.jobId;
-        updateSeq = created.updateSeq;
+        if (hailOutcome.mode === 'online') {
+          await storeData(STORAGE_KEYS.pendingHailClientTripId, null);
+          jobId = hailOutcome.result.jobId;
+          updateSeq = hailOutcome.result.updateSeq;
+          hailDeferredSync = false;
+        } else {
+          jobId = localJobIdFromClientTripId(clientTripId);
+          updateSeq = undefined;
+          hailDeferredSync = true;
+        }
       }
 
       const hailJob: ActiveJob = {
@@ -4617,7 +4553,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
       startMeterWatch();
 
-      if (!offline) {
+      if (!hailDeferredSync) {
         writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
         void patchOnlineCurrentJobId(driver.companyId, vehicleId, jobId).catch((err) => {
           console.warn('[Driver] patchOnlineCurrentJobId after hail start failed:', err);

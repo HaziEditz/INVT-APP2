@@ -1,9 +1,18 @@
 import { DISPATCH_API_URL } from '@/constants/theme';
+import { withTimeout } from '@/lib/asyncTimeout';
 import { getAuthInstance, getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
 import { getDispatchConfig } from '@/lib/dispatchConfig';
 import { isPresenceSessionEnded } from '@/lib/presenceGuards';
 import { loadLiveMeterPresenceFields } from '@/lib/liveMeterPresence';
 import { getData, STORAGE_KEYS } from '@/lib/storage';
+import {
+  AUTH_TOKEN_REFRESH_TIMEOUT_MS,
+  COMPLETE_HTTP_MAX_ATTEMPTS,
+  COMPLETE_HTTP_TIMEOUT_MS,
+  HAIL_CREATE_TIMEOUT_MS,
+  STAGE_HTTP_MAX_ATTEMPTS,
+  STAGE_HTTP_TIMEOUT_MS,
+} from '@/lib/weakSignalPolicy';
 import type { DriverProfile } from '@/types';
 import { update, ref } from 'firebase/database';
 
@@ -32,9 +41,9 @@ export class StageTransportError extends Error {
   }
 }
 
-const STAGE_FETCH_TIMEOUT_MS = 45_000;
-/** Complete can wait on server Firebase cleanup — allow generous client timeout. */
-const COMPLETE_FETCH_TIMEOUT_MS = 45_000;
+/** Weak-signal budgets — see lib/weakSignalPolicy.ts (was 45s×retries). */
+const STAGE_FETCH_TIMEOUT_MS = STAGE_HTTP_TIMEOUT_MS;
+const COMPLETE_FETCH_TIMEOUT_MS = COMPLETE_HTTP_TIMEOUT_MS;
 
 /** True when a failed accept should be queued for offline retry (network/5xx only). */
 export function isDispatchAcceptRetryable(err: unknown): boolean {
@@ -58,12 +67,25 @@ export function isDispatchAcceptRetryable(err: unknown): boolean {
 }
 
 async function refreshAuthToken(): Promise<string | undefined> {
+  const user = getAuthInstance().currentUser;
+  if (!user) return undefined;
   try {
-    const user = getAuthInstance().currentUser;
-    if (!user) return undefined;
-    return await user.getIdToken(true);
+    return await withTimeout(
+      user.getIdToken(true),
+      AUTH_TOKEN_REFRESH_TIMEOUT_MS,
+      'getIdToken(true)',
+    );
   } catch {
-    return getAuthInstance().currentUser?.getIdToken().catch(() => undefined);
+    // Force-refresh can hang on weak cellular — use cached token.
+    try {
+      return await withTimeout(
+        user.getIdToken(false),
+        AUTH_TOKEN_REFRESH_TIMEOUT_MS,
+        'getIdToken(cached)',
+      );
+    } catch {
+      return undefined;
+    }
   }
 }
 
@@ -409,43 +431,40 @@ export async function createHailJobOnDispatch(params: {
     passengers: 1,
   };
 
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const data = await dispatchPost<{
-        ok?: boolean;
-        jobId?: string | number;
-        bookingId?: number;
-        clientTripId?: string;
-        existing?: boolean;
-        idempotent?: boolean;
-      }>('/api/job/create', body);
-      const jobId = String(data.jobId ?? data.bookingId ?? '').trim();
-      if (!jobId || !/^\d+$/.test(jobId)) {
-        throw new Error('Dispatch server did not return a valid booking ID');
-      }
-      return {
-        jobId,
-        bookingId: parseInt(jobId, 10),
-        updateSeq: 1,
-        clientTripId: String(data.clientTripId || params.clientTripId),
-        existing: !!(data.existing || data.idempotent),
-      };
-    } catch (err) {
-      lastErr = err;
-      if (attempt < 2) {
-        await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
-      }
-    }
+  // Single timed attempt — DriverContext journals pending hail on transport timeout.
+  const headers = await driverApiHeaders();
+  const payload = await withDriverIdentity(body);
+  const res = await fetchWithTimeout(
+    `${DISPATCH_API_URL}/api/job/create`,
+    { method: 'POST', headers, body: JSON.stringify(payload) },
+    HAIL_CREATE_TIMEOUT_MS,
+  );
+  const data = await parseJsonBody(res);
+  if (!res.ok || data.ok === false) {
+    throw new DispatchApiError(
+      String(data.error || `Dispatch hail create failed: ${res.status}`),
+      res.status,
+      data,
+    );
   }
-  throw lastErr instanceof Error ? lastErr : new Error('Could not create hail job on dispatch');
+  const jobId = String(data.jobId ?? data.bookingId ?? '').trim();
+  if (!jobId || !/^\d+$/.test(jobId)) {
+    throw new Error('Dispatch server did not return a valid booking ID');
+  }
+  return {
+    jobId,
+    bookingId: parseInt(jobId, 10),
+    updateSeq: 1,
+    clientTripId: String(data.clientTripId || params.clientTripId),
+    existing: !!(data.existing || data.idempotent),
+  };
 }
 
 export async function completeJobPayment(payload: Record<string, unknown>) {
   const headers = await driverApiHeaders();
   const body = await withDriverIdentity(payload);
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < COMPLETE_HTTP_MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetchWithTimeout(
         `${DISPATCH_API_URL}/api/job/complete`,
@@ -463,9 +482,10 @@ export async function completeJobPayment(payload: Record<string, unknown>) {
       return data;
     } catch (err) {
       lastErr = err;
-      const retryableTransport = err instanceof StageTransportError && attempt === 0;
+      const retryableTransport =
+        err instanceof StageTransportError && attempt < COMPLETE_HTTP_MAX_ATTEMPTS - 1;
       if (!retryableTransport) break;
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 400));
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('Dispatch complete failed');
@@ -517,7 +537,7 @@ export async function syncJobStageOnDispatch(
 
   const headers = await driverApiHeaders();
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < STAGE_HTTP_MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetchWithTimeout(
         `${DISPATCH_API_URL}/api/job/stage`,
@@ -540,9 +560,10 @@ export async function syncJobStageOnDispatch(
       );
     } catch (err) {
       lastErr = err;
-      const retryableTransport = err instanceof StageTransportError && attempt === 0;
+      const retryableTransport =
+        err instanceof StageTransportError && attempt < STAGE_HTTP_MAX_ATTEMPTS - 1;
       if (!retryableTransport) break;
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 400));
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(`Dispatch stage sync failed for #${bid}`);
