@@ -88,6 +88,14 @@ export function CurrentTripPanel() {
               compact
               onPress={() => confirmEndTrip(() => void endTrip())}
             />
+            {completionError ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText} selectable>
+                  {completionError}
+                </Text>
+                <Button title="Dismiss" variant="secondary" compact onPress={clearCompletionError} />
+              </View>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -302,7 +310,9 @@ export function CurrentTripPanel() {
 
         {completionError ? (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{completionError}</Text>
+            <Text style={styles.errorText} selectable>
+              {completionError}
+            </Text>
             <Button title="Dismiss" variant="secondary" compact onPress={clearCompletionError} />
           </View>
         ) : null}

@@ -1,6 +1,7 @@
 import { ActiveJob, MeterState, Tariff } from '@/types';
 import { NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
 import { STORAGE_KEYS, storeData } from '@/lib/storage';
+import { formatEndTripError } from './endHailPolicy.ts';
 
 /** Strip heavy GPS polyline from persisted copies — keeps AsyncStorage writes fast. */
 export function slimMeterForStorage(meter: MeterState | undefined): MeterState | undefined {
@@ -93,6 +94,5 @@ export function computePaymentFareSummary(
 }
 
 export function completionErrorMessage(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  return 'Something went wrong. Check connection and try again.';
+  return formatEndTripError(err);
 }

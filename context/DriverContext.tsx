@@ -146,7 +146,20 @@ import {
 } from '@/lib/pendingShiftEnd';
 import { writeShiftEndLog } from '@/lib/shiftLogs';
 import { CompanyZone, findZoneAtCoords, subscribeCompanyZones } from '@/lib/companyZones';
-import { getCurrentCoords, refreshHailPickupLocation } from '@/services/locationService';
+import {
+  getCurrentCoords,
+  refreshHailPickupLocation,
+  reverseGeocodeCoords,
+} from '@/services/locationService';
+import {
+  needsHailAddressResolve,
+  resolveReadableAddress,
+} from '@/lib/hailAddressResolve';
+import {
+  END_HAIL_GPS_TIMEOUT_MS,
+  formatEndTripError,
+  resolveEndHailDropCoords,
+} from '@/lib/endHailPolicy';
 import { patchOnlineCurrentJobId } from '@/lib/liveMeterPresence';
 import * as Location from 'expo-location';
 import {
@@ -3990,17 +4003,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                 closed = applyTripFieldsToJob(closed, fromBooking);
               }
             }
-            const { needsHailAddressResolve, resolveReadableAddress } = await import(
-              '@/lib/hailAddressResolve'
-            );
             if (
               needsHailAddressResolve(closed.pickup) ||
               needsHailAddressResolve(closed.dropoff)
             ) {
-              const { reverseGeocodeCoords } = await import('@/services/locationService');
               const pickup = await resolveReadableAddress(
                 { address: closed.pickup, lat: closed.pickupLat, lng: closed.pickupLng },
                 reverseGeocodeCoords,
+                { timeoutMs: GEOCODE_TIMEOUT_MS },
               );
               const dropoff = await resolveReadableAddress(
                 {
@@ -4009,6 +4019,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                   lng: closed.dropoffLng,
                 },
                 reverseGeocodeCoords,
+                { timeoutMs: GEOCODE_TIMEOUT_MS },
               );
               closed = { ...closed, pickup, dropoff };
             }
@@ -4646,18 +4657,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       meterStopRef.current = null;
     }
 
-    // Capture drop at end (was incorrectly copying pickup address). Offline may
-    // store coord placeholders — reverse-geocode on reconnect / complete flush.
-    const { reverseGeocodeCoords, getCurrentCoords } = await import('@/services/locationService');
-    const {
-      needsHailAddressResolve,
-      resolveReadableAddress,
-    } = await import('@/lib/hailAddressResolve');
+    // Capture drop at end. Static imports only — never lazy-load modules on End Trip
+    // (offline Metro loadBundle was an unhandled rejection in the field).
     const online = dispatchIsConnected(
       networkConnectedRef.current,
       rtdbConnectedRef.current,
     );
-    const dropCoords = await getCurrentCoords().catch(() => null);
+    const dropCoords = await resolveEndHailDropCoords({
+      getCurrentCoords,
+      withTimeout,
+      timeoutMs: END_HAIL_GPS_TIMEOUT_MS,
+    });
     let pickupAddress = hailPickupAddress || liveJob?.pickup || 'Street hail';
     let dropoffAddress = 'Street hail';
     let dropLat = dropCoords?.latitude;
@@ -4759,15 +4769,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const endTrip = async () => {
     if (completionBusy) return;
-    if (hailActiveRef.current || hailActive) {
-      await endHail();
-      return;
-    }
-    if (!meterRef.current?.running && !activeJob) return;
+    const isHail = hailActiveRef.current || hailActive;
+    if (!isHail && !meterRef.current?.running && !activeJob) return;
 
     setCompletionBusy(true);
     setCompletionError(null);
     try {
+      // Hail uses the same try/catch + Alert path as dispatch End Trip.
+      if (isHail) {
+        await endHail();
+        return;
+      }
+
       const snapshot = buildMeterSnapshot();
       const now = Date.now();
 
@@ -4814,7 +4827,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       console.error('[Driver] endTrip failed:', err);
-      const msg = completionErrorMessage(err);
+      const msg = formatEndTripError(err);
       setCompletionError(msg);
       Alert.alert('Could not end trip', msg);
     } finally {
