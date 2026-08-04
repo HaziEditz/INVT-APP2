@@ -86,6 +86,15 @@ test('pending journal keeps presence Busy and blocks auto-dispatch offers', () =
   );
   assert.equal(
     presenceWhilePendingTripSync({
+      away: true,
+      hasLocalTrip: false,
+      pendingJournalWork: true,
+    }),
+    'Busy',
+    'pending sync must beat Away',
+  );
+  assert.equal(
+    presenceWhilePendingTripSync({
       away: false,
       hasLocalTrip: false,
       pendingJournalWork: false,

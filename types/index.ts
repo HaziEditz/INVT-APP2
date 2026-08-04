@@ -59,6 +59,10 @@ export interface JobOffer {
   /** Dispatch fixed-price job — meter must stay off. */
   isFixedPrice?: boolean;
   paymentType?: PaymentType;
+  /** Business account Firebase/key id (Account_id / jobAccountId). */
+  accountId?: string;
+  /** Business account display name (Account_Name / jobAccountName). */
+  accountName?: string;
   isAcc?: boolean;
   isTotalMobility?: boolean;
   expiresAt: number;

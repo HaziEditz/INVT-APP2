@@ -467,6 +467,26 @@ export async function createHailJobOnDispatch(params: {
   };
 }
 
+export type DriverAccountSearchHit = {
+  Id: string | number;
+  Name: string;
+  PhoneNo?: string;
+  Email?: string;
+  AccountCode?: string;
+  Type?: string;
+};
+
+/** Business-account search for hail Account payment (company-scoped). */
+export async function searchBusinessAccounts(
+  query: string,
+): Promise<DriverAccountSearchHit[]> {
+  const data = await driverApiPost<{
+    ok?: boolean;
+    accounts?: DriverAccountSearchHit[];
+  }>('/api/driver/search-accounts', { query: String(query || '').trim() });
+  return Array.isArray(data.accounts) ? data.accounts : [];
+}
+
 export async function completeJobPayment(payload: Record<string, unknown>) {
   const headers = await driverApiHeaders();
   const body = await withDriverIdentity(payload);

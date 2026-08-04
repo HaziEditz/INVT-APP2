@@ -122,16 +122,49 @@ export function isRetryableStageFlushError(err: unknown): boolean {
   return false;
 }
 
-/** Presence / readyForJobs while trip journal still has pending work. */
+/**
+ * Presence while trip journal still has pending work.
+ * Pending sync / local trip always wins over Away — zombie Away+Syncing must not stick.
+ */
 export function presenceWhilePendingTripSync(args: {
   away: boolean;
   hasLocalTrip: boolean;
   pendingJournalWork: boolean;
 }): 'Away' | 'Busy' | 'Available' {
-  if (args.away) return 'Away';
   if (args.hasLocalTrip) return 'Busy';
   if (args.pendingJournalWork) return 'Busy';
+  if (args.away) return 'Away';
   return 'Available';
+}
+
+/** Pure status for heartbeat / repairPresence writes. */
+export function derivePresenceWriteStatusFromIntent(args: {
+  awayIntent: 'none' | 'manual' | 'missed' | string;
+  hasPaymentJob: boolean;
+  activeStage?: string | null;
+  hailActive: boolean;
+  pendingJournalWork: boolean;
+}): 'Away' | 'Busy' | 'Assigned' | 'Arrived' | 'Active' | 'Available' {
+  const stageMap: Record<string, 'Assigned' | 'Arrived' | 'Active' | 'Busy'> = {
+    pickup: 'Assigned',
+    arrived: 'Arrived',
+    onboard: 'Active',
+    complete: 'Busy',
+  };
+  const tripStatus =
+    args.hasPaymentJob || args.hailActive
+      ? 'Busy'
+      : args.activeStage
+        ? stageMap[args.activeStage] ?? 'Busy'
+        : null;
+  const hasLocalTrip = !!tripStatus;
+  const base = presenceWhilePendingTripSync({
+    away: args.awayIntent !== 'none',
+    hasLocalTrip,
+    pendingJournalWork: args.pendingJournalWork,
+  });
+  if (base === 'Busy' && tripStatus && tripStatus !== 'Busy') return tripStatus;
+  return base;
 }
 
 /** Auto-dispatch / offer popup should wait until pending sync clears. */

@@ -136,6 +136,30 @@ async function flushTerminalEvent(args: {
         : undefined);
     const vehicleType =
       asString(payload.VehicleType) || asString(payload.vehicleType) || undefined;
+    const accountId =
+      asString(payload.Account_id) ||
+      asString(payload.AccountId) ||
+      asString(payload.jobAccountId) ||
+      asString(payload.accountId) ||
+      undefined;
+    const accountName =
+      asString(payload.Account_Name) ||
+      asString(payload.AccountName) ||
+      asString(payload.jobAccountName) ||
+      asString(payload.accountName) ||
+      undefined;
+    const accountFields = {
+      paymentMethod: payload.paymentMethod ?? paymentType,
+      PaymentMethod: payload.PaymentMethod ?? payload.paymentMethod ?? paymentType,
+      PaymentType: payload.PaymentType ?? paymentType,
+      paymentType,
+      ...(accountId
+        ? { Account_id: accountId, AccountId: accountId, jobAccountId: accountId }
+        : {}),
+      ...(accountName
+        ? { Account_Name: accountName, AccountName: accountName, jobAccountName: accountName }
+        : {}),
+    };
     await completeJobPayment({
       jobId,
       bookingId: jobId,
@@ -160,7 +184,7 @@ async function flushTerminalEvent(args: {
       voucherCode: payload.voucherCode,
       voucherDiscount: payload.voucherDiscount,
       tmVoucher: payload.tmVoucher,
-      paymentMethod: payload.paymentMethod ?? paymentType,
+      ...accountFields,
       payload: {
         fare,
         totalFare: fare,
@@ -210,6 +234,7 @@ async function flushTerminalEvent(args: {
         tariffId: payload.tariffId ?? meterSnapshot?.tariffId,
         tariffName: payload.tariffName ?? meterSnapshot?.tariffName,
         tariffChanges: payload.tariffChanges,
+        ...accountFields,
       },
     });
     return;

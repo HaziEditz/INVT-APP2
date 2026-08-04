@@ -37,6 +37,10 @@ import {
 } from '@/services/tripJournalService';
 import { shouldBlockOffersForPendingTripSync } from '@/lib/tripJournalFlushPolicy';
 import {
+  normalizeDriverPaymentType,
+  readAccountFieldsFromRecord,
+} from '@/lib/driverPayment';
+import {
   loadPendingSyncBanner,
   resolvePendingSyncBanner,
   savePendingSyncBanner,
@@ -138,6 +142,7 @@ import {
 import {
   GEOCODE_TIMEOUT_MS,
   shouldPurgeExpiredDeferredOffer,
+  derivePresenceWriteStatusFromIntent,
   shouldSuppressMissAway,
 } from '@/lib/tripJournalFlushPolicy';
 import {
@@ -291,6 +296,7 @@ interface DriverContextValue {
     extras: PaymentExtras,
     totalFare: number,
     tmDetails?: TmPaymentDetails,
+    accountDetails?: { accountId?: string; accountName?: string },
   ) => Promise<void>;
   dismissPayment: () => void;
   completionBusy: boolean;
@@ -451,7 +457,14 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
         : val.distanceKm != null
           ? Number(val.distanceKm)
           : undefined,
-    paymentType: (val.paymentType ?? val.PaymentType ?? rawPayment) as PaymentType | undefined,
+    paymentType: (() => {
+      const raw = val.paymentType ?? val.PaymentType ?? rawPayment;
+      return (
+        normalizeDriverPaymentType(raw != null ? String(raw) : undefined) ??
+        (raw as PaymentType | undefined)
+      );
+    })(),
+    ...readAccountFieldsFromRecord(val),
     isAcc: !!val.isAcc,
     isTotalMobility: !!val.isTotalMobility,
     expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
@@ -581,7 +594,13 @@ function buildNotificationFieldPatch(val: Record<string, unknown>): Partial<JobO
     patch.isFixedPrice = true;
   }
   const pay = readPaymentFromRecord(val);
-  if (pay) patch.paymentType = pay as PaymentType;
+  if (pay) {
+    patch.paymentType =
+      (normalizeDriverPaymentType(pay) as PaymentType | undefined) ?? (pay as PaymentType);
+  }
+  const account = readAccountFieldsFromRecord(val);
+  if (account.accountId) patch.accountId = account.accountId;
+  if (account.accountName) patch.accountName = account.accountName;
   return patch;
 }
 
@@ -2458,7 +2477,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (allowed.passengerName) patch.passengerName = allowed.passengerName;
       if (allowed.passengerPhone) patch.passengerPhone = allowed.passengerPhone;
       if (allowed.notes) patch.notes = allowed.notes;
-      if (allowed.paymentType) patch.paymentType = allowed.paymentType as ActiveJob['paymentType'];
+      if (allowed.paymentType) {
+        patch.paymentType =
+          (normalizeDriverPaymentType(String(allowed.paymentType)) as ActiveJob['paymentType']) ??
+          (allowed.paymentType as ActiveJob['paymentType']);
+      }
+      const accountFromAllowed = readAccountFieldsFromRecord(
+        allowed as unknown as Record<string, unknown>,
+      );
+      const accountFromRaw = readAccountFieldsFromRecord(update.raw);
+      if (accountFromAllowed.accountId || accountFromRaw.accountId) {
+        patch.accountId = accountFromAllowed.accountId || accountFromRaw.accountId;
+      }
+      if (accountFromAllowed.accountName || accountFromRaw.accountName) {
+        patch.accountName = accountFromAllowed.accountName || accountFromRaw.accountName;
+      }
       if (syncedNotes.length) {
         patch.allNotes = syncedNotes;
         if (!patch.notes) patch.notes = syncedNotes.map((n) => n.text).join('\n\n');
@@ -2631,22 +2664,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const derivePresenceWriteStatus = (): FirebaseDriverStatus => {
-    if (awayIntentRef.current !== 'none') return 'Away';
-    if (paymentJobRef.current) return 'Busy';
-    const job = activeJobRef.current;
-    if (job?.stage) {
-      const map: Record<JobStage, FirebaseDriverStatus> = {
-        pickup: 'Assigned',
-        arrived: 'Arrived',
-        onboard: 'Active',
-        complete: 'Busy',
-      };
-      return map[job.stage] ?? 'Busy';
+    const pendingJournalWork = pendingTripSyncBlocksOffersRef.current;
+    // Pending sync must stay Busy — drop stale miss→Away so it cannot reassert after flush.
+    if (pendingJournalWork && awayIntentRef.current === 'missed') {
+      awayIntentRef.current = 'none';
     }
-    if (hailActiveRef.current) return 'Busy';
-    // Unsynced offline completes must not advertise Available (auto-dispatch race).
-    if (pendingTripSyncBlocksOffersRef.current) return 'Busy';
-    return 'Available';
+    return derivePresenceWriteStatusFromIntent({
+      awayIntent: awayIntentRef.current,
+      hasPaymentJob: !!paymentJobRef.current,
+      activeStage: activeJobRef.current?.stage ?? null,
+      hailActive: hailActiveRef.current,
+      pendingJournalWork,
+    }) as FirebaseDriverStatus;
   };
 
   const syncBgLocationFirebaseStatus = async (status: FirebaseDriverStatus) => {
@@ -3982,17 +4011,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     extras: PaymentExtras,
     totalFare: number,
     tmDetails?: TmPaymentDetails,
+    accountDetails?: { accountId?: string; accountName?: string },
   ) => {
     const job = paymentJob ?? activeJob;
     if (!job || !driver?.companyId) {
       throw new Error('No active job to complete.');
     }
 
+    const accountId = String(
+      accountDetails?.accountId || job.accountId || '',
+    ).trim();
+    const accountName = String(
+      accountDetails?.accountName || job.accountName || '',
+    ).trim();
+
     let closed: ActiveJob = {
       ...job,
       stage: 'complete',
       fare: totalFare,
       paymentType: paymentType as PaymentType,
+      ...(accountId ? { accountId } : {}),
+      ...(accountName ? { accountName } : {}),
       meterSnapshot: job.meterSnapshot ?? meterRef.current ?? undefined,
       distanceKm: job.meterSnapshot?.distanceKm ?? job.distanceKm,
       durationMin: job.meterSnapshot?.startedAt
@@ -4062,6 +4101,26 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     lastOfferSeenRef.current = null;
 
     const tripCompleteFields = closedJobFieldsForCompleteApi(closed);
+    const accountCompleteFields = {
+      paymentMethod: paymentType,
+      PaymentMethod: paymentType,
+      PaymentType: paymentType,
+      paymentType,
+      ...(accountId
+        ? {
+            Account_id: accountId,
+            AccountId: accountId,
+            jobAccountId: accountId,
+          }
+        : {}),
+      ...(accountName
+        ? {
+            Account_Name: accountName,
+            AccountName: accountName,
+            jobAccountName: accountName,
+          }
+        : {}),
+    };
     const completePayload = {
       jobId: job.id,
       bookingId: job.id,
@@ -4074,6 +4133,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       distance: closed.distanceKm,
       extras,
       ...(tmDetails ?? {}),
+      ...accountCompleteFields,
       payload: {
         fare: totalFare,
         totalFare,
@@ -4082,6 +4142,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         paymentType,
         extras,
         ...tripCompleteFields,
+        ...accountCompleteFields,
       },
     };
 
@@ -4115,6 +4176,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         extras,
         ...(tmDetails ?? {}),
         ...closedJobFieldsForJournal(closed),
+        ...accountCompleteFields,
       });
       await applySyncingBanner({ message: 'Syncing…', reason: 'complete', at: Date.now() });
     };

@@ -2,6 +2,8 @@ import { Button } from '@/components/Button';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
+import { searchBusinessAccounts, type DriverAccountSearchHit } from '@/lib/dispatchApi';
+import { normalizeDriverPaymentType } from '@/lib/driverPayment';
 import { calcTmSplit, loadTmConfig, TmConfig } from '@/lib/tmConfig';
 import { computePaymentFareSummary, completionErrorMessage } from '@/lib/tripCompletionHelpers';
 import {
@@ -11,8 +13,9 @@ import {
   TM_PASSENGER_PAYMENT_TYPES,
   TmPaymentDetails,
 } from '@/types';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Modal,
   Pressable,
@@ -122,7 +125,12 @@ export function PaymentModal() {
   const [eftposRef, setEftposRef] = useState('');
   const [eftposSurchargeOn, setEftposSurchargeOn] = useState(false);
   const [eftposSurchargeAmt, setEftposSurchargeAmt] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [accountSearch, setAccountSearch] = useState('');
+  const [accountHits, setAccountHits] = useState<DriverAccountSearchHit[]>([]);
+  const [accountSearching, setAccountSearching] = useState(false);
+  const accountSearchSeq = useRef(0);
   const [accClaimNo, setAccClaimNo] = useState('');
   const [accPoNo, setAccPoNo] = useState('');
   const [tmCardNumber, setTmCardNumber] = useState('');
@@ -131,10 +139,13 @@ export function PaymentModal() {
 
   const isTmPayment = paymentType === 'TM';
   const isWav = !!activeVehicle?.isWav;
+  const accountLockedFromDispatch = !!String(paymentJob?.accountId || '').trim();
 
   useEffect(() => {
     if (!paymentJob) return;
-    setPaymentType('Cash');
+    const seeded =
+      normalizeDriverPaymentType(paymentJob.paymentType) ?? ('Cash' as DriverPaymentType);
+    setPaymentType(seeded);
     setTmPassengerPaymentType('Cash');
     setExtrasOpen(false);
     setExtraEnabled({
@@ -158,13 +169,46 @@ export function PaymentModal() {
     setEftposRef('');
     setEftposSurchargeOn(false);
     setEftposSurchargeAmt('');
-    setAccountNumber('');
+    setAccountId(String(paymentJob.accountId || '').trim());
+    setAccountName(String(paymentJob.accountName || '').trim());
+    setAccountSearch('');
+    setAccountHits([]);
     setAccClaimNo('');
     setAccPoNo('');
     setTmCardNumber('');
     setTmCardExpiry('');
     setHoistCount('0');
   }, [paymentJob?.id]);
+
+  useEffect(() => {
+    if (paymentType !== 'Account' || accountLockedFromDispatch || accountId) {
+      setAccountHits([]);
+      setAccountSearching(false);
+      return;
+    }
+    const q = accountSearch.trim();
+    if (q.length < 2) {
+      setAccountHits([]);
+      return;
+    }
+    const seq = ++accountSearchSeq.current;
+    setAccountSearching(true);
+    const t = setTimeout(() => {
+      void searchBusinessAccounts(q)
+        .then((hits) => {
+          if (seq !== accountSearchSeq.current) return;
+          setAccountHits(hits);
+        })
+        .catch(() => {
+          if (seq !== accountSearchSeq.current) return;
+          setAccountHits([]);
+        })
+        .finally(() => {
+          if (seq === accountSearchSeq.current) setAccountSearching(false);
+        });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [paymentType, accountSearch, accountLockedFromDispatch, accountId, paymentJob?.id]);
 
   useEffect(() => {
     if (!isTmPayment || !driver?.companyId) {
@@ -242,6 +286,10 @@ export function PaymentModal() {
   };
 
   const onConfirm = async () => {
+    if (paymentType === 'Account' && !String(accountId || '').trim()) {
+      Alert.alert('Select account', 'Search and select a business account before confirming.');
+      return;
+    }
     setSubmitting(true);
     try {
       let tmDetails: TmPaymentDetails | undefined;
@@ -256,7 +304,14 @@ export function PaymentModal() {
       }
 
       const finalPaymentType = isTmPayment ? tmPassengerPaymentType : paymentType;
-      await finalizePayment(finalPaymentType, builtExtras, subtotal, tmDetails);
+      const accountDetails =
+        finalPaymentType === 'Account' || paymentType === 'Account'
+          ? {
+              accountId: String(accountId || '').trim() || undefined,
+              accountName: String(accountName || '').trim() || undefined,
+            }
+          : undefined;
+      await finalizePayment(finalPaymentType, builtExtras, subtotal, tmDetails, accountDetails);
     } catch (err) {
       console.error('[PaymentModal] finalizePayment failed:', err);
       const msg = completionErrorMessage(err);
@@ -347,13 +402,65 @@ export function PaymentModal() {
       case 'Account':
         return (
           <View style={styles.detailsBlock}>
-            <TextInput
-              style={styles.field}
-              placeholder="Account number"
-              placeholderTextColor={Colors.textMuted}
-              value={accountNumber}
-              onChangeText={setAccountNumber}
-            />
+            {accountId ? (
+              <View style={styles.accountSelected}>
+                <Text style={styles.accountSelectedLabel}>Business account</Text>
+                <Text style={styles.accountSelectedName}>
+                  {accountName || 'Account selected'}
+                </Text>
+                {!accountLockedFromDispatch ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setAccountId('');
+                      setAccountName('');
+                      setAccountSearch('');
+                    }}
+                  >
+                    <Text style={styles.accountChange}>Change</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : (
+              <>
+                <Text style={styles.accountHint}>Search and select a business account</Text>
+                <TextInput
+                  style={styles.field}
+                  placeholder="Search business name…"
+                  placeholderTextColor={Colors.textMuted}
+                  value={accountSearch}
+                  onChangeText={(t) => {
+                    setAccountSearch(t);
+                    setAccountId('');
+                    setAccountName('');
+                  }}
+                  autoCorrect={false}
+                />
+                {accountSearching ? (
+                  <ActivityIndicator color={Colors.accent} style={{ marginVertical: 8 }} />
+                ) : null}
+                {accountHits.map((hit) => {
+                  const id = String(hit.Id ?? '');
+                  const name = String(hit.Name || '').trim() || id;
+                  return (
+                    <TouchableOpacity
+                      key={id || name}
+                      style={styles.accountHit}
+                      onPress={() => {
+                        setAccountId(id);
+                        setAccountName(name);
+                        setAccountSearch(name);
+                        setAccountHits([]);
+                      }}
+                    >
+                      <Text style={styles.accountHitName}>{name}</Text>
+                      {hit.AccountCode ? (
+                        <Text style={styles.accountHitMeta}>{String(hit.AccountCode)}</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
           </View>
         );
       case 'ACC':
@@ -844,5 +951,52 @@ const styles = StyleSheet.create({
   },
   confirmBtn: {
     backgroundColor: Colors.success,
+  },
+  accountSelected: {
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 14,
+    gap: 4,
+  },
+  accountSelectedLabel: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  accountSelectedName: {
+    color: Colors.text,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  accountChange: {
+    color: Colors.accent,
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  accountHint: {
+    color: Colors.textMuted,
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  accountHit: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 10,
+    backgroundColor: Colors.background,
+  },
+  accountHitName: {
+    color: Colors.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  accountHitMeta: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
   },
 });
