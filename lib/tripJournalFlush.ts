@@ -3,7 +3,6 @@ import {
   cancelJobAsDriver,
   completeJobPayment,
   createHailJobOnDispatch,
-  DispatchApiError,
   reportNoShow,
   syncJobStageOnDispatch,
 } from '@/lib/dispatchApi';
@@ -12,6 +11,13 @@ import {
   resolveHailPickupSnapshot,
   resolveReadableAddress,
 } from '@/lib/hailAddressResolve';
+import { catchUpJobStagesOnDispatch } from '@/lib/jobServerSync';
+import {
+  isRetryableStageFlushError,
+  isRetryableTerminalFlushError,
+  journalHasUnsyncedStages,
+  localStageHintFromJournalEvents,
+} from '@/lib/tripJournalFlushPolicy';
 import {
   getTripJournal,
   listPendingHailCreates,
@@ -45,15 +51,6 @@ export type TripJournalFlushHooks = {
     payload?: Record<string, unknown>;
   }) => void | Promise<void>;
 };
-
-function isRetryableFlushError(err: unknown): boolean {
-  if (!(err instanceof DispatchApiError)) return true;
-  if (err.status >= 500) return true;
-  if (err.status === 0 || err.status === 408 || err.status === 429) return true;
-  // Version conflicts — retry with rolled-forward version next reconnect.
-  if (err.errorCode === 'version_conflict') return true;
-  return false;
-}
 
 function stageStatusForEvent(type: string): string | null {
   if (type === 'Arrived') return 'Arrived';
@@ -237,7 +234,8 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (isRetryableFlushError(err)) {
+      // Hail create: always retry transport / version; permanent API errors fail the row.
+      if (isRetryableTerminalFlushError(err)) {
         await setTripJournalSyncState(clientTripId, 'pending', { lastError: msg });
         console.warn('[trip-journal] hail create will retry', { clientTripId, error: msg });
         continue;
@@ -280,13 +278,13 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (isRetryableFlushError(err)) {
+        if (isRetryableStageFlushError(err)) {
           console.warn('[trip-journal] stage will retry', { jobId, type: ev.type, error: msg });
           break;
         }
-        // Terminal: drop this event so we do not loop forever.
+        // e.g. Arrived when already Active — drop this stage only; keep later events.
         await markTripJournalEventSynced(journal.clientTripId, ev.id);
-        console.warn('[trip-journal] stage dropped (terminal)', { jobId, type: ev.type, error: msg });
+        console.warn('[trip-journal] stage dropped (non-retryable)', { jobId, type: ev.type, error: msg });
       }
     }
   }
@@ -298,8 +296,43 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
     const companyId = String(journal.companyId || '').trim();
     if (!jobId || !driverId || !companyId) continue;
 
+    // Never flush Completed/Cancelled while this journal still has unsynced stages.
+    const live = (await getTripJournal(journal.clientTripId)) ?? journal;
+    if (journalHasUnsyncedStages(live.events)) {
+      console.warn('[trip-journal] skip terminal until stages flush', {
+        jobId,
+        clientTripId: journal.clientTripId,
+      });
+      continue;
+    }
+
     for (const ev of events) {
       try {
+        if (ev.type === 'Completed') {
+          // Catch up Arrived/Active before complete (mirrors online finalizePayment).
+          const hint = localStageHintFromJournalEvents(live.events);
+          const catchUpStage = hint === 'complete' ? 'onboard' : hint;
+          if (catchUpStage === 'arrived' || catchUpStage === 'onboard') {
+            try {
+              const caught = await catchUpJobStagesOnDispatch(
+                jobId,
+                driverId,
+                catchUpStage,
+                asNumber(ev.payload?.updateSeq),
+                { companyId },
+              );
+              if (caught.synced.length) {
+                console.log('[trip-journal] catch-up before complete', {
+                  jobId,
+                  synced: caught.synced,
+                });
+              }
+            } catch (catchErr) {
+              console.warn('[trip-journal] catch-up before complete failed:', catchErr);
+            }
+          }
+        }
+
         await flushTerminalEvent({
           jobId,
           driverId,
@@ -320,12 +353,13 @@ export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promi
         console.log('[trip-journal] flushed terminal', { jobId, type: ev.type });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (isRetryableFlushError(err)) {
+        if (isRetryableTerminalFlushError(err)) {
+          // Do NOT drop Completed on invalid_transition — retry after stages/catch-up.
           console.warn('[trip-journal] terminal will retry', { jobId, type: ev.type, error: msg });
           break;
         }
         await markTripJournalEventSynced(journal.clientTripId, ev.id);
-        console.warn('[trip-journal] terminal dropped (terminal err)', {
+        console.warn('[trip-journal] terminal dropped (non-retryable)', {
           jobId,
           type: ev.type,
           error: msg,

@@ -33,7 +33,9 @@ import {
   createPendingHailJournal,
   ensureDispatchTripJournal,
   ensureJournalForJob,
+  hasPendingTripJournalWork,
 } from '@/services/tripJournalService';
+import { shouldBlockOffersForPendingTripSync } from '@/lib/tripJournalFlushPolicy';
 import {
   loadPendingSyncBanner,
   resolvePendingSyncBanner,
@@ -672,6 +674,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const tripOnTheWayRef = useRef(false);
   const acceptCoordsRef = useRef<{ jobId: string; lat: number; lng: number } | null>(null);
   const acceptingOfferRef = useRef(false);
+  /** Unsynced trip journal (stages/terminals/hail) — blocks Available / auto-dispatch. */
+  const pendingTripSyncBlocksOffersRef = useRef(false);
+
+  const refreshPendingTripSyncGate = async (): Promise<boolean> => {
+    try {
+      const pending = await hasPendingTripJournalWork();
+      pendingTripSyncBlocksOffersRef.current = pending;
+      return pending;
+    } catch {
+      return pendingTripSyncBlocksOffersRef.current;
+    }
+  };
+
+  const markPendingTripSyncBlocking = () => {
+    pendingTripSyncBlocksOffersRef.current = true;
+  };
 
   const updateDispatchConnection = useCallback(
     (source: 'network' | 'rtdb' | 'recompute', connected?: boolean) => {
@@ -872,12 +890,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         try {
           updateDispatchConnection('network', connected);
           if (connected) {
-            // Presence first: dispatch treats a quiet driver as unreachable, so
-            // heal the heartbeat immediately instead of after reconcile+flush.
+            // Flush pending trip journals BEFORE advertising Available — otherwise
+            // auto-dispatch can offer a new job that accept then queues against a
+            // ghost Active trip still on the server.
+            await flushPendingTripJournalRef.current?.();
             if (shiftActiveRef.current) {
               void repairPresenceRef.current?.('netinfo-reconnect');
             }
-            await flushPendingTripJournalRef.current?.();
             if (activeJobRef.current?.id) {
               void refreshActiveJobRef.current?.('netinfo-reconnect');
             }
@@ -1811,6 +1830,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     !!(activeJobIdRef.current || hailActiveRef.current || paymentJobRef.current);
 
   const syncPresenceAfterTripClear = async () => {
+    const pendingJournal = await refreshPendingTripSyncGate();
     const snap = {
       shiftActive,
       hailActive: hailActiveRef.current,
@@ -1818,21 +1838,26 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       paymentJobId: paymentJobRef.current?.id ?? null,
       awayIntent: awayIntentRef.current,
       hasConfirmedTrip: driverHasConfirmedActiveTrip(),
+      pendingJournal,
     };
     console.log('[away-debug] syncPresenceAfterTripClear enter', snap);
     if (!driver || !shiftActive) {
       console.log('[away-debug] syncPresenceAfterTripClear skip — no driver or shift');
       return;
     }
-    const vehicleId = await resolveVehicleId();
+    const vehicleId = await resolveVehicleIdLocalFirst();
     if (!vehicleId) {
       console.log('[away-debug] syncPresenceAfterTripClear skip — no vehicleId');
       return;
     }
-    if (driverHasConfirmedActiveTrip()) {
-      console.log('[away-debug] syncPresenceAfterTripClear → Busy (trip/payment still active)', snap);
+    if (driverHasConfirmedActiveTrip() || shouldBlockOffersForPendingTripSync(pendingJournal)) {
+      console.log(
+        '[away-debug] syncPresenceAfterTripClear → Busy (trip or pending journal sync)',
+        snap,
+      );
       writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
       setPresenceStatus('Busy');
+      setReadyForJobs(false);
       readyForJobsRef.current = false;
       return;
     }
@@ -2577,6 +2602,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return map[job.stage] ?? 'Busy';
     }
     if (hailActiveRef.current) return 'Busy';
+    // Unsynced offline completes must not advertise Available (auto-dispatch race).
+    if (pendingTripSyncBlocksOffersRef.current) return 'Busy';
     return 'Available';
   };
 
@@ -2694,6 +2721,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   refreshActiveJobRef.current = refreshActiveJobFromServer;
 
   const applySyncingBanner = async (banner: PendingSyncBanner | null) => {
+    if (banner) markPendingTripSyncBlocking();
     setSyncingBanner(banner?.message ?? null);
     await savePendingSyncBanner(banner);
   };
@@ -2706,6 +2734,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   flushPendingTripJournalRef.current = async () => {
     // HTTP journal sync — do not wait for RTDB (that dual-gate left Active jobs stuck).
     if (!tripJournalFlushIsAllowed(networkConnectedRef.current)) return;
+    // Stay Busy while any journal work remains (including mid-flush).
+    markPendingTripSyncBlocking();
     await flushTripJournal({
       onHailCreated: async ({ clientTripId, serverJobId, updateSeq, vehicleId, companyId }) => {
         const live = activeJobRef.current;
@@ -2760,6 +2790,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.warn('[Driver] flushPendingShiftEnds failed:', err);
     });
     await refreshSyncingBannerRef.current?.();
+    const stillPending = await refreshPendingTripSyncGate();
+    if (!stillPending && shiftActiveRef.current && !driverHasConfirmedActiveTrip()) {
+      await syncPresenceAfterTripClear();
+    }
   };
 
   useSafeEffect(() => {
@@ -2837,12 +2871,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const unsubRtdb = subscribeFirebaseRtdbConnected((connected) => {
       updateDispatchConnection('rtdb', connected);
       if (connected) {
-        // Presence first so dispatch stops treating this driver as unreachable.
-        if (shiftActiveRef.current) {
-          void repairPresenceRef.current?.('rtdb-reconnect');
-        }
         void (async () => {
+          // Flush before Available repair — see netinfo-reconnect comment.
           await flushPendingTripJournalRef.current?.();
+          if (shiftActiveRef.current) {
+            void repairPresenceRef.current?.('rtdb-reconnect');
+          }
           if (activeJobRef.current?.id) {
             void refreshActiveJobRef.current?.('rtdb-reconnect');
           }
@@ -2962,12 +2996,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     void import('@/services/shiftRuntimeService').then(({ startShiftRuntime }) =>
       startShiftRuntime({
         onForegroundResume: () => {
-          void repairPresenceRef.current?.('app-foreground');
           void refreshActiveJobRef.current?.('app-foreground');
-          // Soft reconnect often skips NetInfo/RTDB edges; foreground must flush
-          // offline completes so dispatch does not stay Active until remount.
+          // Flush before presence repair so we do not advertise Available mid-sync.
           void (async () => {
             await flushPendingTripJournalRef.current?.();
+            void repairPresenceRef.current?.('app-foreground');
             await flushOfflineQueue();
             await refreshSyncingBannerRef.current?.();
           })();
