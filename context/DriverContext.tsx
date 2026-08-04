@@ -141,6 +141,11 @@ import {
   shouldSuppressMissAway,
 } from '@/lib/tripJournalFlushPolicy';
 import {
+  SHIFT_BOOTSTRAP_GPS_BUDGET_MS,
+  pickBestDeferredOfferPopup,
+  shouldOpenPopupGateBeforeAvailableWrite,
+} from '@/lib/shiftOfferSequencing';
+import {
   enqueuePendingShiftEnd,
   flushPendingShiftEnds,
 } from '@/lib/pendingShiftEnd';
@@ -1886,10 +1891,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     awayIntentRef.current = 'none';
     console.log('[away-debug] syncPresenceAfterTripClear → Available');
+    readyForJobsRef.current = true;
+    setReadyForJobs(true);
     writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
     setPresenceStatus('Online');
-    setReadyForJobs(true);
-    readyForJobsRef.current = true;
+    flushDeferredOfferPopupNowRef.current?.('syncPresenceAfterTripClear');
   };
 
   const restoreAvailableAfterJobClear = async () => {
@@ -1983,30 +1989,35 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     void alertDriverToOffer(offer);
   };
 
-  // Offers that arrived during Away bootstrap (list only) get a popup once ready.
-  // Expired deferred offers are purged — never promoted into a timed-out miss→Away.
-  useSafeEffect(() => {
-    if (!shiftActive || !readyForJobs) return;
+  /** Promote Offer-tab deferred exclusive offers to popup immediately (no effect lag). */
+  const flushDeferredOfferPopupNow = (reason: string) => {
+    if (!shiftActiveRef.current || !readyForJobsRef.current) return;
     if (jobOfferRef.current?.id) return;
     if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
     if (pendingTripSyncBlocksOffersRef.current) return;
 
     const now = Date.now();
-    let best: JobOffer | null = null;
     for (const [offerId, o] of broadcastOffersRef.current) {
       if (shouldPurgeExpiredDeferredOffer(o.expiresAt, now)) {
         console.log('[Driver] purge expired deferred offer (no miss→Away)', offerId);
         removeBroadcastOffer(offerId);
         suppressedOfferIdsRef.current.add(offerId);
-        continue;
       }
-      if (!best || (o.postedAt || 0) > (best.postedAt || 0)) best = o;
     }
+    const best = pickBestDeferredOfferPopup(broadcastOffersRef.current.values(), now);
     if (!best?.id) return;
 
-    console.log('[Driver] flush deferred offer popup after readyForJobs', best.id);
+    console.log('[Driver] flush deferred offer popup', reason, best.id);
     setJobOffer({ ...best, silent: false });
     void alertDriverToOffer({ ...best, silent: false });
+  };
+  const flushDeferredOfferPopupNowRef = useRef(flushDeferredOfferPopupNow);
+  flushDeferredOfferPopupNowRef.current = flushDeferredOfferPopupNow;
+
+  // Fallback if readyForJobs flips outside startShift (goAvailable / trip clear).
+  useSafeEffect(() => {
+    if (!shiftActive || !readyForJobs) return;
+    flushDeferredOfferPopupNow('readyForJobs-effect');
   }, [shiftActive, readyForJobs, pendingTripSync], 'Driver-flushDeferredOfferPopup');
 
   const handleDriverNotification = async (val: Record<string, unknown>) => {
@@ -2979,32 +2990,42 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.log('[Shift] startShift — profile uid:', driver.uid, 'vehicle:', vehicleId);
       await startShiftOnline(driver, vehicleId);
 
-      // GPS + fresh lastSeen before advertising offerable — same Firebase shape as
-      // hail-complete / goAvailable. Previously startShiftOnline wrote Available then
-      // awaited GPS enrich while readyForJobs was still false → Offer-tab-only + network bounce.
+      // Budget GPS so badge→popup stays under ~3s. Previously untimed getCurrentCoords
+      // left readyForJobs false while listeners already filled the Offer tab.
       let trackingStarted = false;
       try {
         const { startBackgroundTracking } = await import('@/services/locationService');
-        console.log('[Shift] location tracking begin (before Available / readyForJobs)');
+        console.log('[Shift] location tracking begin (budgeted GPS before Available)');
         trackingStarted = await startBackgroundTracking(
           driver.id,
           driver.companyId,
           vehicleId,
+          'Available',
+          { initialGpsTimeoutMs: SHIFT_BOOTSTRAP_GPS_BUDGET_MS },
         );
         console.log('[Shift] location tracking result:', trackingStarted);
       } catch (err) {
         console.warn('[Shift] location tracking failed (non-fatal):', err);
       }
 
+      // Open popup gate BEFORE Available so auto-dispatch offers popup immediately
+      // (not Offer-tab badge until a later React effect).
+      if (shouldOpenPopupGateBeforeAvailableWrite()) {
+        readyForJobsRef.current = true;
+        setReadyForJobs(true);
+      }
+
       await writeOnlinePresence(driver, vehicleId, 'Available');
       console.log('[Shift] writeOnlinePresence Available done — GPS/lastSeen stamped');
 
       setPresenceStatus('Online');
-      setReadyForJobs(true);
       readyForJobsRef.current = true;
+      setReadyForJobs(true);
       presenceWriteStatusRef.current = 'Available';
       startPresenceHeartbeat(driver, vehicleId, 'Available');
       void syncBgLocationFirebaseStatus('Available');
+      // Sync flush — do not wait for useEffect after Available edge.
+      flushDeferredOfferPopupNowRef.current?.('startShift-available');
       console.log('[Shift] presence Online, readyForJobs=true');
 
       if (!trackingStarted) {
@@ -3085,14 +3106,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!vehicleId) return;
     const wasMissed = awayIntentRef.current === 'missed';
     awayIntentRef.current = 'none';
+    // Popup gate before Available — same speed path as startShift.
+    readyForJobsRef.current = true;
+    setReadyForJobs(true);
     await writeOnlinePresence(driver, vehicleId, 'Available');
     await syncBgLocationFirebaseStatus('Available');
     if (wasMissed) {
       await moveDriverToEndOfQueue(driver, vehicleId);
     }
     setPresenceStatus('Online');
-    setReadyForJobs(true);
-    readyForJobsRef.current = true;
+    flushDeferredOfferPopupNowRef.current?.('goAvailable');
   };
 
   const setAwayAfterMissedOffer = async () => {

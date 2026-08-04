@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import { withTimeout } from '@/lib/asyncTimeout';
 import { syncDriverLocation } from '@/lib/dispatchApi';
 import { isPresenceSessionEnded } from '@/lib/presenceGuards';
 
@@ -88,6 +89,14 @@ export async function requestLocationPermissions(): Promise<LocationPermissionRe
   };
 }
 
+export type StartBackgroundTrackingOptions = {
+  /**
+   * Cap the initial getCurrentCoords wait (shift start). Prefer last-known on
+   * timeout so Available / offer popup are not blocked by a slow satellite lock.
+   */
+  initialGpsTimeoutMs?: number;
+};
+
 /**
  * Starts GPS tracking when allowed. Returns false if the user denied/dismissed
  * permission — does NOT throw and does NOT change driver presence status.
@@ -97,6 +106,7 @@ export async function startBackgroundTracking(
   companyId: string,
   vehicleId: string,
   firebaseStatus = 'Available',
+  opts?: StartBackgroundTrackingOptions,
 ): Promise<boolean> {
   const perms = await requestLocationPermissions();
   if (!perms.foregroundGranted) {
@@ -127,14 +137,30 @@ export async function startBackgroundTracking(
   }
 
   try {
-    const coords = await getCurrentCoords();
+    const budgetMs = opts?.initialGpsTimeoutMs;
+    let coords: Awaited<ReturnType<typeof getCurrentCoords>>;
+    if (budgetMs != null && budgetMs > 0) {
+      try {
+        coords = await withTimeout(
+          getCurrentCoords(),
+          budgetMs,
+          'startBackgroundTracking.initialGps',
+        );
+      } catch {
+        const last = await getLastKnownCoords();
+        if (!last) throw new Error('initial GPS timed out and no last-known');
+        coords = last as Awaited<ReturnType<typeof getCurrentCoords>>;
+      }
+    } else {
+      coords = await getCurrentCoords();
+    }
     await syncDriverLocation({
       companyId,
       vehicleId,
       driverId,
       lat: coords.latitude,
       lng: coords.longitude,
-      accuracy: coords.accuracy,
+      accuracy: 'accuracy' in coords ? (coords as { accuracy?: number }).accuracy : undefined,
       vehiclestatus: firebaseStatus,
     });
   } catch (e) {
