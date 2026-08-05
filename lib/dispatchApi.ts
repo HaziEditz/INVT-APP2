@@ -530,21 +530,34 @@ export interface ActiveBookingRow {
 }
 
 export async function fetchDriverActiveBookings(driverId: string): Promise<ActiveBookingRow[]> {
-  const data = await driverApiGet<{
+  const path = `/api/driver/active-bookings?driverId=${encodeURIComponent(driverId)}`;
+  const mapRows = (data: {
     ok?: boolean;
     bookings?: Array<{
       bookingId: number;
       status: string;
       version?: number;
+      bookingStatus?: string;
     }>;
-  }>(`/api/driver/active-bookings?driverId=${encodeURIComponent(driverId)}`);
-  const rows = data.bookings ?? [];
-  return rows.map((b) => ({
-    bookingId: b.bookingId,
-    status: String(b.status || ''),
-    bookingStatus: String((b as { bookingStatus?: string }).bookingStatus || b.status || ''),
-    version: parseInt(String(b.version ?? 0), 10) || 0,
-  }));
+  }): ActiveBookingRow[] => {
+    const rows = data.bookings ?? [];
+    return rows.map((b) => ({
+      bookingId: b.bookingId,
+      status: String(b.status || ''),
+      bookingStatus: String(b.bookingStatus || b.status || ''),
+      version: parseInt(String(b.version ?? 0), 10) || 0,
+    }));
+  };
+
+  try {
+    return mapRows(await driverApiGet(path));
+  } catch (err) {
+    // Edge/proxy 502/503 while Node is overloaded — one immediate retry.
+    if (err instanceof DispatchApiError && (err.status === 502 || err.status === 503)) {
+      return mapRows(await driverApiGet(path));
+    }
+    throw err;
+  }
 }
 
 export async function syncJobStageOnDispatch(
