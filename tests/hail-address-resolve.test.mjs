@@ -11,12 +11,15 @@ import {
 test('isCoordLikeAddress matches bare and Hail-prefixed coords', () => {
   assert.equal(isCoordLikeAddress('-36.84846, 174.76333'), true);
   assert.equal(isCoordLikeAddress('Hail - -36.84846, 174.76333'), true);
+  assert.equal(isCoordLikeAddress('Dropoff (-46.39625, 168.35130)'), true);
+  assert.equal(isCoordLikeAddress('Pickup (-46.39625, 168.35130)'), true);
   assert.equal(isCoordLikeAddress('12 Queen Street'), false);
   assert.equal(isCoordLikeAddress(''), false);
 });
 
 test('needsHailAddressResolve covers placeholders', () => {
   assert.equal(needsHailAddressResolve('-36.84, 174.76'), true);
+  assert.equal(needsHailAddressResolve('Dropoff (-46.39625, 168.35130)'), true);
   assert.equal(needsHailAddressResolve('Current location (address unavailable)'), true);
   assert.equal(needsHailAddressResolve('Locating…'), true);
   assert.equal(needsHailAddressResolve('88 Karangahape Rd'), false);
@@ -31,6 +34,18 @@ test('coordsFromAddressOrFields prefers explicit lat/lng', () => {
     lat: -36.84846,
     lng: 174.76333,
   });
+  assert.deepEqual(coordsFromAddressOrFields('Dropoff (-46.39625, 168.35130)'), {
+    lat: -46.39625,
+    lng: 168.3513,
+  });
+});
+
+test('resolveReadableAddress reverse-geocodes Dropoff (lat, lng) placeholders', async () => {
+  const resolved = await resolveReadableAddress(
+    { address: 'Dropoff (-46.39625, 168.35130)', lat: -46.39625, lng: 168.3513 },
+    async () => '305 Kelvin Street, Gladstone, Invercargill',
+  );
+  assert.equal(resolved, '305 Kelvin Street, Gladstone, Invercargill');
 });
 
 test('resolveReadableAddress reverse-geocodes coord placeholders', async () => {

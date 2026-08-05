@@ -14,11 +14,17 @@ export type HailPickupSnapshot = {
   lng?: number;
 };
 
-/** Bare coords or legacy "Hail - lat, lng" — not a real street address. */
+/** Match bare coords, "Hail - lat, lng", or "Dropoff (lat, lng)" placeholders. */
+const COORD_ADDRESS_RE =
+  /^(?:Hail\s*-\s*)?(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/i;
+const LABELLED_COORD_ADDRESS_RE =
+  /^(?:Dropoff|Pickup|Hail)\s*\(\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*\)\s*$/i;
+
+/** Bare coords or labelled coord placeholders — not a real street address. */
 export function isCoordLikeAddress(address: string | null | undefined): boolean {
   const s = String(address || '').trim();
   if (!s) return false;
-  return /^(?:Hail\s*-\s*)?(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/i.test(s);
+  return COORD_ADDRESS_RE.test(s) || LABELLED_COORD_ADDRESS_RE.test(s);
 }
 
 export function needsHailAddressResolve(address: string | null | undefined): boolean {
@@ -45,7 +51,7 @@ export function coordsFromAddressOrFields(
     return { lat, lng };
   }
   const s = String(address || '').trim();
-  const m = s.match(/^(?:Hail\s*-\s*)?(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/i);
+  const m = s.match(COORD_ADDRESS_RE) || s.match(LABELLED_COORD_ADDRESS_RE);
   if (!m) return null;
   const parsedLat = Number(m[1]);
   const parsedLng = Number(m[2]);

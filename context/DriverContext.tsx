@@ -4967,15 +4967,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             if (coords && Number.isFinite(lat) && Number.isFinite(lng)) {
               dropLat = lat;
               dropLng = lng;
-              dropoffAddress = await resolveReadableAddress(
-                {
-                  address: dropoffAddress || `Dropoff (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
-                  lat,
-                  lng,
-                },
-                reverseGeocodeCoords,
-                { timeoutMs: GEOCODE_TIMEOUT_MS },
+              // Hail parity: bare coords first, then reverse-geocode when online.
+              // Do not seed "Dropoff (lat, lng)" — that string was treated as already
+              // readable and skipped geocoding.
+              dropoffAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+              const onlineForGeocode = dispatchIsConnected(
+                networkConnectedRef.current,
+                rtdbConnectedRef.current,
               );
+              if (onlineForGeocode) {
+                dropoffAddress = await withTimeout(
+                  reverseGeocodeCoords(lat, lng),
+                  GEOCODE_TIMEOUT_MS,
+                  'endTrip.reverseGeocode.drop',
+                ).catch(() => dropoffAddress);
+              }
             }
           } catch (err) {
             console.warn('[Driver] endTrip dropoff GPS/geocode skipped:', err);
