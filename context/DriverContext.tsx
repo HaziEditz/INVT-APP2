@@ -34,6 +34,7 @@ import {
   ensureDispatchTripJournal,
   ensureJournalForJob,
   hasPendingTripJournalWork,
+  markTripJournalSyncedForCompletedTrip,
 } from '@/services/tripJournalService';
 import { shouldBlockOffersForPendingTripSync } from '@/lib/tripJournalFlushPolicy';
 import {
@@ -41,7 +42,6 @@ import {
   readAccountFieldsFromRecord,
 } from '@/lib/driverPayment';
 import {
-  loadPendingSyncBanner,
   resolvePendingSyncBanner,
   savePendingSyncBanner,
   type PendingSyncBanner,
@@ -950,8 +950,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           meterRef.current = m;
           setHailActive(true);
         }
-        const storedBanner = await loadPendingSyncBanner();
-        const resolved = (await resolvePendingSyncBanner()) ?? storedBanner;
+        // Only show Syncing when journal work is still pending — do not revive a
+        // stale persisted banner after force-close / successful online complete.
+        const resolved = await resolvePendingSyncBanner();
         setSyncingBanner(resolved?.message ?? null);
         await savePendingSyncBanner(resolved);
         // Pending offline completes must not wait for a reconnect edge after remount.
@@ -4256,6 +4257,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       });
       if (outcome === 'journal_fallback') {
         deferredFirebasePersist = true;
+      } else {
+        // Online complete already archived the job — clear leftover stage/terminal
+        // journal rows so Syncing/Busy does not stick until force-close.
+        try {
+          await markTripJournalSyncedForCompletedTrip({
+            jobId: String(job.id),
+            clientTripId: job.clientTripId || resolveJournalClientTripId(job),
+          });
+          await refreshSyncingBannerRef.current?.();
+          await refreshPendingTripSyncGate();
+        } catch (err) {
+          console.warn('[Driver] clear journal after online complete failed:', err);
+        }
       }
     }
 
@@ -5026,6 +5040,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             ? Math.round((now - snapshot.startedAt) / 60000)
             : activeJob.durationMin,
           bookedAtMs: activeJob.bookedAtMs ?? activeJob.postedAt ?? activeJob.startedAt,
+          tariffChanges: snapshot?.tariffChanges ?? activeJob.tariffChanges ?? [],
           ...(vehicleType
             ? { vehicleType, vehicleTypeRequired: vehicleType }
             : {}),

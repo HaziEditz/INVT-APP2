@@ -87,6 +87,26 @@ test('closedJobFieldsForCompleteApi uses server whitelist keys', () => {
   assert.equal(api.fareBreakdown.flagFall, 3.5);
   assert.equal(api.waitingCost, 0.8);
   assert.equal(api.tariffName, 'Day');
+  assert.equal(api.TarriffType, 'Day');
+  assert.equal(api.TarriffName, 'Day');
+});
+
+test('complete API prefers meter tariffChanges and final tariff aliases', () => {
+  const api = closedJobFieldsForCompleteApi({
+    ...sampleJob,
+    tariffChanges: [],
+    meterSnapshot: {
+      ...sampleJob.meterSnapshot,
+      tariffId: '2',
+      tariffName: 'Total mobility',
+      tariffChanges: [{ tariffId: '2', tariffName: 'Total mobility', at: 1 }],
+    },
+  });
+  assert.equal(api.tariffName, 'Total mobility');
+  assert.equal(api.TarriffType, 'Total mobility');
+  assert.equal(api.tariffId, '2');
+  assert.equal(api.tariffChanges.length, 1);
+  assert.equal(api.tariffChanges[0].tariffName, 'Total mobility');
 });
 
 test('complete API sends fareBreakdown after Payment-modal-style rebuild', () => {

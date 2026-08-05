@@ -425,11 +425,15 @@ export async function createHailJobOnDispatch(params: {
       lat: params.pickup.lat ?? 0,
       lng: params.pickup.lng ?? 0,
     },
-    dropoff: {
-      address: (params.dropoff ?? params.pickup).address,
-      lat: (params.dropoff ?? params.pickup).lat ?? 0,
-      lng: (params.dropoff ?? params.pickup).lng ?? 0,
-    },
+    // Hail destination is unknown until End Trip — never mirror pickup as DropAddress
+    // (dispatch Active card would otherwise show pickup as dropoff).
+    dropoff: params.dropoff?.address?.trim()
+      ? {
+          address: params.dropoff.address.trim(),
+          lat: params.dropoff.lat ?? 0,
+          lng: params.dropoff.lng ?? 0,
+        }
+      : { address: '', lat: 0, lng: 0 },
     passengers: 1,
   };
   const vehicleType = String(params.vehicleType || '').trim();

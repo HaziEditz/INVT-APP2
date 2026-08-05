@@ -136,6 +136,19 @@ export function closedJobFieldsForJournal(job: ActiveJob): Record<string, unknow
     waitingMinutes: breakdown?.waitingMinutes,
     tariffId: job.meterSnapshot?.tariffId,
     tariffName: job.meterSnapshot?.tariffName,
+    ...(job.meterSnapshot?.tariffName
+      ? {
+          TarriffType: job.meterSnapshot.tariffName,
+          TarriffName: job.meterSnapshot.tariffName,
+          TariffName: job.meterSnapshot.tariffName,
+        }
+      : {}),
+    ...(job.meterSnapshot?.tariffId
+      ? {
+          TarriffId: job.meterSnapshot.tariffId,
+          TariffId: job.meterSnapshot.tariffId,
+        }
+      : {}),
   };
 }
 
@@ -191,9 +204,24 @@ export function closedJobFieldsForCompleteApi(job: ActiveJob): Record<string, un
   }
   const tariffId = job.meterSnapshot?.tariffId;
   const tariffName = job.meterSnapshot?.tariffName;
-  if (tariffId) out.tariffId = tariffId;
-  if (tariffName) out.tariffName = tariffName;
-  if (job.tariffChanges?.length) out.tariffChanges = job.tariffChanges;
+  if (tariffId) {
+    out.tariffId = tariffId;
+    out.TarriffId = tariffId;
+    out.TariffId = tariffId;
+  }
+  if (tariffName) {
+    out.tariffName = tariffName;
+    out.TarriffName = tariffName;
+    out.TariffName = tariffName;
+    out.TarriffType = tariffName;
+  }
+  const tariffChanges =
+    job.tariffChanges?.length
+      ? job.tariffChanges
+      : job.meterSnapshot?.tariffChanges?.length
+        ? job.meterSnapshot.tariffChanges
+        : undefined;
+  if (tariffChanges?.length) out.tariffChanges = tariffChanges;
   return out;
 }
 

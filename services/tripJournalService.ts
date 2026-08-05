@@ -262,6 +262,43 @@ export async function markTripJournalEventSynced(
   });
 }
 
+/**
+ * After a successful online /api/job/complete, mark leftover journal stages/terminals
+ * for that trip synced so Syncing/Busy does not stick on already-archived jobs.
+ */
+export async function markTripJournalSyncedForCompletedTrip(params: {
+  jobId?: string | null;
+  clientTripId?: string | null;
+}): Promise<number> {
+  const jobId = String(params.jobId || '').trim();
+  const clientTripId = String(params.clientTripId || '').trim();
+  if (!jobId && !clientTripId) return 0;
+  const rows = await listTripJournals();
+  let cleared = 0;
+  for (const row of rows) {
+    const idMatch = !!jobId && String(row.serverJobId || '').trim() === jobId;
+    const keyMatch = !!clientTripId && row.clientTripId === clientTripId;
+    const payloadMatch =
+      !!jobId &&
+      row.events.some((e) => {
+        const p = e.payload || {};
+        return String(p.jobId || p.bookingId || '') === jobId;
+      });
+    if (!idMatch && !keyMatch && !payloadMatch) continue;
+    const nextEvents = row.events.map((e) => (e.synced === true ? e : { ...e, synced: true }));
+    await upsertTripJournal({
+      ...row,
+      serverJobId:
+        row.serverJobId || (jobId && /^\d+$/.test(jobId) ? jobId : row.serverJobId),
+      syncState: 'synced',
+      lastError: undefined,
+      events: nextEvents,
+    });
+    cleared += 1;
+  }
+  return cleared;
+}
+
 const STAGE_EVENT_TYPES = new Set<TripJournalEventType>(['Arrived', 'OnBoard']);
 const TERMINAL_EVENT_TYPES = new Set<TripJournalEventType>(['Completed', 'Cancelled', 'NoShow']);
 
