@@ -58,6 +58,9 @@ export interface JobOffer {
   estimatedDistanceKm?: number;
   /** Dispatch fixed-price job — meter must stay off. */
   isFixedPrice?: boolean;
+  /** Dispatch tariff selection (empty / "0" / Automatic = driver keeps own). */
+  tariffId?: string;
+  tariffName?: string;
   paymentType?: PaymentType;
   /** Business account Firebase/key id (Account_id / jobAccountId). */
   accountId?: string;

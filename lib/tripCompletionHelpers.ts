@@ -118,6 +118,32 @@ export function withCompleteFareBreakdown(
   selectedTariff: Tariff | null | undefined,
 ): ActiveJob {
   const breakdown = buildCompleteFareBreakdown(job, selectedTariff);
+  // Fixed-fare jobs must not adopt the driver's active meter tariff name/id.
+  if (job.isFixedPrice) {
+    const meter = job.meterSnapshot;
+    if (!meter) {
+      return {
+        ...job,
+        distanceKm: job.distanceKm || breakdown.distanceKm,
+        fare: breakdown.total,
+      };
+    }
+    return {
+      ...job,
+      distanceKm: job.distanceKm || meter.distanceKm || breakdown.distanceKm,
+      fare: breakdown.total,
+      meterSnapshot: {
+        ...meter,
+        breakdown,
+        fare: breakdown.total,
+        distanceKm: meter.distanceKm || breakdown.distanceKm,
+        finishedAt: meter.finishedAt ?? Date.now(),
+        running: false,
+        tariffId: '-1',
+        tariffName: 'Fixed',
+      },
+    };
+  }
   const meter = job.meterSnapshot;
   const nextMeter: MeterState = meter
     ? {

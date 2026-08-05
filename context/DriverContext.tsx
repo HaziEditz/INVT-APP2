@@ -81,6 +81,7 @@ import {
   purgeStaleSosNotifications,
 } from '@/lib/sosEmergency';
 import {
+  isDispatchAutoTariff,
   isFixedPriceBooking,
   readBookingTariffHints,
   readFixedFareAmount,
@@ -453,6 +454,16 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     fixedFare: offerFare,
     estimatedFare: offerFare,
     isFixedPrice: fixedPrice,
+    tariffId: (() => {
+      const id = String(val.TarriffId ?? val.TariffId ?? val.tariffId ?? '').trim();
+      return id || undefined;
+    })(),
+    tariffName: (() => {
+      const name = String(
+        val.TarriffType ?? val.TarriffName ?? val.TariffName ?? val.tariffName ?? '',
+      ).trim();
+      return name && !isForbiddenPlaceholderTariffName(name) ? name : undefined;
+    })(),
     estimatedDistanceKm:
       val.estimatedDistanceKm != null
         ? Number(val.estimatedDistanceKm)
@@ -494,6 +505,7 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
           })(),
     silent: !!val.silent,
     // Notification offers use jobvehicletype; pool/allbookings use VehicleType.
+    // Server stores Create-Job "Any" as "Not Specified" — show product label "Any".
     vehicleTypeRequired: (() => {
       const raw =
         val.VehicleType ??
@@ -502,7 +514,9 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
         val.jobVehicleType ??
         val.vehicleTypeRequired;
       const s = raw != null ? String(raw).trim() : '';
-      return s || undefined;
+      if (!s) return undefined;
+      if (s.toLowerCase() === 'not specified' || s.toLowerCase() === 'any') return 'Any';
+      return s;
     })(),
     bookedAtMs: (() => {
       const raw = val.createdAt ?? val.CreatedAt ?? val.bookedAt ?? val.BookedAt ?? val.postedAt;
@@ -564,14 +578,39 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
 }
 
 function bookingRawSeedFromOffer(offer: JobOffer): Record<string, unknown> | null {
-  if (!offer.isFixedPrice) return null;
+  if (offer.isFixedPrice) {
+    return {
+      TarriffId: '-1',
+      TarriffType: 'Fixed',
+      tarriffType: 'Fixed',
+      CustomeRate: offer.fixedFare ?? offer.estimatedFare ?? offer.fare ?? '',
+      jobFare: offer.fixedFare ?? offer.estimatedFare ?? offer.fare ?? '',
+    };
+  }
+  const id = String(offer.tariffId ?? '').trim();
+  const name = String(offer.tariffName ?? '').trim();
+  if (!id && !name) return null;
   return {
-    TarriffId: '-1',
-    TarriffType: 'Fixed',
-    tarriffType: 'Fixed',
-    CustomeRate: offer.fixedFare ?? offer.estimatedFare ?? offer.fare ?? '',
-    jobFare: offer.fixedFare ?? offer.estimatedFare ?? offer.fare ?? '',
+    ...(id ? { TarriffId: id, TariffId: id, tariffId: id } : {}),
+    ...(name
+      ? { TarriffType: name, TarriffName: name, TariffName: name, tariffName: name }
+      : {}),
   };
+}
+
+/** Auto → keep driver's tariff; specific dispatch tariff → adopt (manual change still OK after). */
+function adoptDispatchTariffFromOffer(
+  offer: JobOffer,
+  tariffs: Tariff[],
+  setTariff: (t: Tariff) => void,
+): void {
+  if (offer.isFixedPrice || !tariffs.length) return;
+  const hints = { id: offer.tariffId, name: offer.tariffName };
+  if (isDispatchAutoTariff(hints)) return;
+  const match = resolveTariffFromList(tariffs, hints);
+  if (!match) return;
+  setTariff(match);
+  storeData(STORAGE_KEYS.selectedTariffId, match.id).catch(() => undefined);
 }
 
 function resolveTariffForDriver(
@@ -3545,6 +3584,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         job.updateSeq = result.version;
         const rawSeed = bookingRawSeedFromOffer(job);
         if (rawSeed) bookingRawRef.current = rawSeed;
+        adoptDispatchTariffFromOffer(offerSnapshot, tariffsListRef.current, (t) => {
+          selectedTariffRef.current = t;
+          setSelectedTariffState(t);
+        });
         setActiveJob(job);
         activeJobIdRef.current = job.id;
         await storeData(STORAGE_KEYS.activeJob, job);
@@ -3615,6 +3658,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     job.updateSeq = acceptResult?.version ?? acceptResult?.booking?.version;
     const rawSeed = bookingRawSeedFromOffer(job);
     if (rawSeed) bookingRawRef.current = rawSeed;
+    adoptDispatchTariffFromOffer(offerSnapshot, tariffsListRef.current, (t) => {
+      selectedTariffRef.current = t;
+      setSelectedTariffState(t);
+    });
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);
@@ -3774,6 +3821,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     job.originalStatus = offer.originalStatus ?? 'pending';
     const rawSeed = bookingRawSeedFromOffer(job);
     if (rawSeed) bookingRawRef.current = rawSeed;
+    adoptDispatchTariffFromOffer(offer, tariffsListRef.current, (t) => {
+      selectedTariffRef.current = t;
+      setSelectedTariffState(t);
+    });
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     await storeData(STORAGE_KEYS.activeJob, job);

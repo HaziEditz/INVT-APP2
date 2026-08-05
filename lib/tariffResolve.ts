@@ -71,19 +71,43 @@ export function readFixedFareAmount(
   );
 }
 
+/**
+ * Dispatch "Auto" / unset tariff — driver keeps their own selected tariff.
+ * Specific tariff id/name → driver should adopt it on accept (can change manually after).
+ */
+export function isDispatchAutoTariff(
+  hints?: { id?: string; name?: string } | null,
+): boolean {
+  if (!hints) return true;
+  const id = hints.id?.trim() ?? '';
+  const name = (hints.name?.trim() ?? '').toLowerCase();
+  if (!id && !name) return true;
+  if (id === '0') return true;
+  if (!id && (name === 'automatic' || name === 'auto')) return true;
+  return false;
+}
+
 /** Resolve a company tariff from booking hints — never returns a forbidden placeholder name. */
 export function resolveTariffFromList(
   tariffs: Tariff[],
   hints?: { id?: string; name?: string } | null,
 ): Tariff | null {
   if (!tariffs.length || !hints) return null;
+  if (isDispatchAutoTariff(hints)) return null;
   const id = hints.id?.trim();
   const name = hints.name?.trim();
-  if (id && id !== '-1') {
+  // Skip Fixed (-1) and Auto (0) — neither is a company meter tariff.
+  if (id && id !== '-1' && id !== '0') {
     const byId = tariffs.find((t) => t.id === id || String(t.id) === id);
     if (byId) return byId;
   }
-  if (name && !isForbiddenPlaceholderTariffName(name) && name.toLowerCase() !== 'fixed') {
+  if (
+    name &&
+    !isForbiddenPlaceholderTariffName(name) &&
+    name.toLowerCase() !== 'fixed' &&
+    name.toLowerCase() !== 'automatic' &&
+    name.toLowerCase() !== 'auto'
+  ) {
     const lower = name.toLowerCase();
     const byName = tariffs.find((t) => t.name.trim().toLowerCase() === lower);
     if (byName) return byName;

@@ -109,6 +109,25 @@ test('complete API prefers meter tariffChanges and final tariff aliases', () => 
   assert.equal(api.tariffChanges[0].tariffName, 'Total mobility');
 });
 
+test('complete API keeps Fixed / -1 for fixed-fare jobs (ignores meter tariff)', () => {
+  const api = closedJobFieldsForCompleteApi({
+    ...sampleJob,
+    isFixedPrice: true,
+    fixedFare: 40,
+    fare: 40,
+    meterSnapshot: {
+      ...sampleJob.meterSnapshot,
+      tariffId: '527',
+      tariffName: 'Total Mobility',
+    },
+  });
+  assert.equal(api.tariffId, '-1');
+  assert.equal(api.TarriffId, '-1');
+  assert.equal(api.tariffName, 'Fixed');
+  assert.equal(api.TarriffType, 'Fixed');
+  assert.equal(api.fixedPrice, true);
+});
+
 test('complete API sends fareBreakdown after Payment-modal-style rebuild', () => {
   // Mirror withCompleteFareBreakdown / calcMeterBreakdown arithmetic.
   const flagFall = 3.5;

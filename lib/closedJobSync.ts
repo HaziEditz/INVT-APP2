@@ -134,21 +134,34 @@ export function closedJobFieldsForJournal(job: ActiveJob): Record<string, unknow
     distanceCharge: breakdown?.distanceCharge,
     waitingCharge: breakdown?.waitingCharge,
     waitingMinutes: breakdown?.waitingMinutes,
-    tariffId: job.meterSnapshot?.tariffId,
-    tariffName: job.meterSnapshot?.tariffName,
-    ...(job.meterSnapshot?.tariffName
+    ...(job.isFixedPrice
       ? {
-          TarriffType: job.meterSnapshot.tariffName,
-          TarriffName: job.meterSnapshot.tariffName,
-          TariffName: job.meterSnapshot.tariffName,
+          tariffId: '-1',
+          tariffName: 'Fixed',
+          TarriffId: '-1',
+          TariffId: '-1',
+          TarriffType: 'Fixed',
+          TarriffName: 'Fixed',
+          TariffName: 'Fixed',
+          isFixedPrice: true,
         }
-      : {}),
-    ...(job.meterSnapshot?.tariffId
-      ? {
-          TarriffId: job.meterSnapshot.tariffId,
-          TariffId: job.meterSnapshot.tariffId,
-        }
-      : {}),
+      : {
+          tariffId: job.meterSnapshot?.tariffId,
+          tariffName: job.meterSnapshot?.tariffName,
+          ...(job.meterSnapshot?.tariffName
+            ? {
+                TarriffType: job.meterSnapshot.tariffName,
+                TarriffName: job.meterSnapshot.tariffName,
+                TariffName: job.meterSnapshot.tariffName,
+              }
+            : {}),
+          ...(job.meterSnapshot?.tariffId
+            ? {
+                TarriffId: job.meterSnapshot.tariffId,
+                TariffId: job.meterSnapshot.tariffId,
+              }
+            : {}),
+        }),
   };
 }
 
@@ -202,18 +215,29 @@ export function closedJobFieldsForCompleteApi(job: ActiveJob): Record<string, un
     out.createdAt = createdAtMs;
     out.CreatedAt = createdAtMs;
   }
-  const tariffId = job.meterSnapshot?.tariffId;
-  const tariffName = job.meterSnapshot?.tariffName;
-  if (tariffId) {
-    out.tariffId = tariffId;
-    out.TarriffId = tariffId;
-    out.TariffId = tariffId;
-  }
-  if (tariffName) {
-    out.tariffName = tariffName;
-    out.TarriffName = tariffName;
-    out.TariffName = tariffName;
-    out.TarriffType = tariffName;
+  if (job.isFixedPrice) {
+    out.tariffId = '-1';
+    out.TarriffId = '-1';
+    out.TariffId = '-1';
+    out.tariffName = 'Fixed';
+    out.TarriffName = 'Fixed';
+    out.TariffName = 'Fixed';
+    out.TarriffType = 'Fixed';
+    out.fixedPrice = true;
+  } else {
+    const tariffId = job.meterSnapshot?.tariffId;
+    const tariffName = job.meterSnapshot?.tariffName;
+    if (tariffId) {
+      out.tariffId = tariffId;
+      out.TarriffId = tariffId;
+      out.TariffId = tariffId;
+    }
+    if (tariffName) {
+      out.tariffName = tariffName;
+      out.TarriffName = tariffName;
+      out.TariffName = tariffName;
+      out.TarriffType = tariffName;
+    }
   }
   const tariffChanges =
     job.tariffChanges?.length
