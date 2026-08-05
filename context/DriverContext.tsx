@@ -4960,14 +4960,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               END_HAIL_GPS_TIMEOUT_MS,
               'endTripDropGps',
             );
-            if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
-              dropLat = coords.lat;
-              dropLng = coords.lng;
+            // getCurrentCoords() returns Expo LocationObjectCoords (latitude/longitude),
+            // not { lat, lng } — reading .lat/.lng silently skipped every End Trip GPS capture.
+            const lat = Number(coords?.latitude);
+            const lng = Number(coords?.longitude);
+            if (coords && Number.isFinite(lat) && Number.isFinite(lng)) {
+              dropLat = lat;
+              dropLng = lng;
               dropoffAddress = await resolveReadableAddress(
                 {
-                  address: dropoffAddress || `Dropoff (${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)})`,
-                  lat: coords.lat,
-                  lng: coords.lng,
+                  address: dropoffAddress || `Dropoff (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+                  lat,
+                  lng,
                 },
                 reverseGeocodeCoords,
                 { timeoutMs: GEOCODE_TIMEOUT_MS },
