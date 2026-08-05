@@ -172,7 +172,7 @@ import {
   formatEndTripError,
   resolveEndHailDropCoords,
 } from '@/lib/endHailPolicy';
-import { patchOnlineCurrentJobId } from '@/lib/liveMeterPresence';
+import { patchOnlineCurrentJobId, patchOnlineCurrentTariff } from '@/lib/liveMeterPresence';
 import * as Location from 'expo-location';
 import {
   diffBookingChanges,
@@ -5160,6 +5160,30 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setSelectedTariffState(t);
     storeData(STORAGE_KEYS.selectedTariffId, t.id).catch(() => undefined);
 
+    const job = activeJobRef.current;
+    if (job && prevId !== t.id) {
+      const change: TariffChangeRecord = { tariffId: t.id, tariffName: t.name, at: Date.now() };
+      const updated: ActiveJob = {
+        ...job,
+        tariffId: t.id,
+        tariffName: t.name,
+        tariffChanges: [...(job.tariffChanges ?? []), change],
+      };
+      setActiveJob(updated);
+      storeData(STORAGE_KEYS.activeJob, updated).catch(() => undefined);
+      void (async () => {
+        try {
+          const vehicleId = await resolveVehicleIdLocalFirst();
+          const companyId = driver?.companyId;
+          if (companyId && vehicleId) {
+            await patchOnlineCurrentTariff(companyId, vehicleId, job.id, t);
+          }
+        } catch (err) {
+          console.warn('[Driver] patchOnlineCurrentTariff failed:', err);
+        }
+      })();
+    }
+
     if (meterRef.current?.running && prevId !== t.id) {
       const change: TariffChangeRecord = { tariffId: t.id, tariffName: t.name, at: Date.now() };
       setMeter((prev) => {
@@ -5175,14 +5199,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           fare: breakdown.total,
         };
         meterRef.current = next;
+        storeData(STORAGE_KEYS.meterState, next).catch(() => undefined);
         return next;
       });
-      if (activeJob) {
-        const changes = [...(activeJob.tariffChanges ?? []), change];
-        const updated = { ...activeJob, tariffChanges: changes };
-        setActiveJob(updated);
-        storeData(STORAGE_KEYS.activeJob, updated).catch(() => undefined);
-      }
       startMeterWatch();
     }
   };
