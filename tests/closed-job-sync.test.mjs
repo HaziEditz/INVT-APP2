@@ -71,6 +71,8 @@ test('closedJobFieldsForCompleteApi uses server whitelist keys', () => {
   assert.equal(api.pickupLat, -36.84);
   assert.equal(api.dropLat, -36.85);
   assert.equal(api.finalDropAddress, '88 Karangahape Rd');
+  assert.equal(api.DropAddress, '88 Karangahape Rd');
+  assert.equal(api.PickAddress, '12 Queen St');
   assert.equal(api.driverComments, 'Gate code 1');
   assert.equal(api.VehicleType, 'Sedan');
   assert.deepEqual(api.stepTimes, { onboardAt: 1 });

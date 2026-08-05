@@ -119,6 +119,13 @@ export function closedJobFieldsForCompleteApi(job: ActiveJob): Record<string, un
     dropLat: f.dropoffLat,
     dropLng: f.dropoffLng,
     finalDropAddress: f.dropoff || undefined,
+    // Closed Jobs UI reads DropAddress / PickAddress — send both mirrors.
+    ...(f.dropoff
+      ? { DropAddress: f.dropoff, dropAddress: f.dropoff, dropoff: f.dropoff }
+      : {}),
+    ...(f.pickup
+      ? { PickAddress: f.pickup, pickAddress: f.pickup, pickup: f.pickup }
+      : {}),
     driverComments: f.notes || undefined,
   };
   if (f.stepTimes && typeof f.stepTimes === 'object') out.stepTimes = f.stepTimes;

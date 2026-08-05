@@ -4263,6 +4263,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         }
         if (job.id && !String(job.id).startsWith('hail_') && !isProvisionalBookingId(job.id)) {
           try {
+            // Keep parity with pendingClosedJob flush — Closed Jobs UI reads
+            // allbookings for fare/timeline/vehicle; omitting them leaves blanks
+            // after a successful online complete.
+            const vehicleType = String(
+              closed.vehicleType || closed.vehicleTypeRequired || '',
+            ).trim();
             await markBookingCompleted(driver.companyId, job.id, {
               fare: totalFare,
               paymentType,
@@ -4273,6 +4279,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               dropoff: closed.dropoff,
               passengerName: closed.passengerName,
               passengerPhone: closed.passengerPhone,
+              stepTimes: closed.stepTimes as unknown as Record<string, unknown>,
+              fareBreakdown: closed.meterSnapshot?.breakdown
+                ? (closed.meterSnapshot.breakdown as unknown as Record<string, unknown>)
+                : undefined,
+              vehicleType: vehicleType || undefined,
               accountId: closed.accountId,
               accountName: closed.accountName,
             });
