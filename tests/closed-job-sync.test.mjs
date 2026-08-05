@@ -6,6 +6,7 @@ import {
   closedJobFieldsForJournal,
   extractClosedJobTripFields,
   pendingClosedJobMatches,
+  stepTimesToClosedMirrors,
 } from '../lib/closedJobSync.ts';
 
 const sampleJob = {
@@ -67,7 +68,11 @@ test('closedJobFieldsForJournal includes address mirrors used by history UI', ()
 });
 
 test('closedJobFieldsForCompleteApi uses server whitelist keys', () => {
-  const api = closedJobFieldsForCompleteApi(sampleJob);
+  const api = closedJobFieldsForCompleteApi({
+    ...sampleJob,
+    bookedAtMs: 1_700_000_000_000,
+    stepTimes: { acceptedAt: 1_700_000_100_000, onboardAt: 1_700_000_200_000, completeAt: 1_700_000_300_000 },
+  });
   assert.equal(api.pickupLat, -36.84);
   assert.equal(api.dropLat, -36.85);
   assert.equal(api.finalDropAddress, '88 Karangahape Rd');
@@ -75,10 +80,67 @@ test('closedJobFieldsForCompleteApi uses server whitelist keys', () => {
   assert.equal(api.PickAddress, '12 Queen St');
   assert.equal(api.driverComments, 'Gate code 1');
   assert.equal(api.VehicleType, 'Sedan');
-  assert.deepEqual(api.stepTimes, { onboardAt: 1 });
+  assert.equal(api.createdAt, 1_700_000_000_000);
+  assert.ok(api.DriverAcceptedAt);
+  assert.ok(api.OnBoardAt);
+  assert.ok(api.JobCompleteTime);
   assert.equal(api.fareBreakdown.flagFall, 3.5);
   assert.equal(api.waitingCost, 0.8);
   assert.equal(api.tariffName, 'Day');
+});
+
+test('complete API sends fareBreakdown after Payment-modal-style rebuild', () => {
+  // Mirror withCompleteFareBreakdown / calcMeterBreakdown arithmetic.
+  const flagFall = 3.5;
+  const distanceKm = 2.5;
+  const waitingMinutes = 1;
+  const distanceCharge = distanceKm * 2;
+  const waitingCharge = waitingMinutes * 0.8;
+  const breakdown = {
+    flagFall,
+    distanceKm,
+    distanceCharge,
+    waitingMinutes,
+    waitingCharge,
+    total: flagFall + distanceCharge + waitingCharge,
+  };
+  const rebuilt = {
+    ...sampleJob,
+    meterSnapshot: {
+      running: false,
+      paused: false,
+      mode: 'moving',
+      startedAt: 1,
+      finishedAt: 2,
+      pausedMs: 0,
+      movingMs: 1000,
+      waitingMs: 60000,
+      distanceKm: 2.5,
+      tariffId: 't1',
+      tariffName: 'Day',
+      tariffChanges: [],
+      breakdown,
+      fare: breakdown.total,
+    },
+  };
+  const api = closedJobFieldsForCompleteApi(rebuilt);
+  assert.equal(api.fareBreakdown.flagFall, 3.5);
+  assert.equal(api.fareBreakdown.distanceKm, 2.5);
+  assert.equal(api.fareBreakdown.waitingMinutes, 1);
+  assert.equal(api.fareBreakdown.total, breakdown.total);
+});
+
+test('stepTimesToClosedMirrors writes ISO timeline keys', () => {
+  const mirrors = stepTimesToClosedMirrors({
+    acceptedAt: 1_700_000_100_000,
+    arrivedAt: 1_700_000_200_000,
+    onboardAt: 1_700_000_300_000,
+    completeAt: 1_700_000_400_000,
+  });
+  assert.match(String(mirrors.DriverAcceptedAt), /T/);
+  assert.match(String(mirrors.ArrivedAt), /T/);
+  assert.match(String(mirrors.OnBoardAt), /T/);
+  assert.match(String(mirrors.JobCompleteTime), /T/);
 });
 
 test('closedJobFieldsForJournal includes meter + vehicle for offline rebuild', () => {

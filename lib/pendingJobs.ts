@@ -54,7 +54,9 @@ export function parseJobOfferRecord(
     passengerPhone: String(val.PhoneNo ?? val.passengerPhone ?? '').trim() || undefined,
     fixedFare: parseFiniteFare(val.Fare ?? val.fixedFare ?? val.estimatedFare),
     estimatedFare: parseFiniteFare(val.Fare ?? val.estimatedFare ?? val.fixedFare),
-    vehicleTypeRequired: String(val.VehicleType ?? val.vehicleType ?? ''),
+    vehicleTypeRequired: String(
+      val.VehicleType ?? val.vehicleType ?? val.jobvehicletype ?? val.jobVehicleType ?? '',
+    ).trim(),
     passengers: Number(val.Passengers ?? val.passengers ?? 1) || 1,
     serviceTypeRaw: serviceRaw,
     expiresAt: Date.now() + 3600000,

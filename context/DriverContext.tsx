@@ -118,6 +118,7 @@ import {
   applyTripFieldsToJob,
   closedJobFieldsForCompleteApi,
   closedJobFieldsForJournal,
+  stepTimesToClosedMirrors,
 } from '@/lib/closedJobSync';
 import { readDropoffAddress, readPickupAddress } from '@/lib/jobAddressFields';
 import {
@@ -205,6 +206,7 @@ import {
   completionErrorMessage,
   persistActiveJobAsync,
   persistMeterAsync,
+  withCompleteFareBreakdown,
 } from '@/lib/tripCompletionHelpers';
 import { JobStepTimes, PaymentExtras, TariffChangeRecord } from '@/types';
 import {
@@ -474,14 +476,40 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     dispatcherName: String(val.DispatcherName ?? val.dispatcherName ?? '').trim() || undefined,
     pickupLat: val.pickupLat != null ? Number(val.pickupLat) : val.lat != null ? Number(val.lat) : undefined,
     pickupLng: val.pickupLng != null ? Number(val.pickupLng) : val.lng != null ? Number(val.lng) : undefined,
-    dropoffLat: val.dropoffLat != null ? Number(val.dropoffLat) : undefined,
-    dropoffLng: val.dropoffLng != null ? Number(val.dropoffLng) : undefined,
+    dropoffLat:
+      val.dropoffLat != null
+        ? Number(val.dropoffLat)
+        : (() => {
+            const ll = String(val.DropLatLng ?? val.dropLatLng ?? '');
+            const [la] = ll.split(',').map((s) => parseFloat(s.trim()));
+            return Number.isFinite(la) ? la : undefined;
+          })(),
+    dropoffLng:
+      val.dropoffLng != null
+        ? Number(val.dropoffLng)
+        : (() => {
+            const ll = String(val.DropLatLng ?? val.dropLatLng ?? '');
+            const parts = ll.split(',').map((s) => parseFloat(s.trim()));
+            return Number.isFinite(parts[1]) ? parts[1] : undefined;
+          })(),
     silent: !!val.silent,
-    vehicleTypeRequired: val.VehicleType
-      ? String(val.VehicleType)
-      : val.vehicleType
-        ? String(val.vehicleType)
-        : undefined,
+    // Notification offers use jobvehicletype; pool/allbookings use VehicleType.
+    vehicleTypeRequired: (() => {
+      const raw =
+        val.VehicleType ??
+        val.vehicleType ??
+        val.jobvehicletype ??
+        val.jobVehicleType ??
+        val.vehicleTypeRequired;
+      const s = raw != null ? String(raw).trim() : '';
+      return s || undefined;
+    })(),
+    bookedAtMs: (() => {
+      const raw = val.createdAt ?? val.CreatedAt ?? val.bookedAt ?? val.BookedAt ?? val.postedAt;
+      if (raw == null) return undefined;
+      const n = typeof raw === 'number' ? raw : Date.parse(String(raw));
+      return Number.isFinite(n) ? n : undefined;
+    })(),
     passengers:
       val.Passengers != null
         ? Number(val.Passengers)
@@ -520,6 +548,7 @@ function isDispatchEnrouteOffersLocked(
 
 function defaultActiveJob(offer: JobOffer): ActiveJob {
   const now = Date.now();
+  const vehicleType = String(offer.vehicleTypeRequired || '').trim() || undefined;
   return {
     ...offer,
     stage: 'pickup',
@@ -529,6 +558,8 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
     fare: parseFiniteFare(offer.fixedFare) ?? parseFiniteFare(offer.estimatedFare) ?? 0,
     stepTimes: { acceptedAt: now },
     tariffChanges: [],
+    bookedAtMs: offer.bookedAtMs ?? offer.postedAt ?? now,
+    ...(vehicleType ? { vehicleType, vehicleTypeRequired: vehicleType } : {}),
   };
 }
 
@@ -4025,6 +4056,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       accountDetails?.accountName || job.accountName || '',
     ).trim();
 
+    const vehicleTypeForClosed = String(
+      job.vehicleType ||
+        job.vehicleTypeRequired ||
+        activeVehicle?.displayType ||
+        activeVehicle?.bodyType ||
+        '',
+    ).trim();
+
     let closed: ActiveJob = {
       ...job,
       stage: 'complete',
@@ -4032,6 +4071,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       paymentType: paymentType as PaymentType,
       ...(accountId ? { accountId } : {}),
       ...(accountName ? { accountName } : {}),
+      ...(vehicleTypeForClosed
+        ? { vehicleType: vehicleTypeForClosed, vehicleTypeRequired: vehicleTypeForClosed }
+        : {}),
       meterSnapshot: job.meterSnapshot ?? meterRef.current ?? undefined,
       distanceKm: job.meterSnapshot?.distanceKm ?? job.distanceKm,
       durationMin: job.meterSnapshot?.startedAt
@@ -4039,7 +4081,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             ((job.meterSnapshot.finishedAt ?? Date.now()) - job.meterSnapshot.startedAt) / 60000,
           )
         : job.durationMin,
+      bookedAtMs: job.bookedAtMs ?? job.postedAt ?? job.startedAt,
     };
+    // Persist the same Flag fall / Distance / Waiting / Total the Payment modal shows.
+    closed = withCompleteFareBreakdown(closed, selectedTariffRef.current);
 
     const offlineComplete = shouldOfflineJournalComplete(
       networkConnectedRef.current,
@@ -4269,6 +4314,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             const vehicleType = String(
               closed.vehicleType || closed.vehicleTypeRequired || '',
             ).trim();
+            const createdAtMs = closed.bookedAtMs ?? closed.postedAt ?? closed.startedAt;
             await markBookingCompleted(driver.companyId, job.id, {
               fare: totalFare,
               paymentType,
@@ -4280,12 +4326,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               passengerName: closed.passengerName,
               passengerPhone: closed.passengerPhone,
               stepTimes: closed.stepTimes as unknown as Record<string, unknown>,
+              stepTimeMirrors: stepTimesToClosedMirrors(closed.stepTimes),
               fareBreakdown: closed.meterSnapshot?.breakdown
                 ? (closed.meterSnapshot.breakdown as unknown as Record<string, unknown>)
                 : undefined,
               vehicleType: vehicleType || undefined,
               accountId: closed.accountId,
               accountName: closed.accountName,
+              createdAt: createdAtMs,
             });
           } catch (err) {
             console.warn('[Driver] markBookingCompleted failed:', err);
@@ -4901,17 +4949,76 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       if (activeJob) {
+        // Capture drop GPS when booking dropoff is empty / as-directed (parity with hail).
+        let dropoffAddress = String(activeJob.dropoff || '').trim();
+        let dropLat = activeJob.dropoffLat;
+        let dropLng = activeJob.dropoffLng;
+        if (!dropoffAddress || needsHailAddressResolve(dropoffAddress)) {
+          try {
+            const coords = await withTimeout(
+              getCurrentCoords(),
+              END_HAIL_GPS_TIMEOUT_MS,
+              'endTripDropGps',
+            );
+            if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+              dropLat = coords.lat;
+              dropLng = coords.lng;
+              dropoffAddress = await resolveReadableAddress(
+                {
+                  address: dropoffAddress || `Dropoff (${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)})`,
+                  lat: coords.lat,
+                  lng: coords.lng,
+                },
+                reverseGeocodeCoords,
+                { timeoutMs: GEOCODE_TIMEOUT_MS },
+              );
+            }
+          } catch (err) {
+            console.warn('[Driver] endTrip dropoff GPS/geocode skipped:', err);
+          }
+        }
+        if (
+          (!dropoffAddress || needsHailAddressResolve(dropoffAddress)) &&
+          driver?.companyId &&
+          isValidBookingId(activeJob.id) &&
+          !isProvisionalBookingId(activeJob.id)
+        ) {
+          try {
+            const fromBooking = await readBookingTripAddresses(
+              driver.companyId,
+              String(activeJob.id),
+            );
+            if (fromBooking?.dropoff) dropoffAddress = fromBooking.dropoff;
+          } catch {
+            /* ignore */
+          }
+        }
+
         const stepTimes: JobStepTimes = { ...activeJob.stepTimes, completeAt: now };
+        const vehicleType = String(
+          activeJob.vehicleType ||
+            activeJob.vehicleTypeRequired ||
+            activeVehicle?.displayType ||
+            activeVehicle?.bodyType ||
+            '',
+        ).trim();
         const updated: ActiveJob = {
           ...activeJob,
           stage: 'complete',
           stepTimes,
+          dropoff: dropoffAddress || activeJob.dropoff,
+          dropoffLat: dropLat,
+          dropoffLng: dropLng,
           meterSnapshot: snapshot ?? activeJob.meterSnapshot,
           fare: snapshot?.fare ?? activeJob.fare,
           distanceKm: snapshot?.distanceKm ?? activeJob.distanceKm,
           durationMin: snapshot?.startedAt
             ? Math.round((now - snapshot.startedAt) / 60000)
             : activeJob.durationMin,
+          bookedAtMs: activeJob.bookedAtMs ?? activeJob.postedAt ?? activeJob.startedAt,
+          ...(vehicleType
+            ? { vehicleType, vehicleTypeRequired: vehicleType }
+            : {}),
         };
         setPaymentJob(updated);
         setJobOffer(null);

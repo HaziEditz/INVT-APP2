@@ -73,6 +73,20 @@ export async function writeClosedJob(
       ? (meter.finishedAt ?? now) - meter.startedAt
       : undefined,
     stepTimes: job.stepTimes,
+    createdAt: job.bookedAtMs ?? job.postedAt ?? job.startedAt,
+    CreatedAt: job.bookedAtMs ?? job.postedAt ?? job.startedAt,
+    DriverAcceptedAt: job.stepTimes?.acceptedAt
+      ? new Date(job.stepTimes.acceptedAt).toISOString()
+      : undefined,
+    ArrivedAt: job.stepTimes?.arrivedAt
+      ? new Date(job.stepTimes.arrivedAt).toISOString()
+      : undefined,
+    OnBoardAt:
+      job.stepTimes?.onboardAt != null || job.stepTimes?.hailStartedAt != null
+        ? new Date(
+            (job.stepTimes.onboardAt ?? job.stepTimes.hailStartedAt) as number,
+          ).toISOString()
+        : undefined,
     tariffId: meter?.tariffId,
     tariffName: meter?.tariffName,
     tariffChanges: job.tariffChanges?.length ? job.tariffChanges : meter?.tariffChanges,

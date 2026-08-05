@@ -11,6 +11,7 @@ import {
   pendingClosedJobMatches,
   type PendingClosedJobRecord,
 } from '@/lib/closedJobSync';
+import { stepTimesToClosedMirrors } from '@/lib/closedJobSync';
 
 async function loadAll(): Promise<PendingClosedJobRecord[]> {
   const rows = (await getData<PendingClosedJobRecord[]>(STORAGE_KEYS.pendingClosedJobs)) ?? [];
@@ -141,12 +142,14 @@ export async function flushPendingClosedJobs(opts?: {
           passengerName: job.passengerName,
           passengerPhone: job.passengerPhone,
           stepTimes: job.stepTimes as unknown as Record<string, unknown>,
+          stepTimeMirrors: stepTimesToClosedMirrors(job.stepTimes),
           fareBreakdown: job.meterSnapshot?.breakdown
             ? (job.meterSnapshot.breakdown as unknown as Record<string, unknown>)
             : undefined,
           vehicleType: vehicleType || undefined,
           accountId: job.accountId,
           accountName: job.accountName,
+          createdAt: job.bookedAtMs ?? job.postedAt ?? job.startedAt,
         });
       } catch (err) {
         console.warn('[pendingClosedJob] markBookingCompleted failed:', err);

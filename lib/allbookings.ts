@@ -38,10 +38,12 @@ export async function markBookingCompleted(
     passengerName?: string;
     passengerPhone?: string;
     stepTimes?: Record<string, unknown>;
+    stepTimeMirrors?: Record<string, unknown>;
     fareBreakdown?: Record<string, unknown> | null;
     vehicleType?: string;
     accountId?: string;
     accountName?: string;
+    createdAt?: number;
   },
 ): Promise<void> {
   if (!companyId || !bookingId) return;
@@ -55,6 +57,20 @@ export async function markBookingCompleted(
     payload.fareBreakdown && typeof payload.fareBreakdown === 'object'
       ? payload.fareBreakdown
       : undefined;
+  const distanceKm =
+    typeof payload.distanceKm === 'number' && Number.isFinite(payload.distanceKm)
+      ? payload.distanceKm
+      : undefined;
+  const createdAt =
+    typeof payload.createdAt === 'number' && Number.isFinite(payload.createdAt)
+      ? payload.createdAt
+      : undefined;
+  const mirrors =
+    payload.stepTimeMirrors && typeof payload.stepTimeMirrors === 'object'
+      ? payload.stepTimeMirrors
+      : {};
+
+  // Never pass undefined into Firebase update() — it rejects the whole write.
   await update(ref(database, `allbookings/${companyId}/${bookingId}`), {
     status: 'completed',
     jobstatus: 'completed',
@@ -65,8 +81,9 @@ export async function markBookingCompleted(
     paymentMethod: payload.paymentType,
     driverId: payload.driverId,
     completedAt: payload.completedAt,
-    distanceKm: payload.distanceKm,
     updatedAt: payload.completedAt,
+    ...(distanceKm != null ? { distanceKm } : {}),
+    ...(createdAt != null ? { createdAt, CreatedAt: createdAt } : {}),
     ...(pickup
       ? { PickAddress: pickup, pickup, pickupAddress: pickup }
       : {}),
@@ -82,6 +99,7 @@ export async function markBookingCompleted(
     ...(payload.stepTimes && typeof payload.stepTimes === 'object'
       ? { stepTimes: payload.stepTimes }
       : {}),
+    ...mirrors,
     ...(breakdown
       ? { fareBreakdown: breakdown, FareBreakdown: breakdown }
       : {}),

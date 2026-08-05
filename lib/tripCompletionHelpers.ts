@@ -1,6 +1,6 @@
-import { ActiveJob, MeterState, Tariff } from '@/types';
-import { NO_TARIFF_CONFIGURED } from '@/lib/tariffs';
-import { STORAGE_KEYS, storeData } from '@/lib/storage';
+import type { ActiveJob, MeterFareBreakdown, MeterState, Tariff } from '../types/index.ts';
+import { NO_TARIFF_CONFIGURED } from './tariffs.ts';
+import { STORAGE_KEYS, storeData } from './storage.ts';
 import { formatEndTripError } from './endHailPolicy.ts';
 
 /** Strip heavy GPS polyline from persisted copies — keeps AsyncStorage writes fast. */
@@ -90,6 +90,65 @@ export function computePaymentFareSummary(
     ratePerKm,
     waitingPerMin,
     tripTotal: safeTripTotal,
+  };
+}
+
+/**
+ * Same arithmetic the Payment modal shows — so Closed Jobs persist the
+ * displayed fare even when meterSnapshot.breakdown was never stamped.
+ */
+export function buildCompleteFareBreakdown(
+  paymentJob: ActiveJob,
+  selectedTariff: Tariff | null | undefined,
+): MeterFareBreakdown {
+  const summary = computePaymentFareSummary(paymentJob, selectedTariff);
+  return {
+    flagFall: summary.flagFall,
+    distanceKm: summary.distanceKm,
+    distanceCharge: summary.distanceCharge,
+    waitingMinutes: summary.waitingMin,
+    waitingCharge: summary.waitingCharge,
+    total: summary.tripTotal,
+  };
+}
+
+/** Ensure meterSnapshot carries a breakdown matching Payment modal math. */
+export function withCompleteFareBreakdown(
+  job: ActiveJob,
+  selectedTariff: Tariff | null | undefined,
+): ActiveJob {
+  const breakdown = buildCompleteFareBreakdown(job, selectedTariff);
+  const meter = job.meterSnapshot;
+  const nextMeter: MeterState = meter
+    ? {
+        ...meter,
+        breakdown,
+        fare: breakdown.total,
+        distanceKm: meter.distanceKm || breakdown.distanceKm,
+        finishedAt: meter.finishedAt ?? Date.now(),
+        running: false,
+      }
+    : {
+        running: false,
+        paused: false,
+        mode: 'waiting',
+        startedAt: job.startedAt || Date.now(),
+        finishedAt: Date.now(),
+        pausedMs: 0,
+        movingMs: 0,
+        waitingMs: breakdown.waitingMinutes * 60000,
+        distanceKm: breakdown.distanceKm,
+        tariffId: selectedTariff?.id || '',
+        tariffName: selectedTariff?.name || '',
+        tariffChanges: job.tariffChanges || [],
+        breakdown,
+        fare: breakdown.total,
+      };
+  return {
+    ...job,
+    distanceKm: job.distanceKm || breakdown.distanceKm,
+    fare: breakdown.total,
+    meterSnapshot: nextMeter,
   };
 }
 

@@ -1,6 +1,37 @@
 import { firstNonEmptyString } from './jobAddressFields.ts';
 import type { ActiveJob, PaymentExtras, TmPaymentDetails } from '../types/index.ts';
 
+/** Flatten stepTimes into Closed Jobs timeline top-level keys. */
+export function stepTimesToClosedMirrors(
+  stepTimes: ActiveJob['stepTimes'] | undefined,
+): Record<string, unknown> {
+  if (!stepTimes || typeof stepTimes !== 'object') return {};
+  const out: Record<string, unknown> = {};
+  if (stepTimes.acceptedAt != null) {
+    out.DriverAcceptedAt = new Date(stepTimes.acceptedAt).toISOString();
+    out.driverAcceptedAt = stepTimes.acceptedAt;
+  }
+  if (stepTimes.onWayAt != null) {
+    out.OnTheWayAt = new Date(stepTimes.onWayAt).toISOString();
+    out.onTheWayAt = stepTimes.onWayAt;
+  }
+  if (stepTimes.arrivedAt != null) {
+    out.ArrivedAt = new Date(stepTimes.arrivedAt).toISOString();
+    out.arrivedAt = stepTimes.arrivedAt;
+  }
+  if (stepTimes.onboardAt != null || stepTimes.hailStartedAt != null) {
+    const onboard = stepTimes.onboardAt ?? stepTimes.hailStartedAt!;
+    out.OnBoardAt = new Date(onboard).toISOString();
+    out.onBoardAt = onboard;
+    out.ActiveAt = out.OnBoardAt;
+  }
+  if (stepTimes.completeAt != null || stepTimes.hailEndedAt != null) {
+    const done = stepTimes.completeAt ?? stepTimes.hailEndedAt!;
+    out.JobCompleteTime = new Date(done).toISOString();
+  }
+  return out;
+}
+
 /** Fields Closed Jobs / history need that payment-only complete used to drop. */
 export type ClosedJobTripFields = {
   pickup: string;
@@ -128,7 +159,10 @@ export function closedJobFieldsForCompleteApi(job: ActiveJob): Record<string, un
       : {}),
     driverComments: f.notes || undefined,
   };
-  if (f.stepTimes && typeof f.stepTimes === 'object') out.stepTimes = f.stepTimes;
+  if (f.stepTimes && typeof f.stepTimes === 'object') {
+    out.stepTimes = f.stepTimes;
+    Object.assign(out, stepTimesToClosedMirrors(f.stepTimes));
+  }
   if (vehicleType) {
     out.VehicleType = vehicleType;
     out.vehicleType = vehicleType;
@@ -146,6 +180,14 @@ export function closedJobFieldsForCompleteApi(job: ActiveJob): Record<string, un
       out.waitingMinutes = breakdown.waitingMinutes;
       out.waitingTimeMinutes = breakdown.waitingMinutes;
     }
+  }
+  const createdAtMs =
+    numOrUndef(job.bookedAtMs) ??
+    numOrUndef((job as ActiveJob & { createdAt?: number }).createdAt) ??
+    numOrUndef(job.postedAt);
+  if (createdAtMs != null) {
+    out.createdAt = createdAtMs;
+    out.CreatedAt = createdAtMs;
   }
   const tariffId = job.meterSnapshot?.tariffId;
   const tariffName = job.meterSnapshot?.tariffName;
