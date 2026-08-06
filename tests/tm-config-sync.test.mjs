@@ -7,12 +7,14 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  calcTmPaymentBreakdown,
   mapCouncilRecordToCompanyTmConfig,
   parseTmConfigRecord,
 } from '../lib/tmConfigLogic.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const saRoot = join(root, '..', 'INVT-superadmin', 'taxitime.co.nz', 'superadmin360taxi');
+const saSrcRoot = join(root, '..', 'INVT-superadmin', 'src', 'routes');
 const adminRoot = join(root, '..', 'INVT-admin');
 
 test('parseTmConfigRecord accepts council and company field aliases', () => {
@@ -92,4 +94,62 @@ test('owner panel removes TM Tariffs from nav and marks page legacy', () => {
     src,
     /These are used for billing and council claims/,
   );
+});
+
+test('council portal Operators labels tmTariffs as legacy / unused', () => {
+  const src = readFileSync(join(saSrcRoot, 'council.ts'), 'utf8');
+  assert.match(src, /legacy \/ unused/i);
+  assert.match(src, /Not used for live metering/);
+  assert.match(src, /tmTariffs\//);
+});
+
+test('council portal card limits use SA usageLimitMonthly / usageLimitDaily', () => {
+  const src = readFileSync(join(saSrcRoot, 'council.ts'), 'utf8');
+  assert.match(src, /usageLimitMonthly/);
+  assert.match(src, /usageLimitDaily/);
+  assert.match(src, /name="usageLimitMonthly"/);
+  assert.match(src, /name="usageLimitDaily"/);
+  assert.match(src, /patch\.usageLimitMonthly\s*=/);
+  assert.match(src, /patch\.usageLimitDaily\s*=/);
+  // Form must not post the old portal-only dollar schema keys.
+  assert.doesNotMatch(src, /name="monthlyLimit"/);
+  assert.doesNotMatch(src, /name="maxFarePerTrip"/);
+  assert.doesNotMatch(src, /name="defaultMonthlyLimit"/);
+  assert.doesNotMatch(src, /name="defaultMaxFarePerTrip"/);
+});
+
+test('calcTmPaymentBreakdown keeps hoist out of meter %/cap split', () => {
+  const cfg = {
+    councilSubsidyPercent: 65,
+    councilCapAmount: 26,
+    hoistCostPerUnit: 10,
+  };
+  // Meter $40 → 65% = $26 (hits cap). Hoist 2×$10 = $20 full council.
+  const b = calcTmPaymentBreakdown(40, 2, cfg);
+  assert.equal(b.meterFare, 40);
+  assert.equal(b.councilPaysMeter, 26);
+  assert.equal(b.passengerPaysMeter, 14);
+  assert.equal(b.hoistTotal, 20);
+  assert.equal(b.councilPaysHoist, 20);
+  assert.equal(b.passengerPaysHoist, 0);
+  assert.equal(b.councilPays, 46); // 26 + 20
+  assert.equal(b.passengerPays, 14); // hoist never charged to passenger
+  assert.equal(b.totalFare, 60);
+  // Regression: old bug applied %/cap to meter+hoist ($60 → would change passenger share).
+  const wronglyOnCombined = calcTmPaymentBreakdown(60, 0, cfg);
+  assert.notEqual(b.passengerPays, wronglyOnCombined.passengerPays);
+});
+
+test('Phase 2A.1 portal config edit + audit + hoist 100% council', () => {
+  const src = readFileSync(join(saSrcRoot, 'council.ts'), 'utf8');
+  assert.match(src, /council-portal\/config/);
+  assert.match(src, /tmConfigAudit/);
+  assert.match(src, /byRole:\s*'council'/);
+  assert.match(src, /hoistCoveredByCouncil:\s*true/);
+  assert.match(src, /Meter Subsidy/);
+  assert.match(src, /Hoist \(council\)/);
+  const saCfg = readFileSync(join(saRoot, 'TM-Council-Config.aspx'), 'utf8');
+  assert.match(saCfg, /100% council-paid/i);
+  assert.match(saCfg, /tmConfigAudit/);
+  assert.doesNotMatch(saCfg, /<option value="false">Passenger<\/option>/);
 });

@@ -111,6 +111,12 @@ export async function writeClosedJob(
       ? {
           tmCouncilPays: tmDetails.councilPays,
           tmPassengerPays: tmDetails.passengerPays,
+          tmMeterFare: tmDetails.meterFare ?? undefined,
+          tmSubsidyFare: tmDetails.tmSubsidyFare ?? undefined,
+          tmSubsidyHoist: tmDetails.tmSubsidyHoist ?? tmDetails.hoistTotal ?? undefined,
+          hoistTotal: tmDetails.hoistTotal ?? undefined,
+          hoistCount: tmDetails.hoistCount ?? undefined,
+          tmHoistCount: tmDetails.hoistCount ?? undefined,
           tmCardNumber: tmDetails.tmCardNumber ?? '',
           tmCardName: tmDetails.tmCardName ?? '',
           tmCardExpiry: tmDetails.tmCardExpiry ?? '',

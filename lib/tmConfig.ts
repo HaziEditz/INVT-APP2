@@ -2,15 +2,18 @@ import { get, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import {
+  calcTmPaymentBreakdown,
   calcTmSplit,
   DEFAULT_TM_CONFIG,
   mapCouncilRecordToCompanyTmConfig,
   parseTmConfigRecord,
   type TmConfig,
+  type TmPaymentBreakdown,
 } from '@/lib/tmConfigLogic';
 
-export type { TmConfig };
+export type { TmConfig, TmPaymentBreakdown };
 export {
+  calcTmPaymentBreakdown,
   calcTmSplit,
   DEFAULT_TM_CONFIG,
   mapCouncilRecordToCompanyTmConfig,

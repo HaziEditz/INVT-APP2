@@ -339,11 +339,22 @@ export interface PaymentExtras {
 }
 
 export interface TmPaymentDetails {
+  /** Total council pays (meter subsidy + hoist). */
   councilPays: number;
+  /** Passenger collect amount (meter share only; hoist is never passenger-paid). */
   passengerPays: number;
+  /** Meter + extras only (no hoist) — base for %/cap split. */
+  meterFare?: number;
+  /** Subsidy on meter fare only. */
+  tmSubsidyFare?: number;
+  /** Hoist fee — 100% council. */
+  hoistTotal?: number;
+  tmSubsidyHoist?: number;
+  hoistCount?: number;
   tmCardNumber?: string;
   tmCardName?: string;
   tmCardExpiry?: string;
+  /** Grand total (meter + hoist). */
   totalFare: number;
 }
 

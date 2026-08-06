@@ -9,7 +9,7 @@ import {
 } from '@/lib/accountCache';
 import { searchBusinessAccounts, type DriverAccountSearchHit } from '@/lib/dispatchApi';
 import { normalizeDriverPaymentType } from '@/lib/driverPayment';
-import { calcTmSplit, loadTmConfig, TmConfig } from '@/lib/tmConfig';
+import { calcTmPaymentBreakdown, loadTmConfig, TmConfig } from '@/lib/tmConfig';
 import { computePaymentFareSummary, completionErrorMessage } from '@/lib/tripCompletionHelpers';
 import {
   DRIVER_PAYMENT_TYPES,
@@ -344,13 +344,33 @@ export function PaymentModal() {
 
   const hoistUnits = isTmPayment && isWav ? Math.max(0, parseInt(hoistCount, 10) || 0) : 0;
   const hoistCostPerUnit = tmConfig?.hoistCostPerUnit ?? 0;
-  const hoistTotal = +(hoistUnits * hoistCostPerUnit).toFixed(2);
-
-  const subtotal = +(fare.tripTotal + extrasTotal + hoistTotal).toFixed(2);
-  const tmSplit =
+  /** Meter + extras only — hoist must NOT enter the %/cap split (NZ TM / Phase 2A.1). */
+  const meterSubtotal = +(fare.tripTotal + extrasTotal).toFixed(2);
+  const tmBreakdown =
     isTmPayment && tmConfig
-      ? calcTmSplit(subtotal, tmConfig)
-      : { councilPays: 0, passengerPays: subtotal };
+      ? calcTmPaymentBreakdown(meterSubtotal, hoistUnits, tmConfig)
+      : null;
+  const hoistTotal = tmBreakdown?.hoistTotal ?? +(hoistUnits * hoistCostPerUnit).toFixed(2);
+  const subtotal = tmBreakdown
+    ? tmBreakdown.totalFare
+    : +(meterSubtotal + hoistTotal).toFixed(2);
+  const tmSplit = tmBreakdown
+    ? {
+        councilPays: tmBreakdown.councilPays,
+        passengerPays: tmBreakdown.passengerPays,
+        councilPaysMeter: tmBreakdown.councilPaysMeter,
+        passengerPaysMeter: tmBreakdown.passengerPaysMeter,
+        councilPaysHoist: tmBreakdown.councilPaysHoist,
+        meterFare: tmBreakdown.meterFare,
+      }
+    : {
+        councilPays: 0,
+        passengerPays: subtotal,
+        councilPaysMeter: 0,
+        passengerPaysMeter: subtotal,
+        councilPaysHoist: 0,
+        meterFare: meterSubtotal,
+      };
   const totalDue = isTmPayment ? tmSplit.passengerPays : subtotal;
 
   const builtExtras: PaymentExtras = {
@@ -408,6 +428,11 @@ export function PaymentModal() {
         tmDetails = {
           councilPays: tmSplit.councilPays,
           passengerPays: tmSplit.passengerPays,
+          meterFare: tmSplit.meterFare,
+          tmSubsidyFare: tmSplit.councilPaysMeter,
+          hoistTotal: hoistTotal > 0 ? hoistTotal : undefined,
+          tmSubsidyHoist: hoistTotal > 0 ? hoistTotal : undefined,
+          hoistCount: hoistUnits > 0 ? hoistUnits : undefined,
           tmCardNumber: tmCardNumber.trim() || undefined,
           tmCardExpiry: tmCardExpiry.trim() || undefined,
           totalFare: subtotal,
@@ -622,13 +647,55 @@ export function PaymentModal() {
       case 'TM':
         return (
           <View style={styles.detailsBlock}>
+            <Text style={styles.subSection}>Meter fare (subsidy applies)</Text>
             <View style={styles.tmRow}>
-              <Text style={styles.tmLabel}>Council pays</Text>
-              <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPays)}</Text>
+              <Text style={styles.tmLabel}>Meter + extras</Text>
+              <Text style={styles.tmValue}>{fmtMoney(tmSplit.meterFare)}</Text>
             </View>
             <View style={styles.tmRow}>
-              <Text style={styles.tmLabel}>Passenger pays</Text>
-              <Text style={[styles.tmValue, styles.tmPassenger]}>{fmtMoney(tmSplit.passengerPays)}</Text>
+              <Text style={styles.tmLabel}>Council (meter subsidy)</Text>
+              <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPaysMeter)}</Text>
+            </View>
+            <View style={styles.tmRow}>
+              <Text style={styles.tmLabel}>Passenger (meter share)</Text>
+              <Text style={[styles.tmValue, styles.tmPassenger]}>
+                {fmtMoney(tmSplit.passengerPaysMeter)}
+              </Text>
+            </View>
+            {isWav ? (
+              <View style={styles.hoistBlock}>
+                <Text style={styles.subSection}>Hoist (100% council — not in split)</Text>
+                <View style={styles.fieldRow}>
+                  <TextInput
+                    style={[styles.field, styles.fieldHalf]}
+                    placeholder="Quantity"
+                    placeholderTextColor={Colors.textMuted}
+                    keyboardType="number-pad"
+                    value={hoistCount}
+                    onChangeText={setHoistCount}
+                  />
+                  <Text style={styles.hoistRate}>
+                    {fmtMoney(hoistCostPerUnit)} / use
+                  </Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Hoist fee (council)</Text>
+                  <Text style={styles.tmValue}>{fmtMoney(hoistTotal)}</Text>
+                </View>
+                <Text style={styles.hint}>Passenger pays $0 toward hoist.</Text>
+              </View>
+            ) : null}
+            <View style={[styles.tmRow, { marginTop: 8 }]}>
+              <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Total council</Text>
+              <Text style={[styles.tmValue, { fontWeight: '700' }]}>
+                {fmtMoney(tmSplit.councilPays)}
+              </Text>
+            </View>
+            <View style={styles.tmRow}>
+              <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Collect from passenger</Text>
+              <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
+                {fmtMoney(tmSplit.passengerPays)}
+              </Text>
             </View>
             <TextInput
               style={styles.field}
@@ -645,27 +712,6 @@ export function PaymentModal() {
               value={tmCardExpiry}
               onChangeText={setTmCardExpiry}
             />
-            {isWav ? (
-              <View style={styles.hoistBlock}>
-                <Text style={styles.subSection}>Hoist (WAV)</Text>
-                <View style={styles.fieldRow}>
-                  <TextInput
-                    style={[styles.field, styles.fieldHalf]}
-                    placeholder="Quantity"
-                    placeholderTextColor={Colors.textMuted}
-                    keyboardType="number-pad"
-                    value={hoistCount}
-                    onChangeText={setHoistCount}
-                  />
-                  <Text style={styles.hoistRate}>
-                    {fmtMoney(hoistCostPerUnit)} / unit
-                  </Text>
-                </View>
-                {hoistTotal > 0 ? (
-                  <Text style={styles.hint}>Hoist total: {fmtMoney(hoistTotal)}</Text>
-                ) : null}
-              </View>
-            ) : null}
             <Dropdown
               label="Passenger pays remaining via"
               value={tmPassengerPaymentType}
@@ -907,8 +953,9 @@ export function PaymentModal() {
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           {isTmPayment ? (
             <Text style={styles.footerNote}>
-              Council {fmtMoney(tmSplit.councilPays)} · Collect from passenger{' '}
-              {fmtMoney(tmSplit.passengerPays)}
+              Meter subsidy {fmtMoney(tmSplit.councilPaysMeter)}
+              {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}
+              {' · '}Collect {fmtMoney(tmSplit.passengerPays)}
             </Text>
           ) : extrasTotal > 0 || hoistTotal > 0 ? (
             <Text style={styles.footerNote}>
