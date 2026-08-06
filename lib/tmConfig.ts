@@ -2,22 +2,27 @@ import { get, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import {
+  buildTmHoistEntries,
   calcTmPaymentBreakdown,
   calcTmSplit,
   DEFAULT_TM_CONFIG,
   mapCouncilRecordToCompanyTmConfig,
   parseTmConfigRecord,
+  resolvePrimaryTmCard,
   type TmConfig,
+  type TmHoistEntry,
   type TmPaymentBreakdown,
 } from '@/lib/tmConfigLogic';
 
-export type { TmConfig, TmPaymentBreakdown };
+export type { TmConfig, TmHoistEntry, TmPaymentBreakdown };
 export {
+  buildTmHoistEntries,
   calcTmPaymentBreakdown,
   calcTmSplit,
   DEFAULT_TM_CONFIG,
   mapCouncilRecordToCompanyTmConfig,
   parseTmConfigRecord,
+  resolvePrimaryTmCard,
 };
 
 export function tmConfigStorageKey(companyId: string): string {

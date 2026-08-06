@@ -338,6 +338,13 @@ export interface PaymentExtras {
   accPoNo?: string;
 }
 
+/** Per-passenger hoist use (1× council rate each), Phase 2A.2. */
+export interface TmHoistEntryDetails {
+  cardNumber: string;
+  cardExpiry?: string;
+  amount: number;
+}
+
 export interface TmPaymentDetails {
   /** Total council pays (meter subsidy + hoist). */
   councilPays: number;
@@ -351,6 +358,8 @@ export interface TmPaymentDetails {
   hoistTotal?: number;
   tmSubsidyHoist?: number;
   hoistCount?: number;
+  /** One entry per hoist use / wheelchair passenger card. */
+  tmHoists?: TmHoistEntryDetails[];
   tmCardNumber?: string;
   tmCardName?: string;
   tmCardExpiry?: string;

@@ -9,7 +9,13 @@ import {
 } from '@/lib/accountCache';
 import { searchBusinessAccounts, type DriverAccountSearchHit } from '@/lib/dispatchApi';
 import { normalizeDriverPaymentType } from '@/lib/driverPayment';
-import { calcTmPaymentBreakdown, loadTmConfig, TmConfig } from '@/lib/tmConfig';
+import {
+  buildTmHoistEntries,
+  calcTmPaymentBreakdown,
+  loadTmConfig,
+  resolvePrimaryTmCard,
+  TmConfig,
+} from '@/lib/tmConfig';
 import { computePaymentFareSummary, completionErrorMessage } from '@/lib/tripCompletionHelpers';
 import {
   DRIVER_PAYMENT_TYPES,
@@ -144,7 +150,10 @@ export function PaymentModal() {
   const [accPoNo, setAccPoNo] = useState('');
   const [tmCardNumber, setTmCardNumber] = useState('');
   const [tmCardExpiry, setTmCardExpiry] = useState('');
-  const [hoistCount, setHoistCount] = useState('0');
+  /** WAV: one row per hoist use / wheelchair passenger (1× rate each). */
+  const [hoistRows, setHoistRows] = useState<{ key: string; cardNumber: string; cardExpiry: string }[]>(
+    [],
+  );
 
   const isTmPayment = paymentType === 'TM';
   const isWav = !!activeVehicle?.isWav;
@@ -189,7 +198,7 @@ export function PaymentModal() {
     setAccPoNo('');
     setTmCardNumber('');
     setTmCardExpiry('');
-    setHoistCount('0');
+    setHoistRows([]);
   }, [paymentJob?.id]);
 
   useEffect(() => {
@@ -342,8 +351,11 @@ export function PaymentModal() {
     extrasTotal += parseFloat(eftposSurchargeAmt) || 0;
   }
 
-  const hoistUnits = isTmPayment && isWav ? Math.max(0, parseInt(hoistCount, 10) || 0) : 0;
   const hoistCostPerUnit = tmConfig?.hoistCostPerUnit ?? 0;
+  const tmHoistEntries =
+    isTmPayment && isWav ? buildTmHoistEntries(hoistRows, hoistCostPerUnit) : [];
+  /** Count = number of hoist rows with a card (1× rate each). */
+  const hoistUnits = tmHoistEntries.length;
   /** Meter + extras only — hoist must NOT enter the %/cap split (NZ TM / Phase 2A.1). */
   const meterSubtotal = +(fare.tripTotal + extrasTotal).toFixed(2);
   const tmBreakdown =
@@ -425,6 +437,15 @@ export function PaymentModal() {
     try {
       let tmDetails: TmPaymentDetails | undefined;
       if (isTmPayment) {
+        if (isWav && hoistRows.some((r) => !String(r.cardNumber || '').trim())) {
+          Alert.alert(
+            'Hoist card required',
+            'Each hoist entry needs its own TM card number (one wheelchair passenger per row).',
+          );
+          setSubmitting(false);
+          return;
+        }
+        const primary = resolvePrimaryTmCard(tmCardNumber, tmCardExpiry, tmHoistEntries);
         tmDetails = {
           councilPays: tmSplit.councilPays,
           passengerPays: tmSplit.passengerPays,
@@ -433,8 +454,9 @@ export function PaymentModal() {
           hoistTotal: hoistTotal > 0 ? hoistTotal : undefined,
           tmSubsidyHoist: hoistTotal > 0 ? hoistTotal : undefined,
           hoistCount: hoistUnits > 0 ? hoistUnits : undefined,
-          tmCardNumber: tmCardNumber.trim() || undefined,
-          tmCardExpiry: tmCardExpiry.trim() || undefined,
+          tmHoists: tmHoistEntries.length ? tmHoistEntries : undefined,
+          tmCardNumber: primary.tmCardNumber,
+          tmCardExpiry: primary.tmCardExpiry,
           totalFare: subtotal,
         };
       }
@@ -662,24 +684,92 @@ export function PaymentModal() {
                 {fmtMoney(tmSplit.passengerPaysMeter)}
               </Text>
             </View>
+            <Text style={[styles.subSection, { marginTop: 10 }]}>Primary TM card (optional)</Text>
+            <Text style={styles.hint}>
+              Leave blank if every passenger is on a hoist row — the first hoist card is used as
+              primary. Does not reduce hoist fees.
+            </Text>
+            <TextInput
+              style={styles.field}
+              placeholder="TM card number"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="number-pad"
+              value={tmCardNumber}
+              onChangeText={setTmCardNumber}
+            />
+            <TextInput
+              style={styles.field}
+              placeholder="TM card expiry MM/YY"
+              placeholderTextColor={Colors.textMuted}
+              value={tmCardExpiry}
+              onChangeText={setTmCardExpiry}
+            />
             {isWav ? (
               <View style={styles.hoistBlock}>
-                <Text style={styles.subSection}>Hoist (100% council — not in split)</Text>
-                <View style={styles.fieldRow}>
-                  <TextInput
-                    style={[styles.field, styles.fieldHalf]}
-                    placeholder="Quantity"
-                    placeholderTextColor={Colors.textMuted}
-                    keyboardType="number-pad"
-                    value={hoistCount}
-                    onChangeText={setHoistCount}
-                  />
-                  <Text style={styles.hoistRate}>
-                    {fmtMoney(hoistCostPerUnit)} / use
-                  </Text>
-                </View>
+                <Text style={styles.subSection}>
+                  Hoist passengers (100% council · {fmtMoney(hoistCostPerUnit)} / use)
+                </Text>
+                <Text style={styles.hint}>
+                  Add one row per wheelchair passenger. Each gets a full hoist fee on their own
+                  card.
+                </Text>
+                {hoistRows.map((row, idx) => (
+                  <View key={row.key} style={styles.hoistRow}>
+                    <Text style={styles.hoistRowLabel}>Hoist {idx + 1}</Text>
+                    <TextInput
+                      style={styles.field}
+                      placeholder="TM card number *"
+                      placeholderTextColor={Colors.textMuted}
+                      keyboardType="number-pad"
+                      value={row.cardNumber}
+                      onChangeText={(v) =>
+                        setHoistRows((prev) =>
+                          prev.map((r) => (r.key === row.key ? { ...r, cardNumber: v } : r)),
+                        )
+                      }
+                    />
+                    <TextInput
+                      style={styles.field}
+                      placeholder="Expiry MM/YY (optional)"
+                      placeholderTextColor={Colors.textMuted}
+                      value={row.cardExpiry}
+                      onChangeText={(v) =>
+                        setHoistRows((prev) =>
+                          prev.map((r) => (r.key === row.key ? { ...r, cardExpiry: v } : r)),
+                        )
+                      }
+                    />
+                    <View style={styles.hoistRowFooter}>
+                      <Text style={styles.hoistRate}>{fmtMoney(hoistCostPerUnit)} council</Text>
+                      <TouchableOpacity
+                        onPress={() =>
+                          setHoistRows((prev) => prev.filter((r) => r.key !== row.key))
+                        }
+                      >
+                        <Text style={styles.hoistRemove}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+                <TouchableOpacity
+                  style={styles.hoistAddBtn}
+                  onPress={() =>
+                    setHoistRows((prev) => [
+                      ...prev,
+                      {
+                        key: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                        cardNumber: '',
+                        cardExpiry: '',
+                      },
+                    ])
+                  }
+                >
+                  <Text style={styles.hoistAddText}>+ Add hoist passenger</Text>
+                </TouchableOpacity>
                 <View style={styles.tmRow}>
-                  <Text style={styles.tmLabel}>Hoist fee (council)</Text>
+                  <Text style={styles.tmLabel}>
+                    Hoist fee ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
+                  </Text>
                   <Text style={styles.tmValue}>{fmtMoney(hoistTotal)}</Text>
                 </View>
                 <Text style={styles.hint}>Passenger pays $0 toward hoist.</Text>
@@ -697,21 +787,6 @@ export function PaymentModal() {
                 {fmtMoney(tmSplit.passengerPays)}
               </Text>
             </View>
-            <TextInput
-              style={styles.field}
-              placeholder="TM card number"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              value={tmCardNumber}
-              onChangeText={setTmCardNumber}
-            />
-            <TextInput
-              style={styles.field}
-              placeholder="TM card expiry MM/YY"
-              placeholderTextColor={Colors.textMuted}
-              value={tmCardExpiry}
-              onChangeText={setTmCardExpiry}
-            />
             <Dropdown
               label="Passenger pays remaining via"
               value={tmPassengerPaymentType}
@@ -1177,6 +1252,43 @@ const styles = StyleSheet.create({
   hoistBlock: {
     marginTop: 4,
     gap: 8,
+  },
+  hoistRow: {
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    padding: 10,
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  hoistRowLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textMuted,
+  },
+  hoistRowFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  hoistRemove: {
+    color: Colors.danger,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  hoistAddBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.tm,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+  },
+  hoistAddText: {
+    color: Colors.tm,
+    fontSize: 14,
+    fontWeight: '700',
   },
   hoistRate: {
     color: Colors.textMuted,

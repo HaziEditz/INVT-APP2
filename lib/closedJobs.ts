@@ -117,6 +117,7 @@ export async function writeClosedJob(
           hoistTotal: tmDetails.hoistTotal ?? undefined,
           hoistCount: tmDetails.hoistCount ?? undefined,
           tmHoistCount: tmDetails.hoistCount ?? undefined,
+          tmHoists: tmDetails.tmHoists?.length ? tmDetails.tmHoists : undefined,
           tmCardNumber: tmDetails.tmCardNumber ?? '',
           tmCardName: tmDetails.tmCardName ?? '',
           tmCardExpiry: tmDetails.tmCardExpiry ?? '',

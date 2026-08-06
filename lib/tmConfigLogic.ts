@@ -106,3 +106,46 @@ export function calcTmPaymentBreakdown(
     totalFare: +(meter + hoistTotal).toFixed(2),
   };
 }
+
+/** One hoist use = 1× council rate, tied to one TM card (Phase 2A.2 / NZ TM). */
+export type TmHoistEntry = {
+  cardNumber: string;
+  cardExpiry?: string;
+  /** Always 1 × rate; stored for audit clarity. */
+  amount: number;
+};
+
+export function buildTmHoistEntries(
+  rows: readonly { cardNumber?: string; cardExpiry?: string }[],
+  hoistCostPerUnit: number,
+): TmHoistEntry[] {
+  const rate = Math.max(0, Number(hoistCostPerUnit) || 0);
+  return (rows || [])
+    .map((r) => ({
+      cardNumber: String(r?.cardNumber || '').trim(),
+      cardExpiry: String(r?.cardExpiry || '').trim() || undefined,
+      amount: +rate.toFixed(2),
+    }))
+    .filter((r) => r.cardNumber.length > 0);
+}
+
+/**
+ * Primary TM card for the trip record.
+ * If the main field is empty and hoist rows exist, first hoist card is used (UI convenience only —
+ * does not combine or reduce hoist fees).
+ */
+export function resolvePrimaryTmCard(
+  primaryCard: string | undefined,
+  primaryExpiry: string | undefined,
+  hoists: readonly TmHoistEntry[],
+): { tmCardNumber?: string; tmCardExpiry?: string } {
+  const card = String(primaryCard || '').trim();
+  const expiry = String(primaryExpiry || '').trim() || undefined;
+  if (card) return { tmCardNumber: card, tmCardExpiry: expiry };
+  const first = hoists[0];
+  if (!first?.cardNumber) return {};
+  return {
+    tmCardNumber: first.cardNumber,
+    tmCardExpiry: first.cardExpiry || expiry,
+  };
+}

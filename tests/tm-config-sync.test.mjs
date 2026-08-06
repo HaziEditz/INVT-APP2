@@ -7,9 +7,11 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  buildTmHoistEntries,
   calcTmPaymentBreakdown,
   mapCouncilRecordToCompanyTmConfig,
   parseTmConfigRecord,
+  resolvePrimaryTmCard,
 } from '../lib/tmConfigLogic.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -152,4 +154,33 @@ test('Phase 2A.1 portal config edit + audit + hoist 100% council', () => {
   assert.match(saCfg, /100% council-paid/i);
   assert.match(saCfg, /tmConfigAudit/);
   assert.doesNotMatch(saCfg, /<option value="false">Passenger<\/option>/);
+});
+
+test('Phase 2A.2 multi hoist rows: 1× rate each, primary from first hoist', () => {
+  const entries = buildTmHoistEntries(
+    [
+      { cardNumber: '111', cardExpiry: '01/27' },
+      { cardNumber: ' 222 ', cardExpiry: '' },
+      { cardNumber: '', cardExpiry: '03/28' }, // ignored — no card
+    ],
+    10,
+  );
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].amount, 10);
+  assert.equal(entries[1].amount, 10);
+  assert.equal(entries[0].cardNumber, '111');
+  assert.equal(entries[1].cardNumber, '222');
+  const b = calcTmPaymentBreakdown(40, entries.length, {
+    councilSubsidyPercent: 65,
+    councilCapAmount: 26,
+    hoistCostPerUnit: 10,
+  });
+  assert.equal(b.hoistTotal, 20);
+  assert.equal(b.passengerPays, 14);
+  const primaryEmpty = resolvePrimaryTmCard('', undefined, entries);
+  assert.equal(primaryEmpty.tmCardNumber, '111');
+  assert.equal(primaryEmpty.tmCardExpiry, '01/27');
+  const primarySet = resolvePrimaryTmCard('999', '12/30', entries);
+  assert.equal(primarySet.tmCardNumber, '999');
+  assert.equal(primarySet.tmCardExpiry, '12/30');
 });
