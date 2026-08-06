@@ -44,4 +44,8 @@ export const STORAGE_KEYS = {
   pendingClosedJobs: 'bw_pending_closed_jobs',
   /** Offline end-shift — deferred Firebase shiftLogs + presence clear until reconnect. */
   pendingShiftEnds: 'bw_pending_shift_ends',
+  /** Frequent/recent business accounts for offline Account payment (suffix companyId). */
+  accountCache: 'bw_account_cache',
+  /** Cached TM companySettings/{cid}/tmConfig for offline TM split. */
+  tmConfigCache: 'bw_tm_config_cache',
 } as const;

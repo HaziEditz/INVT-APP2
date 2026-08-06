@@ -1,9 +1,14 @@
 import NetInfo from '@react-native-community/netinfo';
 import {
+  rememberBusinessAccount,
+  resolvePendingAccountFields,
+} from '@/lib/accountCache';
+import {
   cancelJobAsDriver,
   completeJobPayment,
   createHailJobOnDispatch,
   reportNoShow,
+  searchBusinessAccounts,
   syncJobStageOnDispatch,
 } from '@/lib/dispatchApi';
 import {
@@ -136,18 +141,58 @@ async function flushTerminalEvent(args: {
         : undefined);
     const vehicleType =
       asString(payload.VehicleType) || asString(payload.vehicleType) || undefined;
-    const accountId =
+    const accountIdRaw =
       asString(payload.Account_id) ||
       asString(payload.AccountId) ||
       asString(payload.jobAccountId) ||
       asString(payload.accountId) ||
       undefined;
-    const accountName =
+    const accountNameRaw =
       asString(payload.Account_Name) ||
       asString(payload.AccountName) ||
       asString(payload.jobAccountName) ||
       asString(payload.accountName) ||
       undefined;
+    const accountRef =
+      asString(payload.accountRef) || asString(payload.AccountRef) || undefined;
+    const accountPending =
+      payload.accountPending === true ||
+      payload.AccountPending === true ||
+      (!accountIdRaw && !!(accountNameRaw || accountRef));
+    const resolvedAccount = await resolvePendingAccountFields(
+      {
+        accountId: accountIdRaw,
+        accountName: accountNameRaw,
+        accountRef,
+        accountPending,
+      },
+      {
+        search: searchBusinessAccounts,
+        remember: async (hit) => {
+          if (companyId) await rememberBusinessAccount(companyId, hit);
+        },
+      },
+    );
+    const accountId = resolvedAccount.accountId;
+    const accountName = resolvedAccount.accountName;
+    const eftposRef =
+      asString(payload.eftposRef) ||
+      asString(payload.EftposRef) ||
+      (extras && typeof extras === 'object'
+        ? asString((extras as Record<string, unknown>).eftposRef)
+        : undefined);
+    const accClaimNo =
+      asString(payload.accClaimNo) ||
+      asString(payload.AccClaimNo) ||
+      (extras && typeof extras === 'object'
+        ? asString((extras as Record<string, unknown>).accClaimNo)
+        : undefined);
+    const accPoNo =
+      asString(payload.accPoNo) ||
+      asString(payload.AccPoNo) ||
+      (extras && typeof extras === 'object'
+        ? asString((extras as Record<string, unknown>).accPoNo)
+        : undefined);
     const accountFields = {
       paymentMethod: payload.paymentMethod ?? paymentType,
       PaymentMethod: payload.PaymentMethod ?? payload.paymentMethod ?? paymentType,
@@ -159,6 +204,9 @@ async function flushTerminalEvent(args: {
       ...(accountName
         ? { Account_Name: accountName, AccountName: accountName, jobAccountName: accountName }
         : {}),
+      ...(eftposRef ? { eftposRef, EftposRef: eftposRef } : {}),
+      ...(accClaimNo ? { accClaimNo, AccClaimNo: accClaimNo } : {}),
+      ...(accPoNo ? { accPoNo, AccPoNo: accPoNo } : {}),
     };
     await completeJobPayment({
       jobId,
@@ -178,7 +226,9 @@ async function flushTerminalEvent(args: {
       tmCardExpiry: payload.tmCardExpiry,
       accClientId: payload.accClientId,
       accApprovalNo: payload.accApprovalNo,
-      accClaimNo: payload.accClaimNo,
+      accClaimNo,
+      accPoNo,
+      eftposRef,
       stripeChargeId: payload.stripeChargeId,
       stripePaymentIntentId: payload.stripePaymentIntentId,
       voucherCode: payload.voucherCode,
@@ -199,7 +249,9 @@ async function flushTerminalEvent(args: {
         tmCardExpiry: payload.tmCardExpiry,
         accClientId: payload.accClientId,
         accApprovalNo: payload.accApprovalNo,
-        accClaimNo: payload.accClaimNo,
+        accClaimNo,
+        accPoNo,
+        eftposRef,
         stripeChargeId: payload.stripeChargeId,
         stripePaymentIntentId: payload.stripePaymentIntentId,
         pickupLat,

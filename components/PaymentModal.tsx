@@ -2,6 +2,11 @@ import { Button } from '@/components/Button';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
+import {
+  cachedAccountToSearchHit,
+  rememberBusinessAccount,
+  searchCachedAccounts,
+} from '@/lib/accountCache';
 import { searchBusinessAccounts, type DriverAccountSearchHit } from '@/lib/dispatchApi';
 import { normalizeDriverPaymentType } from '@/lib/driverPayment';
 import { calcTmSplit, loadTmConfig, TmConfig } from '@/lib/tmConfig';
@@ -13,6 +18,7 @@ import {
   TM_PASSENGER_PAYMENT_TYPES,
   TmPaymentDetails,
 } from '@/types';
+import NetInfo from '@react-native-community/netinfo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -131,6 +137,8 @@ export function PaymentModal() {
   const [accountHits, setAccountHits] = useState<DriverAccountSearchHit[]>([]);
   const [accountSearching, setAccountSearching] = useState(false);
   const [accountSearchError, setAccountSearchError] = useState('');
+  const [accountFromCache, setAccountFromCache] = useState(false);
+  const [accountAllowFreeText, setAccountAllowFreeText] = useState(false);
   const accountSearchSeq = useRef(0);
   const [accClaimNo, setAccClaimNo] = useState('');
   const [accPoNo, setAccPoNo] = useState('');
@@ -175,6 +183,8 @@ export function PaymentModal() {
     setAccountSearch('');
     setAccountHits([]);
     setAccountSearchError('');
+    setAccountFromCache(false);
+    setAccountAllowFreeText(false);
     setAccClaimNo('');
     setAccPoNo('');
     setTmCardNumber('');
@@ -183,45 +193,107 @@ export function PaymentModal() {
   }, [paymentJob?.id]);
 
   useEffect(() => {
-    if (paymentType !== 'Account' || accountLockedFromDispatch || accountId) {
+    const accountUiActive =
+      paymentType === 'Account' ||
+      (paymentType === 'TM' && tmPassengerPaymentType === 'Account');
+    if (!accountUiActive || accountLockedFromDispatch || accountId) {
       setAccountHits([]);
       setAccountSearching(false);
       setAccountSearchError('');
+      setAccountFromCache(false);
       return;
     }
     const q = accountSearch.trim();
     if (q.length < 2) {
       setAccountHits([]);
       setAccountSearchError('');
+      setAccountFromCache(false);
+      setAccountAllowFreeText(false);
       return;
     }
     const seq = ++accountSearchSeq.current;
     setAccountSearching(true);
     setAccountSearchError('');
+    setAccountAllowFreeText(false);
+    const companyId = String(driver?.companyId || '').trim();
+
+    const applyCacheHits = async (errMsg?: string) => {
+      if (!companyId) {
+        setAccountHits([]);
+        setAccountFromCache(false);
+        setAccountAllowFreeText(true);
+        setAccountSearchError(
+          errMsg || 'Offline — type the account name/number to continue; we will match it on reconnect.',
+        );
+        return;
+      }
+      const cached = await searchCachedAccounts(companyId, q);
+      if (seq !== accountSearchSeq.current) return;
+      const hits = cached.map(cachedAccountToSearchHit);
+      setAccountHits(hits);
+      setAccountFromCache(hits.length > 0);
+      setAccountAllowFreeText(true);
+      if (hits.length === 0) {
+        setAccountSearchError(
+          errMsg ||
+            'No cached accounts match. You can confirm with the typed name — we will resolve it when online.',
+        );
+      } else {
+        setAccountSearchError(errMsg ? `${errMsg} Showing recent/cached accounts.` : '');
+      }
+    };
+
     const t = setTimeout(() => {
-      void searchBusinessAccounts(q)
-        .then((hits) => {
+      void (async () => {
+        const net = await NetInfo.fetch().catch(() => null);
+        const offline = net?.isConnected === false;
+        if (offline) {
+          await applyCacheHits('You appear offline.');
+          if (seq === accountSearchSeq.current) setAccountSearching(false);
+          return;
+        }
+        try {
+          const hits = await searchBusinessAccounts(q);
           if (seq !== accountSearchSeq.current) return;
           setAccountHits(hits);
+          setAccountFromCache(false);
+          setAccountAllowFreeText(false);
           setAccountSearchError(
             hits.length === 0 ? 'No matching business accounts found.' : '',
           );
-        })
-        .catch((err) => {
+          if (companyId && hits.length > 0) {
+            for (const hit of hits.slice(0, 8)) {
+              const id = String(hit.Id ?? '').trim();
+              if (!id) continue;
+              void rememberBusinessAccount(companyId, {
+                id,
+                name: String(hit.Name || '').trim() || id,
+                accountCode: String(hit.AccountCode || '').trim() || undefined,
+              }).catch(() => {});
+            }
+          }
+        } catch (err) {
           if (seq !== accountSearchSeq.current) return;
-          setAccountHits([]);
           const msg =
             err instanceof Error && err.message
               ? err.message
               : 'Account search failed. Check connection and try again.';
-          setAccountSearchError(msg);
-        })
-        .finally(() => {
+          await applyCacheHits(msg);
+        } finally {
           if (seq === accountSearchSeq.current) setAccountSearching(false);
-        });
+        }
+      })();
     }, 300);
     return () => clearTimeout(t);
-  }, [paymentType, accountSearch, accountLockedFromDispatch, accountId, paymentJob?.id]);
+  }, [
+    paymentType,
+    accountSearch,
+    accountLockedFromDispatch,
+    accountId,
+    paymentJob?.id,
+    driver?.companyId,
+    tmPassengerPaymentType,
+  ]);
 
   useEffect(() => {
     if (!isTmPayment || !driver?.companyId) {
@@ -292,6 +364,17 @@ export function PaymentModal() {
     otherNote: extraEnabled.other ? otherNote.trim() || undefined : undefined,
     hoistCount: hoistUnits > 0 ? hoistUnits : undefined,
     hoistCost: hoistTotal > 0 ? hoistTotal : undefined,
+    ...(paymentType === 'EFTPOS' || (isTmPayment && tmPassengerPaymentType === 'EFTPOS')
+      ? eftposRef.trim()
+        ? { eftposRef: eftposRef.trim() }
+        : {}
+      : {}),
+    ...(paymentType === 'ACC' || (isTmPayment && tmPassengerPaymentType === 'ACC')
+      ? {
+          ...(accClaimNo.trim() ? { accClaimNo: accClaimNo.trim() } : {}),
+          ...(accPoNo.trim() ? { accPoNo: accPoNo.trim() } : {}),
+        }
+      : {}),
   };
 
   const onScanCard = () => {
@@ -299,9 +382,24 @@ export function PaymentModal() {
   };
 
   const onConfirm = async () => {
-    if (paymentType === 'Account' && !String(accountId || '').trim()) {
-      Alert.alert('Select account', 'Search and select a business account before confirming.');
-      return;
+    const needsAccount =
+      paymentType === 'Account' || (isTmPayment && tmPassengerPaymentType === 'Account');
+    const typedAccount = String(accountName || accountSearch || '').trim();
+    const selectedAccountId = String(accountId || '').trim();
+    if (needsAccount && !selectedAccountId) {
+      if (typedAccount.length < 2) {
+        Alert.alert(
+          'Select account',
+          accountAllowFreeText
+            ? 'Type at least 2 characters for the account name/number, or select a cached account.'
+            : 'Search and select a business account before confirming.',
+        );
+        return;
+      }
+      if (!accountAllowFreeText) {
+        Alert.alert('Select account', 'Search and select a business account before confirming.');
+        return;
+      }
     }
     setSubmitting(true);
     try {
@@ -319,10 +417,16 @@ export function PaymentModal() {
       const finalPaymentType = isTmPayment ? tmPassengerPaymentType : paymentType;
       const accountDetails =
         finalPaymentType === 'Account' || paymentType === 'Account'
-          ? {
-              accountId: String(accountId || '').trim() || undefined,
-              accountName: String(accountName || '').trim() || undefined,
-            }
+          ? selectedAccountId
+            ? {
+                accountId: selectedAccountId,
+                accountName: String(accountName || '').trim() || undefined,
+              }
+            : {
+                accountName: typedAccount,
+                accountRef: typedAccount,
+                accountPending: true,
+              }
           : undefined;
       await finalizePayment(finalPaymentType, builtExtras, subtotal, tmDetails, accountDetails);
     } catch (err) {
@@ -427,6 +531,7 @@ export function PaymentModal() {
                       setAccountId('');
                       setAccountName('');
                       setAccountSearch('');
+                      setAccountAllowFreeText(false);
                     }}
                   >
                     <Text style={styles.accountChange}>Change</Text>
@@ -435,10 +540,14 @@ export function PaymentModal() {
               </View>
             ) : (
               <>
-                <Text style={styles.accountHint}>Search and select a business account</Text>
+                <Text style={styles.accountHint}>
+                  {accountAllowFreeText
+                    ? 'Search cached accounts, or type the account name/number to confirm offline'
+                    : 'Search and select a business account'}
+                </Text>
                 <TextInput
                   style={styles.field}
-                  placeholder="Search business name…"
+                  placeholder="Search business name or account number…"
                   placeholderTextColor={Colors.textMuted}
                   value={accountSearch}
                   onChangeText={(t) => {
@@ -450,6 +559,9 @@ export function PaymentModal() {
                 />
                 {accountSearching ? (
                   <ActivityIndicator color={Colors.accent} style={{ marginVertical: 8 }} />
+                ) : null}
+                {accountFromCache ? (
+                  <Text style={styles.hint}>Showing recent/cached accounts</Text>
                 ) : null}
                 {accountSearchError ? (
                   <Text style={styles.accountSearchError}>{accountSearchError}</Text>
@@ -466,6 +578,15 @@ export function PaymentModal() {
                         setAccountName(name);
                         setAccountSearch(name);
                         setAccountHits([]);
+                        setAccountAllowFreeText(false);
+                        const cid = String(driver?.companyId || '').trim();
+                        if (cid && id) {
+                          void rememberBusinessAccount(cid, {
+                            id,
+                            name,
+                            accountCode: String(hit.AccountCode || '').trim() || undefined,
+                          }).catch(() => {});
+                        }
                       }}
                     >
                       <Text style={styles.accountHitName}>{name}</Text>
@@ -551,6 +672,118 @@ export function PaymentModal() {
               options={TM_PASSENGER_PAYMENT_TYPES}
               onChange={setTmPassengerPaymentType}
             />
+            {tmPassengerPaymentType === 'Account' ? (
+              <View style={{ marginTop: 12 }}>
+                {accountId ? (
+                  <View style={styles.accountSelected}>
+                    <Text style={styles.accountSelectedLabel}>Business account</Text>
+                    <Text style={styles.accountSelectedName}>
+                      {accountName || 'Account selected'}
+                    </Text>
+                    {!accountLockedFromDispatch ? (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setAccountId('');
+                          setAccountName('');
+                          setAccountSearch('');
+                          setAccountAllowFreeText(false);
+                        }}
+                      >
+                        <Text style={styles.accountChange}>Change</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.accountHint}>
+                      {accountAllowFreeText
+                        ? 'Search cached accounts, or type the account name/number offline'
+                        : 'Search and select a business account'}
+                    </Text>
+                    <TextInput
+                      style={styles.field}
+                      placeholder="Search business name or account number…"
+                      placeholderTextColor={Colors.textMuted}
+                      value={accountSearch}
+                      onChangeText={(t) => {
+                        setAccountSearch(t);
+                        setAccountId('');
+                        setAccountName('');
+                      }}
+                      autoCorrect={false}
+                    />
+                    {accountSearching ? (
+                      <ActivityIndicator color={Colors.accent} style={{ marginVertical: 8 }} />
+                    ) : null}
+                    {accountFromCache ? (
+                      <Text style={styles.hint}>Showing recent/cached accounts</Text>
+                    ) : null}
+                    {accountSearchError ? (
+                      <Text style={styles.accountSearchError}>{accountSearchError}</Text>
+                    ) : null}
+                    {accountHits.map((hit) => {
+                      const id = String(hit.Id ?? '');
+                      const name = String(hit.Name || '').trim() || id;
+                      return (
+                        <TouchableOpacity
+                          key={id || name}
+                          style={styles.accountHit}
+                          onPress={() => {
+                            setAccountId(id);
+                            setAccountName(name);
+                            setAccountSearch(name);
+                            setAccountHits([]);
+                            setAccountAllowFreeText(false);
+                            const cid = String(driver?.companyId || '').trim();
+                            if (cid && id) {
+                              void rememberBusinessAccount(cid, {
+                                id,
+                                name,
+                                accountCode: String(hit.AccountCode || '').trim() || undefined,
+                              }).catch(() => {});
+                            }
+                          }}
+                        >
+                          <Text style={styles.accountHitName}>{name}</Text>
+                          {hit.AccountCode ? (
+                            <Text style={styles.accountHitMeta}>{String(hit.AccountCode)}</Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </>
+                )}
+              </View>
+            ) : null}
+            {tmPassengerPaymentType === 'ACC' ? (
+              <View style={{ marginTop: 12 }}>
+                <TextInput
+                  style={styles.field}
+                  placeholder="Claim number"
+                  placeholderTextColor={Colors.textMuted}
+                  value={accClaimNo}
+                  onChangeText={setAccClaimNo}
+                />
+                <TextInput
+                  style={styles.field}
+                  placeholder="Purchase order number"
+                  placeholderTextColor={Colors.textMuted}
+                  value={accPoNo}
+                  onChangeText={setAccPoNo}
+                />
+              </View>
+            ) : null}
+            {tmPassengerPaymentType === 'EFTPOS' ? (
+              <View style={{ marginTop: 12 }}>
+                <TextInput
+                  style={styles.field}
+                  placeholder="Transaction reference (optional)"
+                  placeholderTextColor={Colors.textMuted}
+                  value={eftposRef}
+                  onChangeText={setEftposRef}
+                />
+              </View>
+            ) : null}
           </View>
         );
       default:

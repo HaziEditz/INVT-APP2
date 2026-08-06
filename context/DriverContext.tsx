@@ -299,7 +299,12 @@ interface DriverContextValue {
     extras: PaymentExtras,
     totalFare: number,
     tmDetails?: TmPaymentDetails,
-    accountDetails?: { accountId?: string; accountName?: string },
+    accountDetails?: {
+      accountId?: string;
+      accountName?: string;
+      accountPending?: boolean;
+      accountRef?: string;
+    },
   ) => Promise<void>;
   dismissPayment: () => void;
   completionBusy: boolean;
@@ -4094,7 +4099,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     extras: PaymentExtras,
     totalFare: number,
     tmDetails?: TmPaymentDetails,
-    accountDetails?: { accountId?: string; accountName?: string },
+    accountDetails?: {
+      accountId?: string;
+      accountName?: string;
+      accountPending?: boolean;
+      accountRef?: string;
+    },
   ) => {
     const job = paymentJob ?? activeJob;
     if (!job || !driver?.companyId) {
@@ -4107,6 +4117,29 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const accountName = String(
       accountDetails?.accountName || job.accountName || '',
     ).trim();
+    const accountPending = !!accountDetails?.accountPending && !accountId;
+    const accountRef = String(accountDetails?.accountRef || '').trim();
+    const paymentRefFields = {
+      ...(String(extras.eftposRef || '').trim()
+        ? { eftposRef: String(extras.eftposRef).trim() }
+        : {}),
+      ...(String(extras.accClaimNo || '').trim()
+        ? { accClaimNo: String(extras.accClaimNo).trim() }
+        : {}),
+      ...(String(extras.accPoNo || '').trim()
+        ? { accPoNo: String(extras.accPoNo).trim() }
+        : {}),
+    };
+    if (accountId && driver.companyId) {
+      void import('@/lib/accountCache')
+        .then(({ rememberBusinessAccount }) =>
+          rememberBusinessAccount(driver.companyId, {
+            id: accountId,
+            name: accountName || accountId,
+          }),
+        )
+        .catch(() => {});
+    }
 
     const vehicleTypeForClosed = String(
       job.vehicleType ||
@@ -4217,6 +4250,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             jobAccountName: accountName,
           }
         : {}),
+      ...(accountPending ? { accountPending: true, AccountPending: true } : {}),
+      ...(accountRef ? { accountRef, AccountRef: accountRef } : {}),
+      ...paymentRefFields,
     };
     const completePayload = {
       jobId: job.id,

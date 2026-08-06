@@ -330,6 +330,12 @@ export interface PaymentExtras {
   otherNote?: string;
   hoistCount?: number;
   hoistCost?: number;
+  /** EFTPOS transaction reference (optional). */
+  eftposRef?: string;
+  /** ACC claim number. */
+  accClaimNo?: string;
+  /** ACC purchase order number. */
+  accPoNo?: string;
 }
 
 export interface TmPaymentDetails {
