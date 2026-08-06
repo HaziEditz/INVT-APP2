@@ -17,6 +17,7 @@ import {
   resolveReadableAddress,
 } from '@/lib/hailAddressResolve';
 import { catchUpJobStagesOnDispatch } from '@/lib/jobServerSync';
+import { pickTmFieldsFromPayload } from '@/lib/tmPaymentPersist';
 import {
   GEOCODE_TIMEOUT_MS,
   isRetryableStageFlushError,
@@ -208,6 +209,7 @@ async function flushTerminalEvent(args: {
       ...(accClaimNo ? { accClaimNo, AccClaimNo: accClaimNo } : {}),
       ...(accPoNo ? { accPoNo, AccPoNo: accPoNo } : {}),
     };
+    const tmFields = pickTmFieldsFromPayload(payload, { remainderPaymentType: paymentType });
     await completeJobPayment({
       jobId,
       bookingId: jobId,
@@ -219,11 +221,7 @@ async function flushTerminalEvent(args: {
       distanceKm,
       distance: distanceKm,
       extras,
-      councilPays: payload.councilPays,
-      passengerPays: payload.passengerPays,
-      tmCardNumber: payload.tmCardNumber,
-      tmCardName: payload.tmCardName,
-      tmCardExpiry: payload.tmCardExpiry,
+      ...(tmFields || {}),
       accClientId: payload.accClientId,
       accApprovalNo: payload.accApprovalNo,
       accClaimNo,
@@ -242,11 +240,7 @@ async function flushTerminalEvent(args: {
         distance: distanceKm,
         paymentType,
         extras,
-        councilPays: payload.councilPays,
-        passengerPays: payload.passengerPays,
-        tmCardNumber: payload.tmCardNumber,
-        tmCardName: payload.tmCardName,
-        tmCardExpiry: payload.tmCardExpiry,
+        ...(tmFields || {}),
         accClientId: payload.accClientId,
         accApprovalNo: payload.accApprovalNo,
         accClaimNo,

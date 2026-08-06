@@ -16,6 +16,7 @@ import {
   resolvePrimaryTmCard,
   TmConfig,
 } from '@/lib/tmConfig';
+import { formatTmCardExpiryInput } from '@/lib/tmPaymentPersist';
 import { computePaymentFareSummary, completionErrorMessage } from '@/lib/tripCompletionHelpers';
 import {
   DRIVER_PAYMENT_TYPES,
@@ -150,6 +151,7 @@ export function PaymentModal() {
   const [accPoNo, setAccPoNo] = useState('');
   const [tmCardNumber, setTmCardNumber] = useState('');
   const [tmCardExpiry, setTmCardExpiry] = useState('');
+  const [tmCardName, setTmCardName] = useState('');
   /** WAV: one row per hoist use / wheelchair passenger (1× rate each). */
   const [hoistRows, setHoistRows] = useState<{ key: string; cardNumber: string; cardExpiry: string }[]>(
     [],
@@ -198,6 +200,7 @@ export function PaymentModal() {
     setAccPoNo('');
     setTmCardNumber('');
     setTmCardExpiry('');
+    setTmCardName('');
     setHoistRows([]);
   }, [paymentJob?.id]);
 
@@ -446,6 +449,7 @@ export function PaymentModal() {
           return;
         }
         const primary = resolvePrimaryTmCard(tmCardNumber, tmCardExpiry, tmHoistEntries);
+        const councilId = String(tmConfig?.sourceCouncilId || '').trim() || undefined;
         tmDetails = {
           councilPays: tmSplit.councilPays,
           passengerPays: tmSplit.passengerPays,
@@ -457,7 +461,9 @@ export function PaymentModal() {
           tmHoists: tmHoistEntries.length ? tmHoistEntries : undefined,
           tmCardNumber: primary.tmCardNumber,
           tmCardExpiry: primary.tmCardExpiry,
+          tmCardName: String(tmCardName || '').trim() || undefined,
           totalFare: subtotal,
+          councilId,
         };
       }
 
@@ -699,10 +705,20 @@ export function PaymentModal() {
             />
             <TextInput
               style={styles.field}
+              placeholder="Cardholder name (optional)"
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="words"
+              value={tmCardName}
+              onChangeText={setTmCardName}
+            />
+            <TextInput
+              style={styles.field}
               placeholder="TM card expiry MM/YY"
               placeholderTextColor={Colors.textMuted}
+              keyboardType="number-pad"
+              maxLength={5}
               value={tmCardExpiry}
-              onChangeText={setTmCardExpiry}
+              onChangeText={(v) => setTmCardExpiry(formatTmCardExpiryInput(v))}
             />
             {isWav ? (
               <View style={styles.hoistBlock}>
@@ -732,10 +748,16 @@ export function PaymentModal() {
                       style={styles.field}
                       placeholder="Expiry MM/YY (optional)"
                       placeholderTextColor={Colors.textMuted}
+                      keyboardType="number-pad"
+                      maxLength={5}
                       value={row.cardExpiry}
                       onChangeText={(v) =>
                         setHoistRows((prev) =>
-                          prev.map((r) => (r.key === row.key ? { ...r, cardExpiry: v } : r)),
+                          prev.map((r) =>
+                            r.key === row.key
+                              ? { ...r, cardExpiry: formatTmCardExpiryInput(v) }
+                              : r,
+                          ),
                         )
                       }
                     />

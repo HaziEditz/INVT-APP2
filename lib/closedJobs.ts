@@ -1,6 +1,7 @@
 import { push, ref, set } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { cleanObject } from '@/lib/cleanObject';
+import { buildTmPersistFields, buildTmTripStatusSeed } from '@/lib/tmPaymentPersist';
 import { ActiveJob, PaymentExtras, PaymentType, TmPaymentDetails } from '@/types';
 
 function encodeRoutePolyline(points: { lat: number; lng: number }[]): string {
@@ -108,21 +109,10 @@ export async function writeClosedJob(
     status: 'closed',
     BookingStatus: 'Completed',
     ...(tmDetails
-      ? {
-          tmCouncilPays: tmDetails.councilPays,
-          tmPassengerPays: tmDetails.passengerPays,
-          tmMeterFare: tmDetails.meterFare ?? undefined,
-          tmSubsidyFare: tmDetails.tmSubsidyFare ?? undefined,
-          tmSubsidyHoist: tmDetails.tmSubsidyHoist ?? tmDetails.hoistTotal ?? undefined,
-          hoistTotal: tmDetails.hoistTotal ?? undefined,
-          hoistCount: tmDetails.hoistCount ?? undefined,
-          tmHoistCount: tmDetails.hoistCount ?? undefined,
-          tmHoists: tmDetails.tmHoists?.length ? tmDetails.tmHoists : undefined,
-          tmCardNumber: tmDetails.tmCardNumber ?? '',
-          tmCardName: tmDetails.tmCardName ?? '',
-          tmCardExpiry: tmDetails.tmCardExpiry ?? '',
-          tmTotalFare: tmDetails.totalFare,
-        }
+      ? buildTmPersistFields(tmDetails, {
+          councilId: tmDetails.councilId,
+          remainderPaymentType: String(paymentType || ''),
+        })
       : {}),
   });
 
@@ -138,6 +128,19 @@ export async function writeClosedJob(
     });
   } catch {
     // non-fatal — closedLogs push is primary
+  }
+
+  // Seed claim pipeline so council portal / SA batches can see the trip.
+  const councilId = String(tmDetails?.councilId || '').trim();
+  if (tmDetails && councilId) {
+    try {
+      await set(
+        ref(database, `tmTripStatus/${companyId}/${job.id}`),
+        buildTmTripStatusSeed(companyId, councilId, tmDetails),
+      );
+    } catch (err) {
+      console.warn('[closedJobs] tmTripStatus seed failed:', err);
+    }
   }
 
   return id;

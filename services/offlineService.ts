@@ -9,6 +9,7 @@ import {
   recallJobOnDispatch,
   reportNoShow,
 } from '@/lib/dispatchApi';
+import { pickTmFieldsFromPayload } from '@/lib/tmPaymentPersist';
 import type { DriverProfile, OfflineQueueItem } from '@/types';
 
 type JobUpdateAction =
@@ -102,6 +103,7 @@ async function flushJobUpdate(
           ? (payload.extras as Record<string, unknown>)
           : undefined;
 
+      const tmFields = pickTmFieldsFromPayload(payload, { remainderPaymentType: paymentType });
       const completePayload: Record<string, unknown> = {
         jobId,
         bookingId: jobId,
@@ -114,11 +116,7 @@ async function flushJobUpdate(
         distance: distanceKm,
         extras,
         // TM / ACC / Stripe fields were spread onto the queued payload at enqueue time.
-        councilPays: payload.councilPays,
-        passengerPays: payload.passengerPays,
-        tmCardNumber: payload.tmCardNumber,
-        tmCardName: payload.tmCardName,
-        tmCardExpiry: payload.tmCardExpiry,
+        ...(tmFields || {}),
         accClientId: payload.accClientId,
         accApprovalNo: payload.accApprovalNo,
         accClaimNo: payload.accClaimNo,
@@ -137,11 +135,7 @@ async function flushJobUpdate(
           distance: distanceKm,
           paymentType,
           extras,
-          councilPays: payload.councilPays,
-          passengerPays: payload.passengerPays,
-          tmCardNumber: payload.tmCardNumber,
-          tmCardName: payload.tmCardName,
-          tmCardExpiry: payload.tmCardExpiry,
+          ...(tmFields || {}),
           accClientId: payload.accClientId,
           accApprovalNo: payload.accApprovalNo,
           accClaimNo: payload.accClaimNo,

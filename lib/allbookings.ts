@@ -44,6 +44,8 @@ export async function markBookingCompleted(
     accountId?: string;
     accountName?: string;
     createdAt?: number;
+    /** TM economics + markers for Closed Job / claims (optional). */
+    tmFields?: Record<string, unknown>;
   },
 ): Promise<void> {
   if (!companyId || !bookingId) return;
@@ -120,5 +122,6 @@ export async function markBookingCompleted(
           accountName,
         }
       : {}),
+    ...(payload.tmFields && typeof payload.tmFields === 'object' ? payload.tmFields : {}),
   });
 }

@@ -115,6 +115,7 @@ import { subscribeCompanyTariffs } from '@/lib/companyTariffs';
 import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
 import { markBookingCompleted, readBookingTripAddresses } from '@/lib/allbookings';
 import { writeClosedJob } from '@/lib/closedJobs';
+import { buildTmPersistFields } from '@/lib/tmPaymentPersist';
 import {
   applyTripFieldsToJob,
   closedJobFieldsForCompleteApi,
@@ -4265,7 +4266,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       distanceKm: closed.distanceKm,
       distance: closed.distanceKm,
       extras,
-      ...(tmDetails ?? {}),
+      ...(tmDetails
+        ? buildTmPersistFields(tmDetails, {
+            councilId: tmDetails.councilId,
+            remainderPaymentType: paymentType,
+          })
+        : {}),
       ...accountCompleteFields,
       payload: {
         fare: totalFare,
@@ -4276,6 +4282,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         extras,
         ...tripCompleteFields,
         ...accountCompleteFields,
+        // Persist TM economics into closedJobStore (server whitelist + nest).
+        ...(tmDetails
+          ? buildTmPersistFields(tmDetails, {
+              councilId: tmDetails.councilId,
+              remainderPaymentType: paymentType,
+            })
+          : {}),
       },
     };
 
@@ -4307,7 +4320,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         distanceKm: closed.distanceKm,
         distance: closed.distanceKm,
         extras,
-        ...(tmDetails ?? {}),
+        ...(tmDetails
+          ? buildTmPersistFields(tmDetails, {
+              councilId: tmDetails.councilId,
+              remainderPaymentType: paymentType,
+            })
+          : {}),
         ...closedJobFieldsForJournal(closed),
         ...accountCompleteFields,
       });
@@ -4435,6 +4453,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               accountId: closed.accountId,
               accountName: closed.accountName,
               createdAt: createdAtMs,
+              tmFields: tmDetails
+                ? buildTmPersistFields(tmDetails, {
+                    councilId: tmDetails.councilId,
+                    remainderPaymentType: paymentType,
+                  })
+                : undefined,
             });
           } catch (err) {
             console.warn('[Driver] markBookingCompleted failed:', err);

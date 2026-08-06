@@ -365,6 +365,8 @@ export interface TmPaymentDetails {
   tmCardExpiry?: string;
   /** Grand total (meter + hoist). */
   totalFare: number;
+  /** Council id for claims (from company tmConfig.sourceCouncilId or card). */
+  councilId?: string;
 }
 
 export const TM_PASSENGER_PAYMENT_TYPES = [

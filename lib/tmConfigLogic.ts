@@ -2,6 +2,8 @@ export type TmConfig = {
   councilSubsidyPercent: number;
   councilCapAmount: number;
   hoistCostPerUnit: number;
+  /** Set by Phase 1 council→company sync. */
+  sourceCouncilId?: string;
 };
 
 export const DEFAULT_TM_CONFIG: TmConfig = {
@@ -35,6 +37,7 @@ export type TmPaymentBreakdown = {
 
 export function parseTmConfigRecord(d: Record<string, unknown> | null | undefined): TmConfig {
   if (!d || typeof d !== 'object') return { ...DEFAULT_TM_CONFIG };
+  const sourceCouncilId = String(d.sourceCouncilId || d.councilId || '').trim();
   return {
     councilSubsidyPercent:
       Number(d.councilSubsidyPercent ?? d.councilPercent ?? d.subsidyPercent ?? 0) || 0,
@@ -42,6 +45,7 @@ export function parseTmConfigRecord(d: Record<string, unknown> | null | undefine
       Number(d.councilCapAmount ?? d.capAmount ?? d.subsidyCap ?? 0) || 0,
     hoistCostPerUnit:
       Number(d.hoistCostPerUnit ?? d.hoistUnitCost ?? d.hoistCost ?? d.hoistRatePerUse ?? 0) || 0,
+    ...(sourceCouncilId ? { sourceCouncilId } : {}),
   };
 }
 

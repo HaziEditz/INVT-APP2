@@ -1,0 +1,179 @@
+/**
+ * TM payment persistence helpers — closed jobs, claim filters, expiry UX.
+ */
+import type { TmPaymentDetails } from '@/types';
+
+/** Auto-format MMYY / MM/YY typing into MM/YY (max 5 chars). */
+export function formatTmCardExpiryInput(raw: string): string {
+  const digits = String(raw || '')
+    .replace(/\D/g, '')
+    .slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+}
+
+export function isTmCompletedJobRecord(job: Record<string, unknown> | null | undefined): boolean {
+  if (!job || typeof job !== 'object') return false;
+  if (job.isTotalMobility === true || job.tmUsed === true) return true;
+  const pt = String(job.paymentType || job.PaymentType || job.paymentMethod || '')
+    .toLowerCase()
+    .replace(/[_\s-]/g, '');
+  if (pt === 'tm' || pt === 'totalmobility') return true;
+  if (job.tmCouncilPays != null || job.councilPays != null) return true;
+  if (job.tmSubsidyFare != null || job.tmSubsidy != null) return true;
+  if (job.tmCardNumber || job.tmVoucherNo) return true;
+  if (Array.isArray(job.tmHoists) && job.tmHoists.length > 0) return true;
+  return false;
+}
+
+/** Fields written onto closed/completed job records for billing + Closed Job UI. */
+export function buildTmPersistFields(
+  tmDetails: TmPaymentDetails,
+  opts?: { councilId?: string; remainderPaymentType?: string },
+): Record<string, unknown> {
+  const councilPays = Number(tmDetails.councilPays) || 0;
+  const passengerPays = Number(tmDetails.passengerPays) || 0;
+  const card = String(tmDetails.tmCardNumber || '').trim();
+  const councilId = String(opts?.councilId || tmDetails.councilId || '').trim();
+  return {
+    isTotalMobility: true,
+    tmUsed: true,
+    // Remainder method stays in paymentType; these mark the trip as TM for claims.
+    tmPaymentType: 'total_mobility',
+    paymentCategory: 'total_mobility',
+    tmCouncilPays: councilPays,
+    tmPassengerPays: passengerPays,
+    // Legacy aliases used by owner/SA claim UIs
+    tmSubsidy: councilPays,
+    councilPays,
+    passengerPays,
+    tmMeterFare: tmDetails.meterFare,
+    tmSubsidyFare: tmDetails.tmSubsidyFare,
+    tmSubsidyHoist: tmDetails.tmSubsidyHoist ?? tmDetails.hoistTotal,
+    hoistTotal: tmDetails.hoistTotal,
+    hoistCount: tmDetails.hoistCount,
+    tmHoistCount: tmDetails.hoistCount,
+    tmHoists: tmDetails.tmHoists?.length ? tmDetails.tmHoists : undefined,
+    tmCardNumber: card || undefined,
+    tmCardName: tmDetails.tmCardName || undefined,
+    tmCardExpiry: tmDetails.tmCardExpiry || undefined,
+    tmVoucherNo: card || undefined,
+    tmTotalFare: tmDetails.totalFare,
+    tmRemainderPaymentType: opts?.remainderPaymentType || undefined,
+    ...(councilId ? { councilId, tmCouncilId: councilId } : {}),
+  };
+}
+
+export type TmTripStatusSeed = {
+  status: 'pending';
+  councilId: string;
+  companyId: string;
+  submittedAt: number;
+  source: 'driver_complete';
+  isTotalMobility: true;
+  tmCardNumber?: string;
+  tmCouncilPays?: number;
+  tmPassengerPays?: number;
+};
+
+export function buildTmTripStatusSeed(
+  companyId: string,
+  councilId: string,
+  tmDetails: TmPaymentDetails,
+): TmTripStatusSeed {
+  return {
+    status: 'pending',
+    councilId: String(councilId).trim(),
+    companyId: String(companyId).trim(),
+    submittedAt: Date.now(),
+    source: 'driver_complete',
+    isTotalMobility: true,
+    tmCardNumber: tmDetails.tmCardNumber,
+    tmCouncilPays: tmDetails.councilPays,
+    tmPassengerPays: tmDetails.passengerPays,
+  };
+}
+
+const TM_FORWARD_KEYS = [
+  'isTotalMobility',
+  'tmUsed',
+  'tmPaymentType',
+  'paymentCategory',
+  'tmCouncilPays',
+  'tmPassengerPays',
+  'tmSubsidy',
+  'councilPays',
+  'passengerPays',
+  'tmMeterFare',
+  'tmSubsidyFare',
+  'tmSubsidyHoist',
+  'hoistTotal',
+  'hoistCount',
+  'tmHoistCount',
+  'tmHoists',
+  'tmCardNumber',
+  'tmCardName',
+  'tmCardExpiry',
+  'tmVoucherNo',
+  'tmTotalFare',
+  'tmRemainderPaymentType',
+  'councilId',
+  'tmCouncilId',
+] as const;
+
+/**
+ * Pull TM persist fields from a journal/offline/complete payload for re-forwarding.
+ * Accepts either `buildTmPersistFields` output or raw `TmPaymentDetails` shape.
+ */
+export function pickTmFieldsFromPayload(
+  payload: Record<string, unknown> | null | undefined,
+  opts?: { remainderPaymentType?: string },
+): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  if (payload.isTotalMobility === true || payload.tmUsed === true || payload.tmCouncilPays != null) {
+    const out: Record<string, unknown> = {};
+    for (const k of TM_FORWARD_KEYS) {
+      if (payload[k] !== undefined && payload[k] !== null) out[k] = payload[k];
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+  // Raw TmPaymentDetails-ish journal event (councilPays / tmCardNumber).
+  if (
+    payload.councilPays == null &&
+    !payload.tmCardNumber &&
+    !payload.tmVoucherNo &&
+    !(Array.isArray(payload.tmHoists) && payload.tmHoists.length)
+  ) {
+    return undefined;
+  }
+  return buildTmPersistFields(
+    {
+      councilPays: Number(payload.councilPays) || 0,
+      passengerPays: Number(payload.passengerPays) || 0,
+      meterFare: payload.meterFare != null ? Number(payload.meterFare) : undefined,
+      tmSubsidyFare: payload.tmSubsidyFare != null ? Number(payload.tmSubsidyFare) : undefined,
+      hoistTotal: payload.hoistTotal != null ? Number(payload.hoistTotal) : undefined,
+      tmSubsidyHoist:
+        payload.tmSubsidyHoist != null ? Number(payload.tmSubsidyHoist) : undefined,
+      hoistCount: payload.hoistCount != null ? Number(payload.hoistCount) : undefined,
+      tmHoists: Array.isArray(payload.tmHoists)
+        ? (payload.tmHoists as TmPaymentDetails['tmHoists'])
+        : undefined,
+      tmCardNumber: payload.tmCardNumber != null ? String(payload.tmCardNumber) : undefined,
+      tmCardName: payload.tmCardName != null ? String(payload.tmCardName) : undefined,
+      tmCardExpiry: payload.tmCardExpiry != null ? String(payload.tmCardExpiry) : undefined,
+      totalFare: Number(payload.totalFare ?? payload.fare ?? 0) || 0,
+      councilId: payload.councilId != null ? String(payload.councilId) : undefined,
+    },
+    {
+      councilId: payload.councilId != null ? String(payload.councilId) : undefined,
+      remainderPaymentType:
+        opts?.remainderPaymentType ||
+        (payload.tmRemainderPaymentType != null
+          ? String(payload.tmRemainderPaymentType)
+          : payload.paymentType != null
+            ? String(payload.paymentType)
+            : undefined),
+    },
+  );
+}
