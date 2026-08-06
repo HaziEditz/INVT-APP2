@@ -13,11 +13,11 @@ test('offer-pending heartbeat is faster than mid-offer 10s threshold', () => {
   // Mid-offer heal is 10s (strict >). Two offer stamps fit inside that window.
   assert.ok(PRESENCE_OFFER_HEARTBEAT_MS < 10_000);
   assert.ok(PRESENCE_OFFER_HEARTBEAT_MS * 2 <= 10_000);
-  // Idle Available repair cadence is slower than the old 10s pre-offer gate (now 25s on server).
+  // Idle Available repair cadence is slower than mid-offer (10s); pre-offer gate is 45s on server.
   assert.ok(PRESENCE_HEARTBEAT_MS > 10_000);
   assert.ok(PRESENCE_LASTSEEN_REPAIR_MS > 10_000);
-  // Pre-offer gate (25s) must sit above idle heartbeat so healthy parked drivers stay eligible.
-  assert.ok(25_000 > PRESENCE_HEARTBEAT_MS);
+  // Pre-offer gate (45s) must sit above idle heartbeat so healthy parked drivers stay eligible.
+  assert.ok(45_000 > PRESENCE_HEARTBEAT_MS);
 });
 
 test('offer-pending gate engages for modal OR broadcast exclusive offers', () => {

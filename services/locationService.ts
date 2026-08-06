@@ -116,24 +116,29 @@ export async function startBackgroundTracking(
 
   await saveCtx({ companyId, vehicleId, driverId, firebaseStatus });
 
-  const started = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-  if (!started) {
-    try {
-      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-        accuracy: Location.Accuracy.Balanced,
-        timeInterval: 15000,
-        distanceInterval: 25,
-        showsBackgroundLocationIndicator: true,
-        pausesUpdatesAutomatically: false,
-        foregroundService: {
-          notificationTitle: 'BookaWaka — On shift',
-          notificationBody: 'Listening for jobs · GPS active for dispatch',
-        },
-      });
-    } catch (err) {
-      console.warn('[Location] Background tracking unavailable (Expo Go / permissions):', err);
-      return perms.foregroundGranted;
+  // distanceInterval must be 0 so timeInterval fires while parked. A non-zero
+  // filter (e.g. 25m) starves lastSeen when the phone is stationary in background,
+  // so dispatch shows "last seen 3m ago" and blocks assign/auto-dispatch.
+  // Restart if already running so older sessions pick up the new options.
+  try {
+    const started = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    if (started) {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => {});
     }
+    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+      accuracy: Location.Accuracy.Balanced,
+      timeInterval: 15000,
+      distanceInterval: 0,
+      showsBackgroundLocationIndicator: true,
+      pausesUpdatesAutomatically: false,
+      foregroundService: {
+        notificationTitle: 'BookaWaka — On shift',
+        notificationBody: 'Listening for jobs · GPS active for dispatch',
+      },
+    });
+  } catch (err) {
+    console.warn('[Location] Background tracking unavailable (Expo Go / permissions):', err);
+    return perms.foregroundGranted;
   }
 
   try {
