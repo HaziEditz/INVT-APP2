@@ -30,7 +30,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -147,6 +149,14 @@ export function PaymentModal() {
   const [accountFromCache, setAccountFromCache] = useState(false);
   const [accountAllowFreeText, setAccountAllowFreeText] = useState(false);
   const accountSearchSeq = useRef(0);
+  const scrollRef = useRef<ScrollView>(null);
+
+  const scrollAccountFieldIntoView = () => {
+    // Account fields sit mid-form; lift them above the sticky footer + keyboard.
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: 420, animated: true });
+    });
+  };
   const [accClaimNo, setAccClaimNo] = useState('');
   const [accPoNo, setAccPoNo] = useState('');
   const [tmCardNumber, setTmCardNumber] = useState('');
@@ -608,6 +618,7 @@ export function PaymentModal() {
                     setAccountId('');
                     setAccountName('');
                   }}
+                  onFocus={scrollAccountFieldIntoView}
                   autoCorrect={false}
                 />
                 {accountSearching ? (
@@ -853,6 +864,7 @@ export function PaymentModal() {
                         setAccountId('');
                         setAccountName('');
                       }}
+                      onFocus={scrollAccountFieldIntoView}
                       autoCorrect={false}
                     />
                     {accountSearching ? (
@@ -936,14 +948,20 @@ export function PaymentModal() {
 
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen">
-      <View style={styles.screen}>
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+      >
         <ScrollView
+          ref={scrollRef}
           style={styles.scroll}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: insets.top + 12, paddingBottom: 16 },
+            { paddingTop: insets.top + 12, paddingBottom: 120 },
           ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.pageTitle}>Collect Payment</Text>
@@ -1068,7 +1086,7 @@ export function PaymentModal() {
             style={styles.confirmBtn}
           />
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
