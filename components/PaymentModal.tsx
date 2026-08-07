@@ -113,6 +113,8 @@ export function PaymentModal() {
   const { paymentJob, finalizePayment, activeVehicle, selectedTariff, dismissPayment } = useDriver();
 
   const [paymentType, setPaymentType] = useState<DriverPaymentType>('Cash');
+  /** Main payment form vs dedicated Total Mobility details screen (avoids long inline expand). */
+  const [paymentStep, setPaymentStep] = useState<'main' | 'tm'>('main');
   const [tmPassengerPaymentType, setTmPassengerPaymentType] =
     useState<(typeof TM_PASSENGER_PAYMENT_TYPES)[number]>('Cash');
   const [extrasOpen, setExtrasOpen] = useState(false);
@@ -176,6 +178,7 @@ export function PaymentModal() {
     const seeded =
       normalizeDriverPaymentType(paymentJob.paymentType) ?? ('Cash' as DriverPaymentType);
     setPaymentType(seeded);
+    setPaymentStep('main');
     setTmPassengerPaymentType('Cash');
     setExtrasOpen(false);
     setExtraEnabled({
@@ -686,263 +689,61 @@ export function PaymentModal() {
       case 'TM':
         return (
           <View style={styles.detailsBlock}>
-            <Text style={styles.subSection}>Meter fare (subsidy applies)</Text>
             <View style={styles.tmRow}>
-              <Text style={styles.tmLabel}>Meter + extras</Text>
-              <Text style={styles.tmValue}>{fmtMoney(tmSplit.meterFare)}</Text>
-            </View>
-            <View style={styles.tmRow}>
-              <Text style={styles.tmLabel}>Council (meter subsidy)</Text>
-              <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPaysMeter)}</Text>
-            </View>
-            <View style={styles.tmRow}>
-              <Text style={styles.tmLabel}>Passenger (meter share)</Text>
-              <Text style={[styles.tmValue, styles.tmPassenger]}>
-                {fmtMoney(tmSplit.passengerPaysMeter)}
-              </Text>
-            </View>
-            <Text style={[styles.subSection, { marginTop: 10 }]}>Primary TM card (optional)</Text>
-            <Text style={styles.hint}>
-              Leave blank if every passenger is on a hoist row — the first hoist card is used as
-              primary. Does not reduce hoist fees.
-            </Text>
-            <TextInput
-              style={styles.field}
-              placeholder="TM card number"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              value={tmCardNumber}
-              onChangeText={setTmCardNumber}
-            />
-            <TextInput
-              style={styles.field}
-              placeholder="Cardholder name (optional)"
-              placeholderTextColor={Colors.textMuted}
-              autoCapitalize="words"
-              value={tmCardName}
-              onChangeText={setTmCardName}
-            />
-            <TextInput
-              style={styles.field}
-              placeholder="TM card expiry MM/YY"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              maxLength={5}
-              value={tmCardExpiry}
-              onChangeText={(v) => setTmCardExpiry(formatTmCardExpiryInput(v))}
-            />
-            {isWav ? (
-              <View style={styles.hoistBlock}>
-                <Text style={styles.subSection}>
-                  Hoist passengers (100% council · {fmtMoney(hoistCostPerUnit)} / use)
-                </Text>
-                <Text style={styles.hint}>
-                  Add one row per wheelchair passenger. Each gets a full hoist fee on their own
-                  card.
-                </Text>
-                {hoistRows.map((row, idx) => (
-                  <View key={row.key} style={styles.hoistRow}>
-                    <Text style={styles.hoistRowLabel}>Hoist {idx + 1}</Text>
-                    <TextInput
-                      style={styles.field}
-                      placeholder="TM card number *"
-                      placeholderTextColor={Colors.textMuted}
-                      keyboardType="number-pad"
-                      value={row.cardNumber}
-                      onChangeText={(v) =>
-                        setHoistRows((prev) =>
-                          prev.map((r) => (r.key === row.key ? { ...r, cardNumber: v } : r)),
-                        )
-                      }
-                    />
-                    <TextInput
-                      style={styles.field}
-                      placeholder="Expiry MM/YY (optional)"
-                      placeholderTextColor={Colors.textMuted}
-                      keyboardType="number-pad"
-                      maxLength={5}
-                      value={row.cardExpiry}
-                      onChangeText={(v) =>
-                        setHoistRows((prev) =>
-                          prev.map((r) =>
-                            r.key === row.key
-                              ? { ...r, cardExpiry: formatTmCardExpiryInput(v) }
-                              : r,
-                          ),
-                        )
-                      }
-                    />
-                    <View style={styles.hoistRowFooter}>
-                      <Text style={styles.hoistRate}>{fmtMoney(hoistCostPerUnit)} council</Text>
-                      <TouchableOpacity
-                        onPress={() =>
-                          setHoistRows((prev) => prev.filter((r) => r.key !== row.key))
-                        }
-                      >
-                        <Text style={styles.hoistRemove}>Remove</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))}
-                <TouchableOpacity
-                  style={styles.hoistAddBtn}
-                  onPress={() =>
-                    setHoistRows((prev) => [
-                      ...prev,
-                      {
-                        key: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                        cardNumber: '',
-                        cardExpiry: '',
-                      },
-                    ])
-                  }
-                >
-                  <Text style={styles.hoistAddText}>+ Add hoist passenger</Text>
-                </TouchableOpacity>
-                <View style={styles.tmRow}>
-                  <Text style={styles.tmLabel}>
-                    Hoist fee ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
-                  </Text>
-                  <Text style={styles.tmValue}>{fmtMoney(hoistTotal)}</Text>
-                </View>
-                <Text style={styles.hint}>Passenger pays $0 toward hoist.</Text>
-              </View>
-            ) : null}
-            <View style={[styles.tmRow, { marginTop: 8 }]}>
-              <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Total council</Text>
-              <Text style={[styles.tmValue, { fontWeight: '700' }]}>
-                {fmtMoney(tmSplit.councilPays)}
-              </Text>
-            </View>
-            <View style={styles.tmRow}>
-              <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Collect from passenger</Text>
+              <Text style={styles.tmLabel}>Collect from passenger</Text>
               <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
                 {fmtMoney(tmSplit.passengerPays)}
               </Text>
             </View>
-            <Dropdown
-              label="Passenger pays remaining via"
-              value={tmPassengerPaymentType}
-              options={TM_PASSENGER_PAYMENT_TYPES}
-              onChange={setTmPassengerPaymentType}
-            />
-            {tmPassengerPaymentType === 'Account' ? (
-              <View style={{ marginTop: 12 }}>
-                {accountId ? (
-                  <View style={styles.accountSelected}>
-                    <Text style={styles.accountSelectedLabel}>Business account</Text>
-                    <Text style={styles.accountSelectedName}>
-                      {accountName || 'Account selected'}
-                    </Text>
-                    {!accountLockedFromDispatch ? (
-                      <TouchableOpacity
-                        onPress={() => {
-                          setAccountId('');
-                          setAccountName('');
-                          setAccountSearch('');
-                          setAccountAllowFreeText(false);
-                        }}
-                      >
-                        <Text style={styles.accountChange}>Change</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                ) : (
-                  <>
-                    <Text style={styles.accountHint}>
-                      {accountAllowFreeText
-                        ? 'Search cached accounts, or type the account name/number offline'
-                        : 'Search and select a business account'}
-                    </Text>
-                    <TextInput
-                      style={styles.field}
-                      placeholder="Search business name or account number…"
-                      placeholderTextColor={Colors.textMuted}
-                      value={accountSearch}
-                      onChangeText={(t) => {
-                        setAccountSearch(t);
-                        setAccountId('');
-                        setAccountName('');
-                      }}
-                      onFocus={scrollAccountFieldIntoView}
-                      autoCorrect={false}
-                    />
-                    {accountSearching ? (
-                      <ActivityIndicator color={Colors.accent} style={{ marginVertical: 8 }} />
-                    ) : null}
-                    {accountFromCache ? (
-                      <Text style={styles.hint}>Showing recent/cached accounts</Text>
-                    ) : null}
-                    {accountSearchError ? (
-                      <Text style={styles.accountSearchError}>{accountSearchError}</Text>
-                    ) : null}
-                    {accountHits.map((hit) => {
-                      const id = String(hit.Id ?? '');
-                      const name = String(hit.Name || '').trim() || id;
-                      return (
-                        <TouchableOpacity
-                          key={id || name}
-                          style={styles.accountHit}
-                          onPress={() => {
-                            setAccountId(id);
-                            setAccountName(name);
-                            setAccountSearch(name);
-                            setAccountHits([]);
-                            setAccountAllowFreeText(false);
-                            const cid = String(driver?.companyId || '').trim();
-                            if (cid && id) {
-                              void rememberBusinessAccount(cid, {
-                                id,
-                                name,
-                                accountCode: String(hit.AccountCode || '').trim() || undefined,
-                              }).catch(() => {});
-                            }
-                          }}
-                        >
-                          <Text style={styles.accountHitName}>{name}</Text>
-                          {hit.AccountCode ? (
-                            <Text style={styles.accountHitMeta}>{String(hit.AccountCode)}</Text>
-                          ) : null}
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </>
-                )}
+            <View style={styles.tmRow}>
+              <Text style={styles.tmLabel}>Council total</Text>
+              <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPays)}</Text>
+            </View>
+            <View style={styles.tmRow}>
+              <Text style={styles.tmLabel}>Passenger pays via</Text>
+              <Text style={styles.tmValue}>{tmPassengerPaymentType}</Text>
+            </View>
+            {isWav && hoistUnits > 0 ? (
+              <View style={styles.tmRow}>
+                <Text style={styles.tmLabel}>Hoist passengers</Text>
+                <Text style={styles.tmValue}>
+                  {hoistUnits} × {fmtMoney(hoistCostPerUnit)}
+                </Text>
               </View>
             ) : null}
-            {tmPassengerPaymentType === 'ACC' ? (
-              <View style={{ marginTop: 12 }}>
-                <TextInput
-                  style={styles.field}
-                  placeholder="Claim number"
-                  placeholderTextColor={Colors.textMuted}
-                  value={accClaimNo}
-                  onChangeText={setAccClaimNo}
-                />
-                <TextInput
-                  style={styles.field}
-                  placeholder="Purchase order number"
-                  placeholderTextColor={Colors.textMuted}
-                  value={accPoNo}
-                  onChangeText={setAccPoNo}
-                />
-              </View>
-            ) : null}
-            {tmPassengerPaymentType === 'EFTPOS' ? (
-              <View style={{ marginTop: 12 }}>
-                <TextInput
-                  style={styles.field}
-                  placeholder="Transaction reference (optional)"
-                  placeholderTextColor={Colors.textMuted}
-                  value={eftposRef}
-                  onChangeText={setEftposRef}
-                />
-              </View>
-            ) : null}
+            <TouchableOpacity
+              style={styles.tmOpenBtn}
+              onPress={() => {
+                setPaymentStep('tm');
+                requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+              }}
+            >
+              <Text style={styles.tmOpenBtnText}>Open TM details →</Text>
+            </TouchableOpacity>
           </View>
         );
       default:
         return null;
+    }
+  };
+
+  const openTmScreen = () => {
+    setPaymentType('TM');
+    setPaymentStep('tm');
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+  };
+
+  const closeTmScreen = () => {
+    setPaymentStep('main');
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+  };
+
+  const onPaymentTypeChange = (v: DriverPaymentType) => {
+    setPaymentType(v);
+    if (v === 'TM') {
+      openTmScreen();
+    } else {
+      setPaymentStep('main');
     }
   };
 
@@ -953,139 +754,439 @@ export function PaymentModal() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
       >
-        <ScrollView
-          ref={scrollRef}
-          style={styles.scroll}
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingTop: insets.top + 12, paddingBottom: 120 },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={styles.pageTitle}>Collect Payment</Text>
-          <Text style={styles.pickup} numberOfLines={2}>
-            {paymentJob.pickup}
-          </Text>
-          <Pressable onPress={dismissPayment} style={styles.backLink}>
-            <Text style={styles.backLinkText}>← Back to trip</Text>
-          </Pressable>
-
-          <View style={styles.card}>
-            <Text style={styles.stepLabel}>Fare summary</Text>
-            <Text style={styles.metaLine}>
-              Trip {fmtDuration(fare.tripMs)} · {fare.distanceKm.toFixed(2)} km · Waiting{' '}
-              {fare.waitingMin.toFixed(1)} min
-            </Text>
-            <View style={styles.lineRow}>
-              <Text style={styles.lineLabel}>Base Charge</Text>
-              <Text style={styles.lineVal}>{fmtMoney(fare.flagFall)}</Text>
-            </View>
-            <View style={styles.lineRow}>
-              <Text style={styles.lineLabel}>
-                Ride ({fare.distanceKm.toFixed(2)} km × {fmtMoney(fare.ratePerKm)}/km)
+        {paymentStep === 'tm' ? (
+          <>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.scroll}
+              contentContainerStyle={[
+                styles.scrollContent,
+                { paddingTop: insets.top + 12, paddingBottom: 120 },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.pageTitle}>Total Mobility</Text>
+              <Text style={styles.pickup} numberOfLines={2}>
+                {paymentJob.pickup}
               </Text>
-              <Text style={styles.lineVal}>{fmtMoney(fare.distanceCharge)}</Text>
-            </View>
-            <View style={styles.lineRow}>
-              <Text style={styles.lineLabel}>
-                Waiting ({fare.waitingMin.toFixed(1)} min × {fmtMoney(fare.waitingPerMin)}/min)
-              </Text>
-              <Text style={styles.lineVal}>{fmtMoney(fare.waitingCharge)}</Text>
-            </View>
-            <View style={styles.tripTotalRow}>
-              <Text style={styles.tripTotalLabel}>TRIP TOTAL</Text>
-              <Text style={styles.tripTotalVal}>{fmtMoney(fare.tripTotal)}</Text>
-            </View>
-          </View>
+              <Pressable onPress={closeTmScreen} style={styles.backLink}>
+                <Text style={styles.backLinkText}>← Back to payment</Text>
+              </Pressable>
 
-          <Dropdown
-            label="Payment type"
-            value={paymentType}
-            options={DRIVER_PAYMENT_TYPES}
-            onChange={setPaymentType}
-          />
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>Meter fare (subsidy applies)</Text>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Meter + extras</Text>
+                  <Text style={styles.tmValue}>{fmtMoney(tmSplit.meterFare)}</Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Council (meter subsidy)</Text>
+                  <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPaysMeter)}</Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Passenger (meter share)</Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger]}>
+                    {fmtMoney(tmSplit.passengerPaysMeter)}
+                  </Text>
+                </View>
+              </View>
 
-          <View style={styles.card}>
-            <Text style={styles.stepLabel}>Payment details</Text>
-            {renderPaymentDetails()}
-          </View>
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>Primary TM card (optional)</Text>
+                <Text style={styles.hint}>
+                  Leave blank if every passenger is on a hoist row — the first hoist card is used as
+                  primary. Does not reduce hoist fees.
+                </Text>
+                <TextInput
+                  style={styles.field}
+                  placeholder="TM card number"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="number-pad"
+                  value={tmCardNumber}
+                  onChangeText={setTmCardNumber}
+                />
+                <TextInput
+                  style={styles.field}
+                  placeholder="Cardholder name (optional)"
+                  placeholderTextColor={Colors.textMuted}
+                  autoCapitalize="words"
+                  value={tmCardName}
+                  onChangeText={setTmCardName}
+                />
+                <TextInput
+                  style={styles.field}
+                  placeholder="TM card expiry MM/YY"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="number-pad"
+                  maxLength={5}
+                  value={tmCardExpiry}
+                  onChangeText={(v) => setTmCardExpiry(formatTmCardExpiryInput(v))}
+                />
+              </View>
 
-          <Pressable style={styles.collapseHeader} onPress={() => setExtrasOpen((o) => !o)}>
-            <Text style={styles.sectionTitle}>Extra charges</Text>
-            <Text style={styles.collapseIcon}>{extrasOpen ? '▼' : '▶'}</Text>
-          </Pressable>
-          {extrasOpen ? (
-            <View style={styles.card}>
-              {EXTRA_ITEMS.map(({ key, label }) => (
-                <View key={key} style={styles.extraItem}>
-                  <TouchableOpacity
-                    style={styles.checkboxRow}
-                    onPress={() => setExtraEnabled((prev) => ({ ...prev, [key]: !prev[key] }))}
-                  >
-                    <View style={[styles.checkbox, extraEnabled[key] && styles.checkboxOn]}>
-                      {extraEnabled[key] ? <Text style={styles.checkMark}>✓</Text> : null}
-                    </View>
-                    <Text style={styles.checkboxLabel}>{label}</Text>
-                  </TouchableOpacity>
-                  {extraEnabled[key] ? (
-                    key === 'other' ? (
-                      <>
-                        <TextInput
-                          style={styles.field}
-                          placeholder="Description"
-                          placeholderTextColor={Colors.textMuted}
-                          value={otherNote}
-                          onChangeText={setOtherNote}
-                        />
-                        <TextInput
-                          style={styles.field}
-                          placeholder="Amount"
-                          placeholderTextColor={Colors.textMuted}
-                          keyboardType="decimal-pad"
-                          value={extraAmounts.other}
-                          onChangeText={(v) => setExtraAmounts((a) => ({ ...a, other: v }))}
-                        />
-                      </>
-                    ) : (
+              {isWav ? (
+                <View style={styles.card}>
+                  <Text style={styles.stepLabel}>
+                    Hoist passengers (100% council · {fmtMoney(hoistCostPerUnit)} / use)
+                  </Text>
+                  <Text style={styles.hint}>
+                    Add one row per wheelchair passenger. Each gets a full hoist fee on their own
+                    card.
+                  </Text>
+                  {hoistRows.map((row, idx) => (
+                    <View key={row.key} style={styles.hoistRow}>
+                      <Text style={styles.hoistRowLabel}>Hoist {idx + 1}</Text>
                       <TextInput
                         style={styles.field}
-                        placeholder="Amount"
+                        placeholder="TM card number *"
                         placeholderTextColor={Colors.textMuted}
-                        keyboardType="decimal-pad"
-                        value={extraAmounts[key]}
-                        onChangeText={(v) => setExtraAmounts((a) => ({ ...a, [key]: v }))}
+                        keyboardType="number-pad"
+                        value={row.cardNumber}
+                        onChangeText={(v) =>
+                          setHoistRows((prev) =>
+                            prev.map((r) => (r.key === row.key ? { ...r, cardNumber: v } : r)),
+                          )
+                        }
                       />
-                    )
-                  ) : null}
+                      <TextInput
+                        style={styles.field}
+                        placeholder="Expiry MM/YY (optional)"
+                        placeholderTextColor={Colors.textMuted}
+                        keyboardType="number-pad"
+                        maxLength={5}
+                        value={row.cardExpiry}
+                        onChangeText={(v) =>
+                          setHoistRows((prev) =>
+                            prev.map((r) =>
+                              r.key === row.key
+                                ? { ...r, cardExpiry: formatTmCardExpiryInput(v) }
+                                : r,
+                            ),
+                          )
+                        }
+                      />
+                      <View style={styles.hoistRowFooter}>
+                        <Text style={styles.hoistRate}>{fmtMoney(hoistCostPerUnit)} council</Text>
+                        <TouchableOpacity
+                          onPress={() =>
+                            setHoistRows((prev) => prev.filter((r) => r.key !== row.key))
+                          }
+                        >
+                          <Text style={styles.hoistRemove}>Remove</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.hoistAddBtn}
+                    onPress={() =>
+                      setHoistRows((prev) => [
+                        ...prev,
+                        {
+                          key: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                          cardNumber: '',
+                          cardExpiry: '',
+                        },
+                      ])
+                    }
+                  >
+                    <Text style={styles.hoistAddText}>+ Add hoist passenger</Text>
+                  </TouchableOpacity>
+                  <View style={styles.tmRow}>
+                    <Text style={styles.tmLabel}>
+                      Hoist fee ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
+                    </Text>
+                    <Text style={styles.tmValue}>{fmtMoney(hoistTotal)}</Text>
+                  </View>
+                  <Text style={styles.hint}>Passenger pays $0 toward hoist.</Text>
                 </View>
-              ))}
-            </View>
-          ) : null}
-        </ScrollView>
+              ) : null}
 
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-          {isTmPayment ? (
-            <Text style={styles.footerNote}>
-              Meter subsidy {fmtMoney(tmSplit.councilPaysMeter)}
-              {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}
-              {' · '}Collect {fmtMoney(tmSplit.passengerPays)}
-            </Text>
-          ) : extrasTotal > 0 || hoistTotal > 0 ? (
-            <Text style={styles.footerNote}>
-              Extras {fmtMoney(extrasTotal)}
-              {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)}` : ''}
-            </Text>
-          ) : null}
-          <Text style={styles.totalDue}>Total Due: {fmtMoney(totalDue)}</Text>
-          <Button
-            title={submitting ? 'Saving…' : 'Confirm Payment'}
-            onPress={onConfirm}
-            disabled={submitting}
-            style={styles.confirmBtn}
-          />
-        </View>
+              <View style={styles.card}>
+                <View style={styles.tmRow}>
+                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Total council</Text>
+                  <Text style={[styles.tmValue, { fontWeight: '700' }]}>
+                    {fmtMoney(tmSplit.councilPays)}
+                  </Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Collect from passenger</Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
+                    {fmtMoney(tmSplit.passengerPays)}
+                  </Text>
+                </View>
+                <Dropdown
+                  label="Passenger pays remaining via"
+                  value={tmPassengerPaymentType}
+                  options={TM_PASSENGER_PAYMENT_TYPES}
+                  onChange={setTmPassengerPaymentType}
+                />
+                {tmPassengerPaymentType === 'Account' ? (
+                  <View style={{ marginTop: 12 }}>
+                    {accountId ? (
+                      <View style={styles.accountSelected}>
+                        <Text style={styles.accountSelectedLabel}>Business account</Text>
+                        <Text style={styles.accountSelectedName}>
+                          {accountName || 'Account selected'}
+                        </Text>
+                        {!accountLockedFromDispatch ? (
+                          <TouchableOpacity
+                            onPress={() => {
+                              setAccountId('');
+                              setAccountName('');
+                              setAccountSearch('');
+                              setAccountAllowFreeText(false);
+                            }}
+                          >
+                            <Text style={styles.accountChange}>Change</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    ) : (
+                      <>
+                        <Text style={styles.accountHint}>
+                          {accountAllowFreeText
+                            ? 'Search cached accounts, or type the account name/number offline'
+                            : 'Search and select a business account'}
+                        </Text>
+                        <TextInput
+                          style={styles.field}
+                          placeholder="Search business name or account number…"
+                          placeholderTextColor={Colors.textMuted}
+                          value={accountSearch}
+                          onChangeText={(t) => {
+                            setAccountSearch(t);
+                            setAccountId('');
+                            setAccountName('');
+                          }}
+                          onFocus={scrollAccountFieldIntoView}
+                          autoCorrect={false}
+                        />
+                        {accountSearching ? (
+                          <ActivityIndicator color={Colors.accent} style={{ marginVertical: 8 }} />
+                        ) : null}
+                        {accountFromCache ? (
+                          <Text style={styles.hint}>Showing recent/cached accounts</Text>
+                        ) : null}
+                        {accountSearchError ? (
+                          <Text style={styles.accountSearchError}>{accountSearchError}</Text>
+                        ) : null}
+                        {accountHits.map((hit) => {
+                          const id = String(hit.Id ?? '');
+                          const name = String(hit.Name || '').trim() || id;
+                          return (
+                            <TouchableOpacity
+                              key={id || name}
+                              style={styles.accountHit}
+                              onPress={() => {
+                                setAccountId(id);
+                                setAccountName(name);
+                                setAccountSearch(name);
+                                setAccountHits([]);
+                                setAccountAllowFreeText(false);
+                                const cid = String(driver?.companyId || '').trim();
+                                if (cid && id) {
+                                  void rememberBusinessAccount(cid, {
+                                    id,
+                                    name,
+                                    accountCode: String(hit.AccountCode || '').trim() || undefined,
+                                  }).catch(() => {});
+                                }
+                              }}
+                            >
+                              <Text style={styles.accountHitName}>{name}</Text>
+                              {hit.AccountCode ? (
+                                <Text style={styles.accountHitMeta}>{String(hit.AccountCode)}</Text>
+                              ) : null}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </>
+                    )}
+                  </View>
+                ) : null}
+                {tmPassengerPaymentType === 'ACC' ? (
+                  <View style={{ marginTop: 12 }}>
+                    <TextInput
+                      style={styles.field}
+                      placeholder="Claim number"
+                      placeholderTextColor={Colors.textMuted}
+                      value={accClaimNo}
+                      onChangeText={setAccClaimNo}
+                    />
+                    <TextInput
+                      style={styles.field}
+                      placeholder="Purchase order number"
+                      placeholderTextColor={Colors.textMuted}
+                      value={accPoNo}
+                      onChangeText={setAccPoNo}
+                    />
+                  </View>
+                ) : null}
+                {tmPassengerPaymentType === 'EFTPOS' ? (
+                  <View style={{ marginTop: 12 }}>
+                    <TextInput
+                      style={styles.field}
+                      placeholder="Transaction reference (optional)"
+                      placeholderTextColor={Colors.textMuted}
+                      value={eftposRef}
+                      onChangeText={setEftposRef}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            </ScrollView>
+
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+              <Text style={styles.footerNote}>
+                Meter subsidy {fmtMoney(tmSplit.councilPaysMeter)}
+                {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}
+                {' · '}Collect {fmtMoney(tmSplit.passengerPays)}
+              </Text>
+              <Button title="Done" onPress={closeTmScreen} style={styles.confirmBtn} />
+            </View>
+          </>
+        ) : (
+          <>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.scroll}
+              contentContainerStyle={[
+                styles.scrollContent,
+                { paddingTop: insets.top + 12, paddingBottom: 120 },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.pageTitle}>Collect Payment</Text>
+              <Text style={styles.pickup} numberOfLines={2}>
+                {paymentJob.pickup}
+              </Text>
+              <Pressable onPress={dismissPayment} style={styles.backLink}>
+                <Text style={styles.backLinkText}>← Back to trip</Text>
+              </Pressable>
+
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>Fare summary</Text>
+                <Text style={styles.metaLine}>
+                  Trip {fmtDuration(fare.tripMs)} · {fare.distanceKm.toFixed(2)} km · Waiting{' '}
+                  {fare.waitingMin.toFixed(1)} min
+                </Text>
+                <View style={styles.lineRow}>
+                  <Text style={styles.lineLabel}>Base Charge</Text>
+                  <Text style={styles.lineVal}>{fmtMoney(fare.flagFall)}</Text>
+                </View>
+                <View style={styles.lineRow}>
+                  <Text style={styles.lineLabel}>
+                    Ride ({fare.distanceKm.toFixed(2)} km × {fmtMoney(fare.ratePerKm)}/km)
+                  </Text>
+                  <Text style={styles.lineVal}>{fmtMoney(fare.distanceCharge)}</Text>
+                </View>
+                <View style={styles.lineRow}>
+                  <Text style={styles.lineLabel}>
+                    Waiting ({fare.waitingMin.toFixed(1)} min × {fmtMoney(fare.waitingPerMin)}/min)
+                  </Text>
+                  <Text style={styles.lineVal}>{fmtMoney(fare.waitingCharge)}</Text>
+                </View>
+                <View style={styles.tripTotalRow}>
+                  <Text style={styles.tripTotalLabel}>TRIP TOTAL</Text>
+                  <Text style={styles.tripTotalVal}>{fmtMoney(fare.tripTotal)}</Text>
+                </View>
+              </View>
+
+              <Dropdown
+                label="Payment type"
+                value={paymentType}
+                options={DRIVER_PAYMENT_TYPES}
+                onChange={onPaymentTypeChange}
+              />
+
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>Payment details</Text>
+                {renderPaymentDetails()}
+              </View>
+
+              <Pressable style={styles.collapseHeader} onPress={() => setExtrasOpen((o) => !o)}>
+                <Text style={styles.sectionTitle}>Extra charges</Text>
+                <Text style={styles.collapseIcon}>{extrasOpen ? '▼' : '▶'}</Text>
+              </Pressable>
+              {extrasOpen ? (
+                <View style={styles.card}>
+                  {EXTRA_ITEMS.map(({ key, label }) => (
+                    <View key={key} style={styles.extraItem}>
+                      <TouchableOpacity
+                        style={styles.checkboxRow}
+                        onPress={() =>
+                          setExtraEnabled((prev) => ({ ...prev, [key]: !prev[key] }))
+                        }
+                      >
+                        <View style={[styles.checkbox, extraEnabled[key] && styles.checkboxOn]}>
+                          {extraEnabled[key] ? <Text style={styles.checkMark}>✓</Text> : null}
+                        </View>
+                        <Text style={styles.checkboxLabel}>{label}</Text>
+                      </TouchableOpacity>
+                      {extraEnabled[key] ? (
+                        key === 'other' ? (
+                          <>
+                            <TextInput
+                              style={styles.field}
+                              placeholder="Description"
+                              placeholderTextColor={Colors.textMuted}
+                              value={otherNote}
+                              onChangeText={setOtherNote}
+                            />
+                            <TextInput
+                              style={styles.field}
+                              placeholder="Amount"
+                              placeholderTextColor={Colors.textMuted}
+                              keyboardType="decimal-pad"
+                              value={extraAmounts.other}
+                              onChangeText={(v) => setExtraAmounts((a) => ({ ...a, other: v }))}
+                            />
+                          </>
+                        ) : (
+                          <TextInput
+                            style={styles.field}
+                            placeholder="Amount"
+                            placeholderTextColor={Colors.textMuted}
+                            keyboardType="decimal-pad"
+                            value={extraAmounts[key]}
+                            onChangeText={(v) => setExtraAmounts((a) => ({ ...a, [key]: v }))}
+                          />
+                        )
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </ScrollView>
+
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+              {isTmPayment ? (
+                <Text style={styles.footerNote}>
+                  Meter subsidy {fmtMoney(tmSplit.councilPaysMeter)}
+                  {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}
+                  {' · '}Collect {fmtMoney(tmSplit.passengerPays)}
+                </Text>
+              ) : extrasTotal > 0 || hoistTotal > 0 ? (
+                <Text style={styles.footerNote}>
+                  Extras {fmtMoney(extrasTotal)}
+                  {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)}` : ''}
+                </Text>
+              ) : null}
+              <Text style={styles.totalDue}>Total Due: {fmtMoney(totalDue)}</Text>
+              <Button
+                title={submitting ? 'Saving…' : 'Confirm Payment'}
+                onPress={onConfirm}
+                disabled={submitting}
+                style={styles.confirmBtn}
+              />
+            </View>
+          </>
+        )}
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -1287,6 +1388,19 @@ const styles = StyleSheet.create({
   tmPassenger: {
     color: Colors.success,
     fontSize: 18,
+    fontWeight: '800',
+  },
+  tmOpenBtn: {
+    marginTop: 14,
+    backgroundColor: Colors.accent,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+  },
+  tmOpenBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: '800',
   },
   hoistBlock: {
