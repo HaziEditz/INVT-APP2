@@ -27,6 +27,12 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 
+# Live debug captures (INVT watch-live-trace) — never commit; can grow huge
+prod-live-*-capture.txt
+prod-live-*-capture.txt.1
+*-mid-offer-capture.txt
+*-mid-offer-capture.txt.1
+
 # macOS
 .DS_Store
 *.pem

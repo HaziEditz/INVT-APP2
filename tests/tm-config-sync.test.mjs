@@ -1,5 +1,5 @@
 /**
- * Phase 1 — council tmConfig ↔ company driver-split mapping + legacy tmTariffs UX.
+ * Phase 1 — council tmConfig ↔ company driver-split mapping + reference price list UX.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -77,7 +77,8 @@ test('SA Council Config save triggers company sync', () => {
 test('SA approve company access syncs council rates', () => {
   const src = readFileSync(join(saRoot, 'TM-Settings.aspx'), 'utf8');
   assert.match(src, /syncCouncilTmConfigToCompany/);
-  assert.match(src, /legacy \/ unused|LEGACY — unused/i);
+  assert.match(src, /Reference price list/i);
+  assert.match(src, /not live metering/i);
   assert.doesNotMatch(
     src,
     /Set the metered rates used to calculate TM fares/,
@@ -98,9 +99,9 @@ test('owner panel removes TM Tariffs from nav and marks page legacy', () => {
   );
 });
 
-test('council portal Operators labels tmTariffs as legacy / unused', () => {
+test('council portal Operators labels tmTariffs as Manual reference', () => {
   const src = readFileSync(join(saSrcRoot, 'council.ts'), 'utf8');
-  assert.match(src, /legacy \/ unused/i);
+  assert.match(src, /Manual reference/i);
   assert.match(src, /Not used for live metering/);
   assert.match(src, /tmTariffs\//);
 });
