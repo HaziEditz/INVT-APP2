@@ -151,8 +151,10 @@ test('Closed Job UI shows TM when remainder is Cash', () => {
 test('owner panel extractTmTrips accepts driver TM economics', () => {
   const src = readFileSync(join(adminRoot, 'server.js'), 'utf8');
   assert.match(src, /function isOwnerTmCompletedJob/);
+  assert.match(src, /function mergeOwnerTmJobMap/);
   assert.match(src, /isTotalMobility === true/);
   assert.match(src, /tmCouncilPays/);
+  assert.match(src, /adminRead\('closedJobs\/' \+ cid\)/);
   assert.match(src, /tmCardNumber \|\| t\.tmVoucherNo/);
 });
 
