@@ -27,6 +27,42 @@ export function journalHasUnsyncedStages(events: JournalEventLike[]): boolean {
   );
 }
 
+/** Match a journal row to a completed trip (job id and/or clientTripId). */
+export function journalMatchesCompletedTrip(
+  row: {
+    clientTripId?: string;
+    serverJobId?: string | null;
+    events: Array<{ payload?: Record<string, unknown> | null }>;
+  },
+  jobId: string,
+  clientTripId: string,
+): boolean {
+  const id = String(jobId || '').trim();
+  const key = String(clientTripId || '').trim();
+  const idMatch = !!id && String(row.serverJobId || '').trim() === id;
+  const keyMatch = !!key && row.clientTripId === key;
+  const payloadMatch =
+    !!id &&
+    row.events.some((e) => {
+      const p = e.payload || {};
+      return String(p.jobId || p.bookingId || '') === id;
+    });
+  return idMatch || keyMatch || payloadMatch;
+}
+
+/**
+ * After local Completed is journalled (weak-signal / offline), mark Arrived/OnBoard
+ * synced so Syncing only tracks the terminal flush — not already-applied stages.
+ * Does NOT mark Completed/Cancelled/NoShow (those must still flush to dispatch).
+ */
+export function markJournalStageEventsSynced<T extends JournalEventLike>(events: T[]): T[] {
+  return events.map((e) =>
+    (e.type === 'Arrived' || e.type === 'OnBoard') && e.synced !== true
+      ? { ...e, synced: true }
+      : e,
+  );
+}
+
 /** Local stage hint for catch-up before Completed flush. */
 export function localStageHintFromJournalEvents(
   events: JournalEventLike[],

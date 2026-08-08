@@ -35,6 +35,7 @@ import {
   ensureJournalForJob,
   hasPendingTripJournalWork,
   markTripJournalSyncedForCompletedTrip,
+  markTripJournalStagesSyncedForTrip,
 } from '@/services/tripJournalService';
 import { shouldBlockOffersForPendingTripSync } from '@/lib/tripJournalFlushPolicy';
 import {
@@ -2922,6 +2923,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       onTerminalSynced: async ({ serverJobId, clientTripId, type, payload }) => {
         if (type !== 'Completed') return;
         await bindPendingClosedJobServerId({ clientTripId, serverJobId }).catch(() => undefined);
+        // Terminal flush succeeded (incl. idempotent) — clear any leftover stage/terminal
+        // rows for this trip so Syncing does not stick after a successful complete.
+        await markTripJournalSyncedForCompletedTrip({
+          jobId: serverJobId,
+          clientTripId,
+        }).catch((err) => {
+          console.warn('[Driver] clear journal after terminal flush failed:', err);
+        });
         await flushPendingClosedJobs({
           only: { serverJobId, clientTripId },
           tripFields: payload,
@@ -4337,6 +4346,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (offlineComplete) {
       try {
         await journalCompletedLocal();
+        try {
+          await markTripJournalStagesSyncedForTrip({
+            jobId: String(job.id),
+            clientTripId: job.clientTripId || resolveJournalClientTripId(job),
+          });
+          await refreshSyncingBannerRef.current?.();
+          await refreshPendingTripSyncGate();
+        } catch (stageErr) {
+          console.warn('[Driver] clear stages after offline complete failed:', stageErr);
+        }
       } catch (err) {
         localCompletionRef.current = false;
         throw err instanceof Error ? err : new Error('Cannot complete offline.');
@@ -4362,6 +4381,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       });
       if (outcome === 'journal_fallback') {
         deferredFirebasePersist = true;
+        // Stages already happened locally — clear them so Syncing only tracks Completed
+        // flush. Kick flush immediately while still online (do not wait for reconnect).
+        try {
+          await markTripJournalStagesSyncedForTrip({
+            jobId: String(job.id),
+            clientTripId: job.clientTripId || resolveJournalClientTripId(job),
+          });
+          await refreshSyncingBannerRef.current?.();
+          await refreshPendingTripSyncGate();
+        } catch (err) {
+          console.warn('[Driver] clear stages after journal_fallback failed:', err);
+        }
+        void flushPendingTripJournalRef.current?.();
       } else {
         // Online complete already archived the job — clear leftover stage/terminal
         // journal rows so Syncing/Busy does not stick until force-close.

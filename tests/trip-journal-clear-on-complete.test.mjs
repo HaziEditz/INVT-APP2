@@ -1,26 +1,20 @@
 /**
- * After online complete, leftover journal stages for that job must clear Syncing/Busy.
+ * Syncing must clear after complete succeeds — including journal_fallback once
+ * stages are cleared and Completed flushes (idempotent OK counts).
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { hasPendingTripJournalWorkFromRows } from '../lib/tripJournalFlushPolicy.ts';
+import {
+  hasPendingTripJournalWorkFromRows,
+  journalMatchesCompletedTrip,
+  markJournalStageEventsSynced,
+  journalHasUnsyncedStages,
+} from '../lib/tripJournalFlushPolicy.ts';
 
 /** Pure mirror of markTripJournalSyncedForCompletedTrip matching rules. */
-function journalMatchesCompletedTrip(row, jobId, clientTripId) {
-  const idMatch = !!jobId && String(row.serverJobId || '').trim() === jobId;
-  const keyMatch = !!clientTripId && row.clientTripId === clientTripId;
-  const payloadMatch =
-    !!jobId &&
-    row.events.some((e) => {
-      const p = e.payload || {};
-      return String(p.jobId || p.bookingId || '') === jobId;
-    });
-  return idMatch || keyMatch || payloadMatch;
-}
-
 function markEventsSynced(row) {
   return {
     ...row,
@@ -92,11 +86,57 @@ test('marking completed trip journal synced clears pending stage/terminal counts
   );
 });
 
+test('journal_fallback clears stages only — Completed stays pending until flush', () => {
+  const jobId = '8692608084';
+  const row = {
+    clientTripId: 'ct-hail',
+    serverJobId: jobId,
+    events: [
+      { type: 'Arrived', synced: false, payload: { jobId } },
+      { type: 'OnBoard', synced: false, payload: { jobId } },
+      { type: 'Completed', synced: false, payload: { jobId } },
+    ],
+  };
+  assert.equal(journalMatchesCompletedTrip(row, jobId, 'ct-hail'), true);
+  assert.equal(journalHasUnsyncedStages(row.events), true);
+
+  const next = markJournalStageEventsSynced(row.events);
+  assert.equal(journalHasUnsyncedStages(next), false);
+  assert.equal(next.find((e) => e.type === 'Completed')?.synced, false);
+  assert.equal(next.find((e) => e.type === 'Arrived')?.synced, true);
+  assert.equal(next.find((e) => e.type === 'OnBoard')?.synced, true);
+
+  // After stage clear: Syncing should only reflect the pending Completed terminal.
+  assert.equal(
+    hasPendingTripJournalWorkFromRows({
+      pendingHailCreates: 0,
+      pendingStages: 0,
+      pendingTerminalsWithServerId: 1,
+      orphanTerminalJournals: 0,
+      failedHailStillPending: 0,
+    }),
+    true,
+  );
+  // After terminal flush + full clear:
+  assert.equal(
+    hasPendingTripJournalWorkFromRows({
+      pendingHailCreates: 0,
+      pendingStages: 0,
+      pendingTerminalsWithServerId: 0,
+      orphanTerminalJournals: 0,
+      failedHailStillPending: 0,
+    }),
+    false,
+  );
+});
+
 test('hydrate must not revive stored Syncing banner when journal is clear', () => {
-  // Document the policy: resolvePendingSyncBanner() alone — no ?? storedBanner.
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   const src = readFileSync(join(root, 'context/DriverContext.tsx'), 'utf8');
   assert.match(src, /Only show Syncing when journal work is still pending/);
   assert.equal(/\?\?\s*storedBanner/.test(src), false);
   assert.match(src, /markTripJournalSyncedForCompletedTrip/);
+  assert.match(src, /markTripJournalStagesSyncedForTrip/);
+  assert.match(src, /journal_fallback/);
+  assert.match(src, /flushPendingTripJournalRef\.current\?\.\(\)/);
 });

@@ -9,6 +9,8 @@ import {
   hasPendingTripJournalWorkFromRows,
   journalHasOrphanTerminals,
   journalIsFailedHailStillPending,
+  journalMatchesCompletedTrip,
+  markJournalStageEventsSynced,
 } from '@/lib/tripJournalFlushPolicy';
 import type {
   TripJournal,
@@ -276,15 +278,7 @@ export async function markTripJournalSyncedForCompletedTrip(params: {
   const rows = await listTripJournals();
   let cleared = 0;
   for (const row of rows) {
-    const idMatch = !!jobId && String(row.serverJobId || '').trim() === jobId;
-    const keyMatch = !!clientTripId && row.clientTripId === clientTripId;
-    const payloadMatch =
-      !!jobId &&
-      row.events.some((e) => {
-        const p = e.payload || {};
-        return String(p.jobId || p.bookingId || '') === jobId;
-      });
-    if (!idMatch && !keyMatch && !payloadMatch) continue;
+    if (!journalMatchesCompletedTrip(row, jobId, clientTripId)) continue;
     const nextEvents = row.events.map((e) => (e.synced === true ? e : { ...e, synced: true }));
     await upsertTripJournal({
       ...row,
@@ -292,6 +286,36 @@ export async function markTripJournalSyncedForCompletedTrip(params: {
         row.serverJobId || (jobId && /^\d+$/.test(jobId) ? jobId : row.serverJobId),
       syncState: 'synced',
       lastError: undefined,
+      events: nextEvents,
+    });
+    cleared += 1;
+  }
+  return cleared;
+}
+
+/**
+ * Weak-signal complete: local Completed is journalled but Arrived/OnBoard may still
+ * look pending. Clear stages only so Syncing tracks the terminal flush; Completed
+ * stays unsynced until /api/job/complete succeeds (including idempotent).
+ */
+export async function markTripJournalStagesSyncedForTrip(params: {
+  jobId?: string | null;
+  clientTripId?: string | null;
+}): Promise<number> {
+  const jobId = String(params.jobId || '').trim();
+  const clientTripId = String(params.clientTripId || '').trim();
+  if (!jobId && !clientTripId) return 0;
+  const rows = await listTripJournals();
+  let cleared = 0;
+  for (const row of rows) {
+    if (!journalMatchesCompletedTrip(row, jobId, clientTripId)) continue;
+    const nextEvents = markJournalStageEventsSynced(row.events);
+    const changed = nextEvents.some((e, i) => e.synced !== row.events[i]?.synced);
+    if (!changed) continue;
+    await upsertTripJournal({
+      ...row,
+      serverJobId:
+        row.serverJobId || (jobId && /^\d+$/.test(jobId) ? jobId : row.serverJobId),
       events: nextEvents,
     });
     cleared += 1;
