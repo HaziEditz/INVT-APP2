@@ -31,7 +31,13 @@ export function buildTmPersistFields(
   tmDetails: TmPaymentDetails,
   opts?: { councilId?: string; remainderPaymentType?: string },
 ): Record<string, unknown> {
-  const councilPays = Number(tmDetails.councilPays) || 0;
+  const hoist =
+    Number(tmDetails.tmSubsidyHoist != null ? tmDetails.tmSubsidyHoist : tmDetails.hoistTotal) || 0;
+  // Claim fields are meter %/cap only — never fold flat hoist into tmSubsidy/tmCouncilPays.
+  const meterClaim =
+    tmDetails.tmSubsidyFare != null
+      ? Number(tmDetails.tmSubsidyFare) || 0
+      : Math.max(0, (Number(tmDetails.councilPays) || 0) - hoist);
   const passengerPays = Number(tmDetails.passengerPays) || 0;
   const card = String(tmDetails.tmCardNumber || '').trim();
   const councilId = String(opts?.councilId || tmDetails.councilId || '').trim();
@@ -41,14 +47,14 @@ export function buildTmPersistFields(
     // Remainder method stays in paymentType; these mark the trip as TM for claims.
     tmPaymentType: 'total_mobility',
     paymentCategory: 'total_mobility',
-    tmCouncilPays: councilPays,
+    tmCouncilPays: meterClaim,
     tmPassengerPays: passengerPays,
-    // Legacy aliases used by owner/SA claim UIs
-    tmSubsidy: councilPays,
-    councilPays,
+    // Legacy aliases used by owner/SA claim UIs (meter claim only)
+    tmSubsidy: meterClaim,
+    councilPays: meterClaim,
     passengerPays,
     tmMeterFare: tmDetails.meterFare,
-    tmSubsidyFare: tmDetails.tmSubsidyFare,
+    tmSubsidyFare: meterClaim,
     tmSubsidyHoist: tmDetails.tmSubsidyHoist ?? tmDetails.hoistTotal,
     hoistTotal: tmDetails.hoistTotal,
     hoistCount: tmDetails.hoistCount,
@@ -81,6 +87,12 @@ export function buildTmTripStatusSeed(
   councilId: string,
   tmDetails: TmPaymentDetails,
 ): TmTripStatusSeed {
+  const hoist =
+    Number(tmDetails.tmSubsidyHoist != null ? tmDetails.tmSubsidyHoist : tmDetails.hoistTotal) || 0;
+  const meterClaim =
+    tmDetails.tmSubsidyFare != null
+      ? Number(tmDetails.tmSubsidyFare) || 0
+      : Math.max(0, (Number(tmDetails.councilPays) || 0) - hoist);
   return {
     status: 'pending',
     councilId: String(councilId).trim(),
@@ -89,7 +101,7 @@ export function buildTmTripStatusSeed(
     source: 'driver_complete',
     isTotalMobility: true,
     tmCardNumber: tmDetails.tmCardNumber,
-    tmCouncilPays: tmDetails.councilPays,
+    tmCouncilPays: meterClaim,
     tmPassengerPays: tmDetails.passengerPays,
   };
 }

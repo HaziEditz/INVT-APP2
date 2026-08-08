@@ -82,11 +82,46 @@ test('buildTmPersistFields keeps remainder method separate from TM markers', () 
   assert.equal(fields.hoistTotal, 10);
 });
 
+test('buildTmPersistFields writes meter claim only — hoist stays separate', () => {
+  // Driver UI grand total still includes hoist in councilPays; persist must strip it.
+  const fields = buildTmPersistFields({
+    councilPays: 36, // 26 meter + 10 hoist (UI total)
+    passengerPays: 14,
+    meterFare: 40,
+    tmSubsidyFare: 26,
+    hoistTotal: 10,
+    tmSubsidyHoist: 10,
+    hoistCount: 1,
+    totalFare: 50,
+  });
+  assert.equal(fields.tmCouncilPays, 26);
+  assert.equal(fields.tmSubsidy, 26);
+  assert.equal(fields.councilPays, 26);
+  assert.equal(fields.tmSubsidyFare, 26);
+  assert.equal(fields.tmSubsidyHoist, 10);
+  assert.equal(fields.hoistTotal, 10);
+});
+
+test('buildTmPersistFields subtracts hoist when tmSubsidyFare missing', () => {
+  const fields = buildTmPersistFields({
+    councilPays: 36,
+    passengerPays: 14,
+    hoistTotal: 10,
+    tmSubsidyHoist: 10,
+    totalFare: 50,
+  });
+  assert.equal(fields.tmCouncilPays, 26);
+  assert.equal(fields.tmSubsidy, 26);
+});
+
 test('buildTmTripStatusSeed is pending for council portal', () => {
   const seed = buildTmTripStatusSeed('860869', 'cncl_icc', {
-    councilPays: 20,
+    councilPays: 30,
     passengerPays: 10,
-    totalFare: 30,
+    tmSubsidyFare: 20,
+    tmSubsidyHoist: 10,
+    hoistTotal: 10,
+    totalFare: 40,
     tmCardNumber: '111',
   });
   assert.equal(seed.status, 'pending');
@@ -112,11 +147,11 @@ test('pickTmFieldsFromPayload rebuilds from TmPaymentDetails journal shape', () 
   assert.equal(picked.councilId, 'cncl_x');
 });
 
-test('PaymentModal wires expiry formatter + optional cardholder', () => {
+test('PaymentModal wires expiry formatter + cardholder name', () => {
   const src = readFileSync(join(root, 'components/PaymentModal.tsx'), 'utf8');
   assert.match(src, /formatTmCardExpiryInput/);
   assert.match(src, /tmCardName/);
-  assert.match(src, /Cardholder name \(optional\)/);
+  assert.match(src, /Passenger \/ cardholder name/);
   assert.match(src, /sourceCouncilId/);
 });
 

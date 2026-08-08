@@ -149,8 +149,9 @@ test('Phase 2A.1 portal config edit + audit + hoist 100% council', () => {
   assert.match(src, /tmConfigAudit/);
   assert.match(src, /byRole:\s*'council'/);
   assert.match(src, /hoistCoveredByCouncil:\s*true/);
-  assert.match(src, /Meter Subsidy/);
+  assert.match(src, /Meter [Ss]ubsidy/);
   assert.match(src, /Hoist \(council\)/);
+  assert.match(src, /Council claim \(%\/cap\)/);
   const saCfg = readFileSync(join(saRoot, 'TM-Council-Config.aspx'), 'utf8');
   assert.match(saCfg, /100% council-paid/i);
   assert.match(saCfg, /tmConfigAudit/);

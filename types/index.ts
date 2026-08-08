@@ -348,13 +348,13 @@ export interface TmHoistEntryDetails {
 }
 
 export interface TmPaymentDetails {
-  /** Total council pays (meter subsidy + hoist). */
+  /** Driver UI grand total (meter subsidy + hoist). Claim persist uses tmSubsidyFare instead. */
   councilPays: number;
   /** Passenger collect amount (meter share only; hoist is never passenger-paid). */
   passengerPays: number;
   /** Meter + extras only (no hoist) — base for %/cap split. */
   meterFare?: number;
-  /** Subsidy on meter fare only. */
+  /** Meter %/cap subsidy only — written to tmSubsidy / tmCouncilPays on persist. */
   tmSubsidyFare?: number;
   /** Hoist fee — 100% council. */
   hoistTotal?: number;
