@@ -10,6 +10,7 @@ import {
   buildTmPersistFields,
   buildTmTripStatusSeed,
   formatTmCardExpiryInput,
+  isCompleteCardholderName,
   isTmCompletedJobRecord,
   pickTmFieldsFromPayload,
 } from '../lib/tmPaymentPersist.ts';
@@ -28,6 +29,13 @@ test('formatTmCardExpiryInput inserts slash after month', () => {
   assert.equal(formatTmCardExpiryInput('12/27'), '12/27');
   assert.equal(formatTmCardExpiryInput('12-27'), '12/27');
   assert.equal(formatTmCardExpiryInput('122799'), '12/27');
+});
+
+test('isCompleteCardholderName requires first and last', () => {
+  assert.equal(isCompleteCardholderName(''), false);
+  assert.equal(isCompleteCardholderName('Marianne'), false);
+  assert.equal(isCompleteCardholderName('Marianne Hodges'), true);
+  assert.equal(isCompleteCardholderName('  Jane   Doe  '), true);
 });
 
 test('isTmCompletedJobRecord accepts remainder Cash + TM economics', () => {
@@ -150,8 +158,9 @@ test('pickTmFieldsFromPayload rebuilds from TmPaymentDetails journal shape', () 
 test('PaymentModal wires expiry formatter + cardholder name', () => {
   const src = readFileSync(join(root, 'components/PaymentModal.tsx'), 'utf8');
   assert.match(src, /formatTmCardExpiryInput/);
+  assert.match(src, /isCompleteCardholderName/);
   assert.match(src, /tmCardName/);
-  assert.match(src, /Passenger \/ cardholder name/);
+  assert.match(src, /Full passenger name \(first & last\)/);
   assert.match(src, /sourceCouncilId/);
 });
 

@@ -12,6 +12,15 @@ export function formatTmCardExpiryInput(raw: string): string {
   return `${digits.slice(0, 2)}/${digits.slice(2)}`;
 }
 
+/** Require first + last (2+ whitespace-separated tokens) for TM cardholder names. */
+export function isCompleteCardholderName(raw: string | null | undefined): boolean {
+  const parts = String(raw || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return parts.length >= 2;
+}
+
 export function isTmCompletedJobRecord(job: Record<string, unknown> | null | undefined): boolean {
   if (!job || typeof job !== 'object') return false;
   if (job.isTotalMobility === true || job.tmUsed === true) return true;

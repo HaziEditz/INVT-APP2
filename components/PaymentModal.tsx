@@ -16,7 +16,7 @@ import {
   resolvePrimaryTmCard,
   TmConfig,
 } from '@/lib/tmConfig';
-import { formatTmCardExpiryInput } from '@/lib/tmPaymentPersist';
+import { formatTmCardExpiryInput, isCompleteCardholderName } from '@/lib/tmPaymentPersist';
 import { computePaymentFareSummary, completionErrorMessage } from '@/lib/tripCompletionHelpers';
 import {
   DRIVER_PAYMENT_TYPES,
@@ -172,6 +172,8 @@ export function PaymentModal() {
   const [hoistRows, setHoistRows] = useState<
     { key: string; cardNumber: string; cardExpiry: string; cardName: string }[]
   >([]);
+  /** WAV only: null until driver taps Yes/No. Yes auto-adds first hoist from primary (silent). */
+  const [hoistUsedAnswer, setHoistUsedAnswer] = useState<null | 'yes' | 'no'>(null);
 
   const isTmPayment = paymentType === 'TM';
   const isWav = !!activeVehicle?.isWav;
@@ -219,6 +221,7 @@ export function PaymentModal() {
     setTmCardExpiry('');
     setTmCardName('');
     setHoistRows([]);
+    setHoistUsedAnswer(null);
   }, [paymentJob?.id]);
 
   useEffect(() => {
@@ -474,10 +477,16 @@ export function PaymentModal() {
           setPaymentStep('tm');
           return;
         }
-        if (isWav && hoistRows.some((r) => String(r.cardNumber || '').trim() && !String(r.cardName || '').trim())) {
+        if (
+          isWav &&
+          hoistRows.some(
+            (r) =>
+              String(r.cardNumber || '').trim() && !isCompleteCardholderName(r.cardName),
+          )
+        ) {
           Alert.alert(
             'Passenger name required',
-            'Enter the passenger / cardholder name on each hoist row.',
+            'Enter the full passenger / cardholder name (first and last) on each hoist row.',
           );
           setSubmitting(false);
           setPaymentStep('tm');
@@ -489,10 +498,10 @@ export function PaymentModal() {
           tmHoistEntries,
           tmCardName,
         );
-        if (primary.tmCardNumber && !primary.tmCardName) {
+        if (primary.tmCardNumber && !isCompleteCardholderName(primary.tmCardName)) {
           Alert.alert(
             'Passenger name required',
-            'Enter the passenger / cardholder name for the TM card.',
+            'Enter the full passenger / cardholder name (first and last) for the TM card.',
           );
           setSubmitting(false);
           setPaymentStep('tm');
@@ -776,49 +785,62 @@ export function PaymentModal() {
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   };
 
+  const primaryCardReady =
+    !!String(tmCardNumber || '').trim() && isCompleteCardholderName(tmCardName);
+  const hoistQuestionDone = !isWav || hoistUsedAnswer != null;
   const tmRemainderReady = !!tmPassengerPaymentType;
   const tmCanReview = (() => {
+    if (!primaryCardReady) return false;
+    if (!hoistQuestionDone) return false;
     if (!tmRemainderReady) return false;
-    if (isWav && hoistRows.some((r) => !String(r.cardNumber || '').trim())) return false;
-    if (isWav && hoistRows.some((r) => String(r.cardNumber || '').trim() && !String(r.cardName || '').trim())) {
-      return false;
+    if (isWav && hoistUsedAnswer === 'yes') {
+      if (hoistRows.length < 1) return false;
+      if (hoistRows.some((r) => !String(r.cardNumber || '').trim())) return false;
+      if (hoistRows.some((r) => !isCompleteCardholderName(r.cardName))) return false;
     }
     const primary = resolvePrimaryTmCard(tmCardNumber, tmCardExpiry, tmHoistEntries, tmCardName);
-    if (primary.tmCardNumber && !primary.tmCardName) return false;
-    if (!primary.tmCardNumber && !(isWav && hoistUnits > 0)) return false;
+    if (!primary.tmCardNumber || !isCompleteCardholderName(primary.tmCardName)) return false;
     return true;
   })();
 
-  const applyPrimaryToHoistRow = (rowKey: string) => {
+  const newHoistRowKey = () => `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  /** Single-tap Yes: record first hoist from primary with no extra form. */
+  const onHoistYes = () => {
     const card = String(tmCardNumber || '').trim();
-    if (!card) {
-      Alert.alert('No primary card', 'Enter the primary TM card first, or type the card on this hoist row.');
+    const name = String(tmCardName || '').trim();
+    if (!card || !isCompleteCardholderName(name)) {
+      Alert.alert(
+        'Primary card required',
+        'Enter the TM card number and full passenger name (first and last) first.',
+      );
       return;
     }
-    setHoistRows((prev) =>
-      prev.map((r) =>
-        r.key === rowKey
-          ? {
-              ...r,
-              cardNumber: card,
-              cardExpiry: tmCardExpiry,
-              cardName: String(tmCardName || '').trim(),
-            }
-          : r,
-      ),
-    );
+    setHoistUsedAnswer('yes');
+    setHoistRows([
+      {
+        key: newHoistRowKey(),
+        cardNumber: card,
+        cardExpiry: tmCardExpiry,
+        cardName: name,
+      },
+    ]);
   };
 
-  const addHoistRow = () => {
-    const card = String(tmCardNumber || '').trim();
+  const onHoistNo = () => {
+    setHoistUsedAnswer('no');
+    setHoistRows([]);
+  };
+
+  /** Extra wheelchair passengers only — needs its own card + name. */
+  const addMoreHoist = () => {
     setHoistRows((prev) => [
       ...prev,
       {
-        key: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        // Prefill from primary so a single wheelchair passenger need not retype the same card.
-        cardNumber: card,
-        cardExpiry: card ? tmCardExpiry : '',
-        cardName: card ? String(tmCardName || '').trim() : '',
+        key: newHoistRowKey(),
+        cardNumber: '',
+        cardExpiry: '',
+        cardName: '',
       },
     ]);
   };
@@ -827,9 +849,13 @@ export function PaymentModal() {
     if (!tmCanReview) {
       Alert.alert(
         'Complete TM details',
-        !tmRemainderReady
-          ? 'Select how the passenger pays the remaining fare.'
-          : 'Enter TM card number and passenger name (hoist rows need both).',
+        !primaryCardReady
+          ? 'Enter the primary TM card number and full passenger name (first and last).'
+          : !hoistQuestionDone
+            ? 'Choose whether a hoist was used.'
+            : !tmRemainderReady
+              ? 'Select how the passenger pays the remaining fare.'
+              : 'Complete any additional hoist passenger card details (full name required).',
       );
       return;
     }
@@ -874,133 +900,290 @@ export function PaymentModal() {
                 <Text style={styles.backLinkText}>← Back to payment</Text>
               </Pressable>
 
-              <View style={[styles.card, styles.tmRemainderCard]}>
-                <Text style={styles.stepLabel}>1. Remaining payment method *</Text>
-                <Text style={styles.hint}>
-                  Required before you can review. Collects the passenger meter share (
-                  {fmtMoney(tmSplit.passengerPays)}).
-                </Text>
-                <Dropdown
-                  label="Passenger pays remaining via"
-                  value={tmPassengerPaymentType}
-                  options={TM_PASSENGER_PAYMENT_TYPES}
-                  placeholder="Select payment method…"
-                  onChange={setTmPassengerPaymentType}
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>1. Primary TM card *</Text>
+                <Text style={styles.hint}>Card number and passenger name for this trip.</Text>
+                <TextInput
+                  style={styles.field}
+                  placeholder="TM card number *"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="number-pad"
+                  value={tmCardNumber}
+                  onChangeText={setTmCardNumber}
                 />
-                {tmPassengerPaymentType === 'Account' ? (
-                  <View style={{ marginTop: 12 }}>
-                    {accountId ? (
-                      <View style={styles.accountSelected}>
-                        <Text style={styles.accountSelectedLabel}>Business account</Text>
-                        <Text style={styles.accountSelectedName}>
-                          {accountName || 'Account selected'}
-                        </Text>
-                        {!accountLockedFromDispatch ? (
-                          <TouchableOpacity
-                            onPress={() => {
-                              setAccountId('');
-                              setAccountName('');
-                              setAccountSearch('');
-                              setAccountAllowFreeText(false);
-                            }}
-                          >
-                            <Text style={styles.accountChange}>Change</Text>
-                          </TouchableOpacity>
-                        ) : null}
+                <TextInput
+                  style={styles.field}
+                  placeholder="Full passenger name (first & last) *"
+                  placeholderTextColor={Colors.textMuted}
+                  autoCapitalize="words"
+                  value={tmCardName}
+                  onChangeText={setTmCardName}
+                />
+                <TextInput
+                  style={styles.field}
+                  placeholder="TM card expiry MM/YY (optional)"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="number-pad"
+                  maxLength={5}
+                  value={tmCardExpiry}
+                  onChangeText={(v) => setTmCardExpiry(formatTmCardExpiryInput(v))}
+                />
+              </View>
+
+              {isWav ? (
+                <View style={styles.card}>
+                  <Text style={styles.stepLabel}>
+                    2. Hoist used? (100% council · {fmtMoney(hoistCostPerUnit)} / use)
+                  </Text>
+                  {hoistUsedAnswer == null ? (
+                    <>
+                      <Text style={styles.hint}>
+                        Tap Yes to record one hoist for this passenger — uses the card and name above.
+                        No extra typing.
+                      </Text>
+                      <View style={styles.hoistYesNoRow}>
+                        <TouchableOpacity
+                          style={[styles.hoistChoiceBtn, styles.hoistChoiceYes]}
+                          onPress={onHoistYes}
+                          disabled={!primaryCardReady}
+                        >
+                          <Text style={styles.hoistChoiceYesText}>Yes</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.hoistChoiceBtn, styles.hoistChoiceNo]}
+                          onPress={onHoistNo}
+                          disabled={!primaryCardReady}
+                        >
+                          <Text style={styles.hoistChoiceNoText}>No</Text>
+                        </TouchableOpacity>
                       </View>
-                    ) : (
-                      <>
-                        <Text style={styles.accountHint}>
-                          {accountAllowFreeText
-                            ? 'Search cached accounts, or type the account name/number offline'
-                            : 'Search and select a business account'}
+                      {!primaryCardReady ? (
+                        <Text style={styles.hint}>Enter primary card and name first.</Text>
+                      ) : null}
+                    </>
+                  ) : hoistUsedAnswer === 'yes' ? (
+                    <>
+                      <View style={styles.hoistSilentBanner}>
+                        <Text style={styles.hoistSilentTitle}>Hoist recorded</Text>
+                        <Text style={styles.hoistSilentMeta}>
+                          Same card · {fmtMoney(hoistCostPerUnit)} council · passenger pays $0
                         </Text>
-                        <TextInput
-                          style={styles.field}
-                          placeholder="Search business name or account number…"
-                          placeholderTextColor={Colors.textMuted}
-                          value={accountSearch}
-                          onChangeText={(t) => {
-                            setAccountSearch(t);
-                            setAccountId('');
-                            setAccountName('');
-                          }}
-                          onFocus={scrollAccountFieldIntoView}
-                          autoCorrect={false}
-                        />
-                        {accountSearching ? (
-                          <ActivityIndicator color={Colors.accent} style={{ marginVertical: 8 }} />
-                        ) : null}
-                        {accountFromCache ? (
-                          <Text style={styles.hint}>Showing recent/cached accounts</Text>
-                        ) : null}
-                        {accountSearchError ? (
-                          <Text style={styles.accountSearchError}>{accountSearchError}</Text>
-                        ) : null}
-                        {accountHits.map((hit) => {
-                          const id = String(hit.Id ?? '');
-                          const name = String(hit.Name || '').trim() || id;
-                          return (
+                        <TouchableOpacity onPress={onHoistNo} style={{ marginTop: 8 }}>
+                          <Text style={styles.hoistUsePrimary}>Change to No hoist</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {hoistRows.slice(1).map((row, idx) => (
+                        <View key={row.key} style={styles.hoistRow}>
+                          <Text style={styles.hoistRowLabel}>Extra hoist {idx + 2}</Text>
+                          <Text style={styles.hint}>
+                            Additional wheelchair passenger — enter their TM card and name.
+                          </Text>
+                          <TextInput
+                            style={styles.field}
+                            placeholder="TM card number *"
+                            placeholderTextColor={Colors.textMuted}
+                            keyboardType="number-pad"
+                            value={row.cardNumber}
+                            onChangeText={(v) =>
+                              setHoistRows((prev) =>
+                                prev.map((r) => (r.key === row.key ? { ...r, cardNumber: v } : r)),
+                              )
+                            }
+                          />
+                          <TextInput
+                            style={styles.field}
+                            placeholder="Full passenger name (first & last) *"
+                            placeholderTextColor={Colors.textMuted}
+                            autoCapitalize="words"
+                            value={row.cardName}
+                            onChangeText={(v) =>
+                              setHoistRows((prev) =>
+                                prev.map((r) => (r.key === row.key ? { ...r, cardName: v } : r)),
+                              )
+                            }
+                          />
+                          <TextInput
+                            style={styles.field}
+                            placeholder="Expiry MM/YY (optional)"
+                            placeholderTextColor={Colors.textMuted}
+                            keyboardType="number-pad"
+                            maxLength={5}
+                            value={row.cardExpiry}
+                            onChangeText={(v) =>
+                              setHoistRows((prev) =>
+                                prev.map((r) =>
+                                  r.key === row.key
+                                    ? { ...r, cardExpiry: formatTmCardExpiryInput(v) }
+                                    : r,
+                                ),
+                              )
+                            }
+                          />
+                          <View style={styles.hoistRowFooter}>
+                            <Text style={styles.hoistRate}>{fmtMoney(hoistCostPerUnit)} council</Text>
                             <TouchableOpacity
-                              key={id || name}
-                              style={styles.accountHit}
+                              onPress={() =>
+                                setHoistRows((prev) => prev.filter((r) => r.key !== row.key))
+                              }
+                            >
+                              <Text style={styles.hoistRemove}>Remove</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))}
+                      <TouchableOpacity style={styles.hoistAddBtn} onPress={addMoreHoist}>
+                        <Text style={styles.hoistAddText}>+ Add more hoist</Text>
+                      </TouchableOpacity>
+                      {hoistUnits > 0 ? (
+                        <View style={styles.tmRow}>
+                          <Text style={styles.tmLabel}>
+                            Hoist fee ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
+                          </Text>
+                          <Text style={styles.tmValue}>{fmtMoney(hoistTotal)}</Text>
+                        </View>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.hint}>No hoist on this trip.</Text>
+                      <TouchableOpacity onPress={onHoistYes} disabled={!primaryCardReady}>
+                        <Text style={styles.hoistUsePrimary}>Change to Yes — record hoist</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
+              ) : null}
+
+              {primaryCardReady && hoistQuestionDone ? (
+                <View style={[styles.card, styles.tmRemainderCard]}>
+                  <Text style={styles.stepLabel}>
+                    {isWav ? '3' : '2'}. Remaining payment method *
+                  </Text>
+                  <Text style={styles.hint}>
+                    Collects the passenger meter share ({fmtMoney(tmSplit.passengerPays)}).
+                  </Text>
+                  <Dropdown
+                    label="Passenger pays remaining via"
+                    value={tmPassengerPaymentType}
+                    options={TM_PASSENGER_PAYMENT_TYPES}
+                    placeholder="Select payment method…"
+                    onChange={setTmPassengerPaymentType}
+                  />
+                  {tmPassengerPaymentType === 'Account' ? (
+                    <View style={{ marginTop: 12 }}>
+                      {accountId ? (
+                        <View style={styles.accountSelected}>
+                          <Text style={styles.accountSelectedLabel}>Business account</Text>
+                          <Text style={styles.accountSelectedName}>
+                            {accountName || 'Account selected'}
+                          </Text>
+                          {!accountLockedFromDispatch ? (
+                            <TouchableOpacity
                               onPress={() => {
-                                setAccountId(id);
-                                setAccountName(name);
-                                setAccountSearch(name);
-                                setAccountHits([]);
+                                setAccountId('');
+                                setAccountName('');
+                                setAccountSearch('');
                                 setAccountAllowFreeText(false);
-                                const cid = String(driver?.companyId || '').trim();
-                                if (cid && id) {
-                                  void rememberBusinessAccount(cid, {
-                                    id,
-                                    name,
-                                    accountCode: String(hit.AccountCode || '').trim() || undefined,
-                                  }).catch(() => {});
-                                }
                               }}
                             >
-                              <Text style={styles.accountHitName}>{name}</Text>
-                              {hit.AccountCode ? (
-                                <Text style={styles.accountHitMeta}>{String(hit.AccountCode)}</Text>
-                              ) : null}
+                              <Text style={styles.accountChange}>Change</Text>
                             </TouchableOpacity>
-                          );
-                        })}
-                      </>
-                    )}
-                  </View>
-                ) : null}
-                {tmPassengerPaymentType === 'ACC' ? (
-                  <View style={{ marginTop: 12 }}>
-                    <TextInput
-                      style={styles.field}
-                      placeholder="Claim number"
-                      placeholderTextColor={Colors.textMuted}
-                      value={accClaimNo}
-                      onChangeText={setAccClaimNo}
-                    />
-                    <TextInput
-                      style={styles.field}
-                      placeholder="Purchase order number"
-                      placeholderTextColor={Colors.textMuted}
-                      value={accPoNo}
-                      onChangeText={setAccPoNo}
-                    />
-                  </View>
-                ) : null}
-                {tmPassengerPaymentType === 'EFTPOS' ? (
-                  <View style={{ marginTop: 12 }}>
-                    <TextInput
-                      style={styles.field}
-                      placeholder="Transaction reference (optional)"
-                      placeholderTextColor={Colors.textMuted}
-                      value={eftposRef}
-                      onChangeText={setEftposRef}
-                    />
-                  </View>
-                ) : null}
-              </View>
+                          ) : null}
+                        </View>
+                      ) : (
+                        <>
+                          <Text style={styles.accountHint}>
+                            {accountAllowFreeText
+                              ? 'Search cached accounts, or type the account name/number offline'
+                              : 'Search and select a business account'}
+                          </Text>
+                          <TextInput
+                            style={styles.field}
+                            placeholder="Search business name or account number…"
+                            placeholderTextColor={Colors.textMuted}
+                            value={accountSearch}
+                            onChangeText={(t) => {
+                              setAccountSearch(t);
+                              setAccountId('');
+                              setAccountName('');
+                            }}
+                            onFocus={scrollAccountFieldIntoView}
+                            autoCorrect={false}
+                          />
+                          {accountSearching ? (
+                            <ActivityIndicator color={Colors.accent} style={{ marginVertical: 8 }} />
+                          ) : null}
+                          {accountFromCache ? (
+                            <Text style={styles.hint}>Showing recent/cached accounts</Text>
+                          ) : null}
+                          {accountSearchError ? (
+                            <Text style={styles.accountSearchError}>{accountSearchError}</Text>
+                          ) : null}
+                          {accountHits.map((hit) => {
+                            const id = String(hit.Id ?? '');
+                            const name = String(hit.Name || '').trim() || id;
+                            return (
+                              <TouchableOpacity
+                                key={id || name}
+                                style={styles.accountHit}
+                                onPress={() => {
+                                  setAccountId(id);
+                                  setAccountName(name);
+                                  setAccountSearch(name);
+                                  setAccountHits([]);
+                                  setAccountAllowFreeText(false);
+                                  const cid = String(driver?.companyId || '').trim();
+                                  if (cid && id) {
+                                    void rememberBusinessAccount(cid, {
+                                      id,
+                                      name,
+                                      accountCode: String(hit.AccountCode || '').trim() || undefined,
+                                    }).catch(() => {});
+                                  }
+                                }}
+                              >
+                                <Text style={styles.accountHitName}>{name}</Text>
+                                {hit.AccountCode ? (
+                                  <Text style={styles.accountHitMeta}>{String(hit.AccountCode)}</Text>
+                                ) : null}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </>
+                      )}
+                    </View>
+                  ) : null}
+                  {tmPassengerPaymentType === 'ACC' ? (
+                    <View style={{ marginTop: 12 }}>
+                      <TextInput
+                        style={styles.field}
+                        placeholder="Claim number"
+                        placeholderTextColor={Colors.textMuted}
+                        value={accClaimNo}
+                        onChangeText={setAccClaimNo}
+                      />
+                      <TextInput
+                        style={styles.field}
+                        placeholder="Purchase order number"
+                        placeholderTextColor={Colors.textMuted}
+                        value={accPoNo}
+                        onChangeText={setAccPoNo}
+                      />
+                    </View>
+                  ) : null}
+                  {tmPassengerPaymentType === 'EFTPOS' ? (
+                    <View style={{ marginTop: 12 }}>
+                      <TextInput
+                        style={styles.field}
+                        placeholder="Transaction reference (optional)"
+                        placeholderTextColor={Colors.textMuted}
+                        value={eftposRef}
+                        onChangeText={setEftposRef}
+                      />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
 
               <View style={styles.card}>
                 <Text style={styles.stepLabel}>Meter fare (subsidy applies)</Text>
@@ -1018,128 +1201,14 @@ export function PaymentModal() {
                     {fmtMoney(tmSplit.passengerPaysMeter)}
                   </Text>
                 </View>
-              </View>
-
-              <View style={styles.card}>
-                <Text style={styles.stepLabel}>2. Primary TM card (optional)</Text>
-                <Text style={styles.hint}>
-                  Leave blank if every passenger is on a hoist row — the first hoist card is used as
-                  primary. Adding a hoist passenger prefills from this card when set (same card =
-                  no retyping).
-                </Text>
-                <TextInput
-                  style={styles.field}
-                  placeholder="TM card number"
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="number-pad"
-                  value={tmCardNumber}
-                  onChangeText={setTmCardNumber}
-                />
-                <TextInput
-                  style={styles.field}
-                  placeholder="Passenger / cardholder name *"
-                  placeholderTextColor={Colors.textMuted}
-                  autoCapitalize="words"
-                  value={tmCardName}
-                  onChangeText={setTmCardName}
-                />
-                <TextInput
-                  style={styles.field}
-                  placeholder="TM card expiry MM/YY"
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="number-pad"
-                  maxLength={5}
-                  value={tmCardExpiry}
-                  onChangeText={(v) => setTmCardExpiry(formatTmCardExpiryInput(v))}
-                />
-              </View>
-
-              {isWav ? (
-                <View style={styles.card}>
-                  <Text style={styles.stepLabel}>
-                    3. Hoist passengers (100% council · {fmtMoney(hoistCostPerUnit)} / use)
-                  </Text>
-                  <Text style={styles.hint}>
-                    Add one row per wheelchair passenger. Same card as primary? Use “Use primary
-                    card” or leave primary filled — new rows prefill automatically.
-                  </Text>
-                  {hoistRows.map((row, idx) => (
-                    <View key={row.key} style={styles.hoistRow}>
-                      <Text style={styles.hoistRowLabel}>Hoist {idx + 1}</Text>
-                      <TextInput
-                        style={styles.field}
-                        placeholder="TM card number *"
-                        placeholderTextColor={Colors.textMuted}
-                        keyboardType="number-pad"
-                        value={row.cardNumber}
-                        onChangeText={(v) =>
-                          setHoistRows((prev) =>
-                            prev.map((r) => (r.key === row.key ? { ...r, cardNumber: v } : r)),
-                          )
-                        }
-                      />
-                      <TextInput
-                        style={styles.field}
-                        placeholder="Passenger / cardholder name *"
-                        placeholderTextColor={Colors.textMuted}
-                        autoCapitalize="words"
-                        value={row.cardName}
-                        onChangeText={(v) =>
-                          setHoistRows((prev) =>
-                            prev.map((r) => (r.key === row.key ? { ...r, cardName: v } : r)),
-                          )
-                        }
-                      />
-                      <TextInput
-                        style={styles.field}
-                        placeholder="Expiry MM/YY (optional)"
-                        placeholderTextColor={Colors.textMuted}
-                        keyboardType="number-pad"
-                        maxLength={5}
-                        value={row.cardExpiry}
-                        onChangeText={(v) =>
-                          setHoistRows((prev) =>
-                            prev.map((r) =>
-                              r.key === row.key
-                                ? { ...r, cardExpiry: formatTmCardExpiryInput(v) }
-                                : r,
-                            ),
-                          )
-                        }
-                      />
-                      <View style={styles.hoistRowFooter}>
-                        <Text style={styles.hoistRate}>{fmtMoney(hoistCostPerUnit)} council</Text>
-                        <View style={styles.hoistRowActions}>
-                          {String(tmCardNumber || '').trim() ? (
-                            <TouchableOpacity onPress={() => applyPrimaryToHoistRow(row.key)}>
-                              <Text style={styles.hoistUsePrimary}>Use primary card</Text>
-                            </TouchableOpacity>
-                          ) : null}
-                          <TouchableOpacity
-                            onPress={() =>
-                              setHoistRows((prev) => prev.filter((r) => r.key !== row.key))
-                            }
-                          >
-                            <Text style={styles.hoistRemove}>Remove</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </View>
-                  ))}
-                  <TouchableOpacity style={styles.hoistAddBtn} onPress={addHoistRow}>
-                    <Text style={styles.hoistAddText}>+ Add hoist passenger</Text>
-                  </TouchableOpacity>
+                {hoistUnits > 0 ? (
                   <View style={styles.tmRow}>
                     <Text style={styles.tmLabel}>
                       Hoist fee ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
                     </Text>
-                    <Text style={styles.tmValue}>{fmtMoney(hoistTotal)}</Text>
+                    <Text style={styles.tmValue}>{fmtMoney(hoistTotal)} council</Text>
                   </View>
-                  <Text style={styles.hint}>Passenger pays $0 toward hoist.</Text>
-                </View>
-              ) : null}
-
-              <View style={styles.card}>
+                ) : null}
                 <View style={styles.tmRow}>
                   <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Total council</Text>
                   <Text style={[styles.tmValue, { fontWeight: '700' }]}>
@@ -1152,20 +1221,20 @@ export function PaymentModal() {
                     {fmtMoney(tmSplit.passengerPays)}
                   </Text>
                 </View>
-                <View style={styles.tmRow}>
-                  <Text style={styles.tmLabel}>Remaining via</Text>
-                  <Text style={styles.tmValue}>{tmPassengerPaymentType || '— select above —'}</Text>
-                </View>
               </View>
             </ScrollView>
 
             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
               <Text style={styles.footerNote}>
-                {!tmRemainderReady
-                  ? 'Select remaining payment method (step 1) to continue'
-                  : `Meter subsidy ${fmtMoney(tmSplit.councilPaysMeter)}${
-                      hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''
-                    } · Collect ${fmtMoney(tmSplit.passengerPays)} via ${tmPassengerPaymentType}`}
+                {!primaryCardReady
+                  ? 'Enter primary TM card and full passenger name (first & last)'
+                  : !hoistQuestionDone
+                    ? 'Choose Yes or No for hoist'
+                    : !tmRemainderReady
+                      ? 'Select remaining payment method to continue'
+                      : `Meter subsidy ${fmtMoney(tmSplit.councilPaysMeter)}${
+                          hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''
+                        } · Collect ${fmtMoney(tmSplit.passengerPays)} via ${tmPassengerPaymentType}`}
               </Text>
               <Button
                 title="Review payment →"
@@ -1211,10 +1280,16 @@ export function PaymentModal() {
                   <Text style={styles.tmLabel}>Council (meter subsidy)</Text>
                   <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPaysMeter)}</Text>
                 </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Passenger (meter share)</Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger]}>
+                    {fmtMoney(tmSplit.passengerPaysMeter)}
+                  </Text>
+                </View>
                 {hoistTotal > 0 ? (
                   <View style={styles.tmRow}>
                     <Text style={styles.tmLabel}>
-                      Hoist ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
+                      Hoist fee ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
                     </Text>
                     <Text style={styles.tmValue}>{fmtMoney(hoistTotal)} council</Text>
                   </View>
@@ -1683,6 +1758,54 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
+  },
+  hoistYesNoRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  hoistChoiceBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  hoistChoiceYes: {
+    backgroundColor: Colors.tm,
+    borderColor: Colors.tm,
+  },
+  hoistChoiceNo: {
+    backgroundColor: Colors.background,
+    borderColor: Colors.border,
+  },
+  hoistChoiceYesText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  hoistChoiceNoText: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  hoistSilentBanner: {
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.tm,
+    gap: 2,
+  },
+  hoistSilentTitle: {
+    color: Colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  hoistSilentMeta: {
+    color: Colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
   },
   hoistUsePrimary: {
     color: Colors.tm,
