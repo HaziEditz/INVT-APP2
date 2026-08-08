@@ -342,6 +342,8 @@ export interface PaymentExtras {
 export interface TmHoistEntryDetails {
   cardNumber: string;
   cardExpiry?: string;
+  /** Cardholder / passenger name for council trip Client field. */
+  cardName?: string;
   amount: number;
 }
 

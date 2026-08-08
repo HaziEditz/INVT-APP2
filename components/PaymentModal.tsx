@@ -70,19 +70,22 @@ function Dropdown<T extends string>({
   value,
   options,
   onChange,
+  placeholder,
 }: {
   label: string;
-  value: T;
+  value: T | '';
   options: readonly T[];
   onChange: (v: T) => void;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const display = value || placeholder || 'Select…';
 
   return (
     <View style={styles.dropdownWrap}>
       <Text style={styles.sectionTitle}>{label}</Text>
       <Pressable style={styles.dropdownBtn} onPress={() => setOpen((o) => !o)}>
-        <Text style={styles.dropdownValue}>{value}</Text>
+        <Text style={[styles.dropdownValue, !value && styles.dropdownPlaceholder]}>{display}</Text>
         <Text style={styles.dropdownCaret}>{open ? '▲' : '▼'}</Text>
       </Pressable>
       {open ? (
@@ -113,10 +116,11 @@ export function PaymentModal() {
   const { paymentJob, finalizePayment, activeVehicle, selectedTariff, dismissPayment } = useDriver();
 
   const [paymentType, setPaymentType] = useState<DriverPaymentType>('Cash');
-  /** Main payment form vs dedicated Total Mobility details screen (avoids long inline expand). */
-  const [paymentStep, setPaymentStep] = useState<'main' | 'tm'>('main');
-  const [tmPassengerPaymentType, setTmPassengerPaymentType] =
-    useState<(typeof TM_PASSENGER_PAYMENT_TYPES)[number]>('Cash');
+  /** main → tm details → tmConfirm (explicit confirm before submit). */
+  const [paymentStep, setPaymentStep] = useState<'main' | 'tm' | 'tmConfirm'>('main');
+  const [tmPassengerPaymentType, setTmPassengerPaymentType] = useState<
+    (typeof TM_PASSENGER_PAYMENT_TYPES)[number] | ''
+  >('');
   const [extrasOpen, setExtrasOpen] = useState(false);
   const [extraEnabled, setExtraEnabled] = useState<Record<ExtraKey, boolean>>({
     eftposSurcharge: false,
@@ -165,9 +169,9 @@ export function PaymentModal() {
   const [tmCardExpiry, setTmCardExpiry] = useState('');
   const [tmCardName, setTmCardName] = useState('');
   /** WAV: one row per hoist use / wheelchair passenger (1× rate each). */
-  const [hoistRows, setHoistRows] = useState<{ key: string; cardNumber: string; cardExpiry: string }[]>(
-    [],
-  );
+  const [hoistRows, setHoistRows] = useState<
+    { key: string; cardNumber: string; cardExpiry: string; cardName: string }[]
+  >([]);
 
   const isTmPayment = paymentType === 'TM';
   const isWav = !!activeVehicle?.isWav;
@@ -179,7 +183,7 @@ export function PaymentModal() {
       normalizeDriverPaymentType(paymentJob.paymentType) ?? ('Cash' as DriverPaymentType);
     setPaymentType(seeded);
     setPaymentStep('main');
-    setTmPassengerPaymentType('Cash');
+    setTmPassengerPaymentType('');
     setExtrasOpen(false);
     setExtraEnabled({
       eftposSurcharge: false,
@@ -430,6 +434,14 @@ export function PaymentModal() {
   };
 
   const onConfirm = async () => {
+    if (isTmPayment && !tmPassengerPaymentType) {
+      Alert.alert(
+        'Remaining payment required',
+        'Select how the passenger pays the remaining fare before confirming.',
+      );
+      setPaymentStep('tm');
+      return;
+    }
     const needsAccount =
       paymentType === 'Account' || (isTmPayment && tmPassengerPaymentType === 'Account');
     const typedAccount = String(accountName || accountSearch || '').trim();
@@ -459,9 +471,33 @@ export function PaymentModal() {
             'Each hoist entry needs its own TM card number (one wheelchair passenger per row).',
           );
           setSubmitting(false);
+          setPaymentStep('tm');
           return;
         }
-        const primary = resolvePrimaryTmCard(tmCardNumber, tmCardExpiry, tmHoistEntries);
+        if (isWav && hoistRows.some((r) => String(r.cardNumber || '').trim() && !String(r.cardName || '').trim())) {
+          Alert.alert(
+            'Passenger name required',
+            'Enter the passenger / cardholder name on each hoist row.',
+          );
+          setSubmitting(false);
+          setPaymentStep('tm');
+          return;
+        }
+        const primary = resolvePrimaryTmCard(
+          tmCardNumber,
+          tmCardExpiry,
+          tmHoistEntries,
+          tmCardName,
+        );
+        if (primary.tmCardNumber && !primary.tmCardName) {
+          Alert.alert(
+            'Passenger name required',
+            'Enter the passenger / cardholder name for the TM card.',
+          );
+          setSubmitting(false);
+          setPaymentStep('tm');
+          return;
+        }
         const councilId = String(tmConfig?.sourceCouncilId || '').trim() || undefined;
         tmDetails = {
           councilPays: tmSplit.councilPays,
@@ -474,13 +510,15 @@ export function PaymentModal() {
           tmHoists: tmHoistEntries.length ? tmHoistEntries : undefined,
           tmCardNumber: primary.tmCardNumber,
           tmCardExpiry: primary.tmCardExpiry,
-          tmCardName: String(tmCardName || '').trim() || undefined,
+          tmCardName: primary.tmCardName,
           totalFare: subtotal,
           councilId,
         };
       }
 
-      const finalPaymentType = isTmPayment ? tmPassengerPaymentType : paymentType;
+      const finalPaymentType = isTmPayment
+        ? (tmPassengerPaymentType as DriverPaymentType)
+        : paymentType;
       const accountDetails =
         finalPaymentType === 'Account' || paymentType === 'Account'
           ? selectedAccountId
@@ -701,7 +739,7 @@ export function PaymentModal() {
             </View>
             <View style={styles.tmRow}>
               <Text style={styles.tmLabel}>Passenger pays via</Text>
-              <Text style={styles.tmValue}>{tmPassengerPaymentType}</Text>
+              <Text style={styles.tmValue}>{tmPassengerPaymentType || 'Not selected'}</Text>
             </View>
             {isWav && hoistUnits > 0 ? (
               <View style={styles.tmRow}>
@@ -735,6 +773,67 @@ export function PaymentModal() {
 
   const closeTmScreen = () => {
     setPaymentStep('main');
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+  };
+
+  const tmRemainderReady = !!tmPassengerPaymentType;
+  const tmCanReview = (() => {
+    if (!tmRemainderReady) return false;
+    if (isWav && hoistRows.some((r) => !String(r.cardNumber || '').trim())) return false;
+    if (isWav && hoistRows.some((r) => String(r.cardNumber || '').trim() && !String(r.cardName || '').trim())) {
+      return false;
+    }
+    const primary = resolvePrimaryTmCard(tmCardNumber, tmCardExpiry, tmHoistEntries, tmCardName);
+    if (primary.tmCardNumber && !primary.tmCardName) return false;
+    if (!primary.tmCardNumber && !(isWav && hoistUnits > 0)) return false;
+    return true;
+  })();
+
+  const applyPrimaryToHoistRow = (rowKey: string) => {
+    const card = String(tmCardNumber || '').trim();
+    if (!card) {
+      Alert.alert('No primary card', 'Enter the primary TM card first, or type the card on this hoist row.');
+      return;
+    }
+    setHoistRows((prev) =>
+      prev.map((r) =>
+        r.key === rowKey
+          ? {
+              ...r,
+              cardNumber: card,
+              cardExpiry: tmCardExpiry,
+              cardName: String(tmCardName || '').trim(),
+            }
+          : r,
+      ),
+    );
+  };
+
+  const addHoistRow = () => {
+    const card = String(tmCardNumber || '').trim();
+    setHoistRows((prev) => [
+      ...prev,
+      {
+        key: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        // Prefill from primary so a single wheelchair passenger need not retype the same card.
+        cardNumber: card,
+        cardExpiry: card ? tmCardExpiry : '',
+        cardName: card ? String(tmCardName || '').trim() : '',
+      },
+    ]);
+  };
+
+  const goTmReview = () => {
+    if (!tmCanReview) {
+      Alert.alert(
+        'Complete TM details',
+        !tmRemainderReady
+          ? 'Select how the passenger pays the remaining fare.'
+          : 'Enter TM card number and passenger name (hoist rows need both).',
+      );
+      return;
+    }
+    setPaymentStep('tmConfirm');
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   };
 
@@ -775,152 +874,17 @@ export function PaymentModal() {
                 <Text style={styles.backLinkText}>← Back to payment</Text>
               </Pressable>
 
-              <View style={styles.card}>
-                <Text style={styles.stepLabel}>Meter fare (subsidy applies)</Text>
-                <View style={styles.tmRow}>
-                  <Text style={styles.tmLabel}>Meter + extras</Text>
-                  <Text style={styles.tmValue}>{fmtMoney(tmSplit.meterFare)}</Text>
-                </View>
-                <View style={styles.tmRow}>
-                  <Text style={styles.tmLabel}>Council (meter subsidy)</Text>
-                  <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPaysMeter)}</Text>
-                </View>
-                <View style={styles.tmRow}>
-                  <Text style={styles.tmLabel}>Passenger (meter share)</Text>
-                  <Text style={[styles.tmValue, styles.tmPassenger]}>
-                    {fmtMoney(tmSplit.passengerPaysMeter)}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.card}>
-                <Text style={styles.stepLabel}>Primary TM card (optional)</Text>
+              <View style={[styles.card, styles.tmRemainderCard]}>
+                <Text style={styles.stepLabel}>1. Remaining payment method *</Text>
                 <Text style={styles.hint}>
-                  Leave blank if every passenger is on a hoist row — the first hoist card is used as
-                  primary. Does not reduce hoist fees.
+                  Required before you can review. Collects the passenger meter share (
+                  {fmtMoney(tmSplit.passengerPays)}).
                 </Text>
-                <TextInput
-                  style={styles.field}
-                  placeholder="TM card number"
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="number-pad"
-                  value={tmCardNumber}
-                  onChangeText={setTmCardNumber}
-                />
-                <TextInput
-                  style={styles.field}
-                  placeholder="Cardholder name (optional)"
-                  placeholderTextColor={Colors.textMuted}
-                  autoCapitalize="words"
-                  value={tmCardName}
-                  onChangeText={setTmCardName}
-                />
-                <TextInput
-                  style={styles.field}
-                  placeholder="TM card expiry MM/YY"
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="number-pad"
-                  maxLength={5}
-                  value={tmCardExpiry}
-                  onChangeText={(v) => setTmCardExpiry(formatTmCardExpiryInput(v))}
-                />
-              </View>
-
-              {isWav ? (
-                <View style={styles.card}>
-                  <Text style={styles.stepLabel}>
-                    Hoist passengers (100% council · {fmtMoney(hoistCostPerUnit)} / use)
-                  </Text>
-                  <Text style={styles.hint}>
-                    Add one row per wheelchair passenger. Each gets a full hoist fee on their own
-                    card.
-                  </Text>
-                  {hoistRows.map((row, idx) => (
-                    <View key={row.key} style={styles.hoistRow}>
-                      <Text style={styles.hoistRowLabel}>Hoist {idx + 1}</Text>
-                      <TextInput
-                        style={styles.field}
-                        placeholder="TM card number *"
-                        placeholderTextColor={Colors.textMuted}
-                        keyboardType="number-pad"
-                        value={row.cardNumber}
-                        onChangeText={(v) =>
-                          setHoistRows((prev) =>
-                            prev.map((r) => (r.key === row.key ? { ...r, cardNumber: v } : r)),
-                          )
-                        }
-                      />
-                      <TextInput
-                        style={styles.field}
-                        placeholder="Expiry MM/YY (optional)"
-                        placeholderTextColor={Colors.textMuted}
-                        keyboardType="number-pad"
-                        maxLength={5}
-                        value={row.cardExpiry}
-                        onChangeText={(v) =>
-                          setHoistRows((prev) =>
-                            prev.map((r) =>
-                              r.key === row.key
-                                ? { ...r, cardExpiry: formatTmCardExpiryInput(v) }
-                                : r,
-                            ),
-                          )
-                        }
-                      />
-                      <View style={styles.hoistRowFooter}>
-                        <Text style={styles.hoistRate}>{fmtMoney(hoistCostPerUnit)} council</Text>
-                        <TouchableOpacity
-                          onPress={() =>
-                            setHoistRows((prev) => prev.filter((r) => r.key !== row.key))
-                          }
-                        >
-                          <Text style={styles.hoistRemove}>Remove</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))}
-                  <TouchableOpacity
-                    style={styles.hoistAddBtn}
-                    onPress={() =>
-                      setHoistRows((prev) => [
-                        ...prev,
-                        {
-                          key: `h-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                          cardNumber: '',
-                          cardExpiry: '',
-                        },
-                      ])
-                    }
-                  >
-                    <Text style={styles.hoistAddText}>+ Add hoist passenger</Text>
-                  </TouchableOpacity>
-                  <View style={styles.tmRow}>
-                    <Text style={styles.tmLabel}>
-                      Hoist fee ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
-                    </Text>
-                    <Text style={styles.tmValue}>{fmtMoney(hoistTotal)}</Text>
-                  </View>
-                  <Text style={styles.hint}>Passenger pays $0 toward hoist.</Text>
-                </View>
-              ) : null}
-
-              <View style={styles.card}>
-                <View style={styles.tmRow}>
-                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Total council</Text>
-                  <Text style={[styles.tmValue, { fontWeight: '700' }]}>
-                    {fmtMoney(tmSplit.councilPays)}
-                  </Text>
-                </View>
-                <View style={styles.tmRow}>
-                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Collect from passenger</Text>
-                  <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
-                    {fmtMoney(tmSplit.passengerPays)}
-                  </Text>
-                </View>
                 <Dropdown
                   label="Passenger pays remaining via"
                   value={tmPassengerPaymentType}
                   options={TM_PASSENGER_PAYMENT_TYPES}
+                  placeholder="Select payment method…"
                   onChange={setTmPassengerPaymentType}
                 />
                 {tmPassengerPaymentType === 'Account' ? (
@@ -1037,15 +1001,287 @@ export function PaymentModal() {
                   </View>
                 ) : null}
               </View>
+
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>Meter fare (subsidy applies)</Text>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Meter + extras</Text>
+                  <Text style={styles.tmValue}>{fmtMoney(tmSplit.meterFare)}</Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Council (meter subsidy)</Text>
+                  <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPaysMeter)}</Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Passenger (meter share)</Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger]}>
+                    {fmtMoney(tmSplit.passengerPaysMeter)}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>2. Primary TM card (optional)</Text>
+                <Text style={styles.hint}>
+                  Leave blank if every passenger is on a hoist row — the first hoist card is used as
+                  primary. Adding a hoist passenger prefills from this card when set (same card =
+                  no retyping).
+                </Text>
+                <TextInput
+                  style={styles.field}
+                  placeholder="TM card number"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="number-pad"
+                  value={tmCardNumber}
+                  onChangeText={setTmCardNumber}
+                />
+                <TextInput
+                  style={styles.field}
+                  placeholder="Passenger / cardholder name *"
+                  placeholderTextColor={Colors.textMuted}
+                  autoCapitalize="words"
+                  value={tmCardName}
+                  onChangeText={setTmCardName}
+                />
+                <TextInput
+                  style={styles.field}
+                  placeholder="TM card expiry MM/YY"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="number-pad"
+                  maxLength={5}
+                  value={tmCardExpiry}
+                  onChangeText={(v) => setTmCardExpiry(formatTmCardExpiryInput(v))}
+                />
+              </View>
+
+              {isWav ? (
+                <View style={styles.card}>
+                  <Text style={styles.stepLabel}>
+                    3. Hoist passengers (100% council · {fmtMoney(hoistCostPerUnit)} / use)
+                  </Text>
+                  <Text style={styles.hint}>
+                    Add one row per wheelchair passenger. Same card as primary? Use “Use primary
+                    card” or leave primary filled — new rows prefill automatically.
+                  </Text>
+                  {hoistRows.map((row, idx) => (
+                    <View key={row.key} style={styles.hoistRow}>
+                      <Text style={styles.hoistRowLabel}>Hoist {idx + 1}</Text>
+                      <TextInput
+                        style={styles.field}
+                        placeholder="TM card number *"
+                        placeholderTextColor={Colors.textMuted}
+                        keyboardType="number-pad"
+                        value={row.cardNumber}
+                        onChangeText={(v) =>
+                          setHoistRows((prev) =>
+                            prev.map((r) => (r.key === row.key ? { ...r, cardNumber: v } : r)),
+                          )
+                        }
+                      />
+                      <TextInput
+                        style={styles.field}
+                        placeholder="Passenger / cardholder name *"
+                        placeholderTextColor={Colors.textMuted}
+                        autoCapitalize="words"
+                        value={row.cardName}
+                        onChangeText={(v) =>
+                          setHoistRows((prev) =>
+                            prev.map((r) => (r.key === row.key ? { ...r, cardName: v } : r)),
+                          )
+                        }
+                      />
+                      <TextInput
+                        style={styles.field}
+                        placeholder="Expiry MM/YY (optional)"
+                        placeholderTextColor={Colors.textMuted}
+                        keyboardType="number-pad"
+                        maxLength={5}
+                        value={row.cardExpiry}
+                        onChangeText={(v) =>
+                          setHoistRows((prev) =>
+                            prev.map((r) =>
+                              r.key === row.key
+                                ? { ...r, cardExpiry: formatTmCardExpiryInput(v) }
+                                : r,
+                            ),
+                          )
+                        }
+                      />
+                      <View style={styles.hoistRowFooter}>
+                        <Text style={styles.hoistRate}>{fmtMoney(hoistCostPerUnit)} council</Text>
+                        <View style={styles.hoistRowActions}>
+                          {String(tmCardNumber || '').trim() ? (
+                            <TouchableOpacity onPress={() => applyPrimaryToHoistRow(row.key)}>
+                              <Text style={styles.hoistUsePrimary}>Use primary card</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          <TouchableOpacity
+                            onPress={() =>
+                              setHoistRows((prev) => prev.filter((r) => r.key !== row.key))
+                            }
+                          >
+                            <Text style={styles.hoistRemove}>Remove</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={styles.hoistAddBtn} onPress={addHoistRow}>
+                    <Text style={styles.hoistAddText}>+ Add hoist passenger</Text>
+                  </TouchableOpacity>
+                  <View style={styles.tmRow}>
+                    <Text style={styles.tmLabel}>
+                      Hoist fee ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
+                    </Text>
+                    <Text style={styles.tmValue}>{fmtMoney(hoistTotal)}</Text>
+                  </View>
+                  <Text style={styles.hint}>Passenger pays $0 toward hoist.</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.card}>
+                <View style={styles.tmRow}>
+                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Total council</Text>
+                  <Text style={[styles.tmValue, { fontWeight: '700' }]}>
+                    {fmtMoney(tmSplit.councilPays)}
+                  </Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Collect from passenger</Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
+                    {fmtMoney(tmSplit.passengerPays)}
+                  </Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Remaining via</Text>
+                  <Text style={styles.tmValue}>{tmPassengerPaymentType || '— select above —'}</Text>
+                </View>
+              </View>
             </ScrollView>
 
             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
               <Text style={styles.footerNote}>
-                Meter subsidy {fmtMoney(tmSplit.councilPaysMeter)}
-                {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}
-                {' · '}Collect {fmtMoney(tmSplit.passengerPays)}
+                {!tmRemainderReady
+                  ? 'Select remaining payment method (step 1) to continue'
+                  : `Meter subsidy ${fmtMoney(tmSplit.councilPaysMeter)}${
+                      hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''
+                    } · Collect ${fmtMoney(tmSplit.passengerPays)} via ${tmPassengerPaymentType}`}
               </Text>
-              <Button title="Done" onPress={closeTmScreen} style={styles.confirmBtn} />
+              <Button
+                title="Review payment →"
+                onPress={goTmReview}
+                disabled={!tmCanReview}
+                style={styles.confirmBtn}
+              />
+            </View>
+          </>
+        ) : paymentStep === 'tmConfirm' ? (
+          <>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.scroll}
+              contentContainerStyle={[
+                styles.scrollContent,
+                { paddingTop: insets.top + 12, paddingBottom: 120 },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.pageTitle}>Confirm TM payment</Text>
+              <Text style={styles.pickup} numberOfLines={2}>
+                {paymentJob.pickup}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setPaymentStep('tm');
+                  requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+                }}
+                style={styles.backLink}
+              >
+                <Text style={styles.backLinkText}>← Edit TM details</Text>
+              </Pressable>
+
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>Payment breakdown</Text>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Meter + extras</Text>
+                  <Text style={styles.tmValue}>{fmtMoney(tmSplit.meterFare)}</Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Council (meter subsidy)</Text>
+                  <Text style={styles.tmValue}>{fmtMoney(tmSplit.councilPaysMeter)}</Text>
+                </View>
+                {hoistTotal > 0 ? (
+                  <View style={styles.tmRow}>
+                    <Text style={styles.tmLabel}>
+                      Hoist ({hoistUnits} × {fmtMoney(hoistCostPerUnit)})
+                    </Text>
+                    <Text style={styles.tmValue}>{fmtMoney(hoistTotal)} council</Text>
+                  </View>
+                ) : null}
+                <View style={styles.tmRow}>
+                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Total council</Text>
+                  <Text style={[styles.tmValue, { fontWeight: '700' }]}>
+                    {fmtMoney(tmSplit.councilPays)}
+                  </Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Collect from passenger</Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
+                    {fmtMoney(tmSplit.passengerPays)}
+                  </Text>
+                </View>
+                <View style={styles.tmRow}>
+                  <Text style={styles.tmLabel}>Remaining payment</Text>
+                  <Text style={styles.tmValue}>{tmPassengerPaymentType}</Text>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.stepLabel}>TM card / passenger</Text>
+                {(() => {
+                  const primary = resolvePrimaryTmCard(
+                    tmCardNumber,
+                    tmCardExpiry,
+                    tmHoistEntries,
+                    tmCardName,
+                  );
+                  return (
+                    <>
+                      <View style={styles.tmRow}>
+                        <Text style={styles.tmLabel}>Primary card</Text>
+                        <Text style={styles.tmValue}>{primary.tmCardNumber || '—'}</Text>
+                      </View>
+                      <View style={styles.tmRow}>
+                        <Text style={styles.tmLabel}>Passenger name</Text>
+                        <Text style={styles.tmValue}>{primary.tmCardName || '—'}</Text>
+                      </View>
+                    </>
+                  );
+                })()}
+                {tmHoistEntries.map((h, i) => (
+                  <View key={`${h.cardNumber}-${i}`} style={{ marginTop: 8 }}>
+                    <Text style={styles.hoistRowLabel}>Hoist {i + 1}</Text>
+                    <Text style={styles.hint}>
+                      {h.cardName || '—'} · card {h.cardNumber}
+                      {h.cardExpiry ? ` · ${h.cardExpiry}` : ''} · {fmtMoney(h.amount)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+              <Text style={styles.footerNote}>
+                Collect {fmtMoney(tmSplit.passengerPays)} via {tmPassengerPaymentType}
+                {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}
+              </Text>
+              <Button
+                title={submitting ? 'Saving…' : 'Confirm Payment'}
+                onPress={onConfirm}
+                disabled={submitting}
+                style={styles.confirmBtn}
+              />
             </View>
           </>
         ) : (
@@ -1179,8 +1415,21 @@ export function PaymentModal() {
               ) : null}
               <Text style={styles.totalDue}>Total Due: {fmtMoney(totalDue)}</Text>
               <Button
-                title={submitting ? 'Saving…' : 'Confirm Payment'}
-                onPress={onConfirm}
+                title={submitting ? 'Saving…' : isTmPayment ? 'Review TM payment →' : 'Confirm Payment'}
+                onPress={() => {
+                  if (isTmPayment) {
+                    if (!tmCanReview) {
+                      openTmScreen();
+                      return;
+                    }
+                    setPaymentStep('tmConfirm');
+                    requestAnimationFrame(() =>
+                      scrollRef.current?.scrollTo({ y: 0, animated: false }),
+                    );
+                    return;
+                  }
+                  void onConfirm();
+                }}
                 disabled={submitting}
                 style={styles.confirmBtn}
               />
@@ -1301,6 +1550,10 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 18,
     fontWeight: '700',
+  },
+  dropdownPlaceholder: {
+    color: Colors.textMuted,
+    fontWeight: '600',
   },
   dropdownCaret: {
     color: Colors.textMuted,
@@ -1424,11 +1677,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
+  },
+  hoistRowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  hoistUsePrimary: {
+    color: Colors.tm,
+    fontSize: 13,
+    fontWeight: '700',
   },
   hoistRemove: {
     color: Colors.danger,
     fontSize: 13,
     fontWeight: '600',
+  },
+  tmRemainderCard: {
+    borderWidth: 2,
+    borderColor: Colors.tm,
   },
   hoistAddBtn: {
     paddingVertical: 10,

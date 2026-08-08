@@ -115,12 +115,13 @@ export function calcTmPaymentBreakdown(
 export type TmHoistEntry = {
   cardNumber: string;
   cardExpiry?: string;
+  cardName?: string;
   /** Always 1 × rate; stored for audit clarity. */
   amount: number;
 };
 
 export function buildTmHoistEntries(
-  rows: readonly { cardNumber?: string; cardExpiry?: string }[],
+  rows: readonly { cardNumber?: string; cardExpiry?: string; cardName?: string }[],
   hoistCostPerUnit: number,
 ): TmHoistEntry[] {
   const rate = Math.max(0, Number(hoistCostPerUnit) || 0);
@@ -128,6 +129,7 @@ export function buildTmHoistEntries(
     .map((r) => ({
       cardNumber: String(r?.cardNumber || '').trim(),
       cardExpiry: String(r?.cardExpiry || '').trim() || undefined,
+      cardName: String(r?.cardName || '').trim() || undefined,
       amount: +rate.toFixed(2),
     }))
     .filter((r) => r.cardNumber.length > 0);
@@ -142,14 +144,17 @@ export function resolvePrimaryTmCard(
   primaryCard: string | undefined,
   primaryExpiry: string | undefined,
   hoists: readonly TmHoistEntry[],
-): { tmCardNumber?: string; tmCardExpiry?: string } {
+  primaryName?: string | undefined,
+): { tmCardNumber?: string; tmCardExpiry?: string; tmCardName?: string } {
   const card = String(primaryCard || '').trim();
   const expiry = String(primaryExpiry || '').trim() || undefined;
-  if (card) return { tmCardNumber: card, tmCardExpiry: expiry };
+  const name = String(primaryName || '').trim() || undefined;
+  if (card) return { tmCardNumber: card, tmCardExpiry: expiry, tmCardName: name };
   const first = hoists[0];
   if (!first?.cardNumber) return {};
   return {
     tmCardNumber: first.cardNumber,
     tmCardExpiry: first.cardExpiry || expiry,
+    tmCardName: first.cardName || name,
   };
 }

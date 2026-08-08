@@ -160,8 +160,8 @@ test('Phase 2A.1 portal config edit + audit + hoist 100% council', () => {
 test('Phase 2A.2 multi hoist rows: 1× rate each, primary from first hoist', () => {
   const entries = buildTmHoistEntries(
     [
-      { cardNumber: '111', cardExpiry: '01/27' },
-      { cardNumber: ' 222 ', cardExpiry: '' },
+      { cardNumber: '111', cardExpiry: '01/27', cardName: 'Alex' },
+      { cardNumber: ' 222 ', cardExpiry: '', cardName: 'Blake' },
       { cardNumber: '', cardExpiry: '03/28' }, // ignored — no card
     ],
     10,
@@ -170,7 +170,9 @@ test('Phase 2A.2 multi hoist rows: 1× rate each, primary from first hoist', () 
   assert.equal(entries[0].amount, 10);
   assert.equal(entries[1].amount, 10);
   assert.equal(entries[0].cardNumber, '111');
+  assert.equal(entries[0].cardName, 'Alex');
   assert.equal(entries[1].cardNumber, '222');
+  assert.equal(entries[1].cardName, 'Blake');
   const b = calcTmPaymentBreakdown(40, entries.length, {
     councilSubsidyPercent: 65,
     councilCapAmount: 26,
@@ -181,7 +183,9 @@ test('Phase 2A.2 multi hoist rows: 1× rate each, primary from first hoist', () 
   const primaryEmpty = resolvePrimaryTmCard('', undefined, entries);
   assert.equal(primaryEmpty.tmCardNumber, '111');
   assert.equal(primaryEmpty.tmCardExpiry, '01/27');
-  const primarySet = resolvePrimaryTmCard('999', '12/30', entries);
+  assert.equal(primaryEmpty.tmCardName, 'Alex');
+  const primarySet = resolvePrimaryTmCard('999', '12/30', entries, 'Casey');
   assert.equal(primarySet.tmCardNumber, '999');
   assert.equal(primarySet.tmCardExpiry, '12/30');
+  assert.equal(primarySet.tmCardName, 'Casey');
 });
