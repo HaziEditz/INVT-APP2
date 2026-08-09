@@ -98,10 +98,21 @@ function TapToPayBody({
       if (!reader) throw new Error('No Tap to Pay reader on this device');
 
       setStatus('Connecting…');
-      const locationId = process.env.EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID || undefined;
+      // beta.29+: discoveryMethod + locationId live on the same connectReader object
+      // (nested `params: { locationId }` left discoveryMethod null → "Unknown discovery method: null").
+      const locationId =
+        process.env.EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID ||
+        reader?.location?.id ||
+        undefined;
+      if (!locationId) {
+        throw new Error(
+          'Missing Stripe Terminal locationId (EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID).',
+        );
+      }
       const connected = await terminal.connectReader({
+        discoveryMethod: 'tapToPay',
         reader,
-        params: locationId ? { locationId } : {},
+        locationId,
       });
       if (connected?.error) throw new Error(connected.error.message || 'Connect failed');
 
