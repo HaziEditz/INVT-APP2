@@ -4535,17 +4535,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     activeJobIdRef.current = null;
     bookingRawRef.current = null;
     localCompletionRef.current = false;
-    await storeData(STORAGE_KEYS.activeJob, null);
-    await storeData(STORAGE_KEYS.meterState, null);
-    refreshJobHistory().catch(() => undefined);
-
-    if (driver && shiftActive) {
-      if (offlineComplete || deferredFirebasePersist) {
-        void syncPresenceAfterTripClear();
-      } else {
-        await syncPresenceAfterTripClear();
+    // Trip is already cleared in React state — never await slow storage/presence here
+    // or PaymentModal can sit on "Saving…" / finalizePayment never settles.
+    void (async () => {
+      try {
+        await storeData(STORAGE_KEYS.activeJob, null);
+        await storeData(STORAGE_KEYS.meterState, null);
+      } catch (err) {
+        console.warn('[Driver] clear local job/meter storage after complete failed:', err);
       }
-    }
+      if (driver && shiftActive) {
+        try {
+          await syncPresenceAfterTripClear();
+        } catch (err) {
+          console.warn('[Driver] syncPresenceAfterTripClear after complete failed:', err);
+        }
+      }
+    })();
+    refreshJobHistory().catch(() => undefined);
     releaseQueuedOffersAfterTrip();
   };
 

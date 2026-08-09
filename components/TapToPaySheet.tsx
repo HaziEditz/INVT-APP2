@@ -4,6 +4,7 @@ import {
   createTapPaymentIntent,
   fetchTerminalConnectionToken,
   recordTapLedger,
+  shouldSimulateTapToPay,
 } from '@/lib/platformPaymentApi';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import {
@@ -88,9 +89,11 @@ function TapToPayBody({
       if (init?.error) throw new Error(init.error.message || 'Terminal init failed');
 
       setStatus('Finding Tap to Pay on this device…');
+      // Simulated only via explicit EXPO_PUBLIC_STRIPE_TERMINAL_SIMULATED=1 — never __DEV__.
+      const simulated = shouldSimulateTapToPay();
       const disc = await terminal.discoverReaders({
         discoveryMethod: 'tapToPay',
-        simulated: __DEV__,
+        simulated,
       });
       if (disc?.error) throw new Error(disc.error.message || 'Discover failed');
 
@@ -116,18 +119,20 @@ function TapToPayBody({
       });
       if (connected?.error) throw new Error(connected.error.message || 'Connect failed');
 
-      setStatus('Creating on-device PaymentIntent…');
-      const created = await terminal.createPaymentIntent({
-        amount: intent.amountCents,
-        currency: 'nzd',
-      });
-      if (created?.error || !created.paymentIntent) {
-        throw new Error(created?.error?.message || 'PaymentIntent create failed');
+      // One PI only: server create-intent → retrieve by clientSecret (do not also create on-device).
+      setStatus('Loading payment…');
+      const retrieved = await terminal.retrievePaymentIntent(intent.clientSecret);
+      if (retrieved?.error || !retrieved.paymentIntent) {
+        throw new Error(retrieved?.error?.message || 'retrievePaymentIntent failed');
       }
 
-      setStatus('Hold bank card near phone…');
+      setStatus(
+        simulated
+          ? 'Simulated Tap to Pay — follow on-screen prompts…'
+          : 'Briefly tap the bank card on the back of the phone (NFC)…',
+      );
       const collected = await terminal.collectPaymentMethod({
-        paymentIntent: created.paymentIntent,
+        paymentIntent: retrieved.paymentIntent,
       });
       if (collected?.error || !collected.paymentIntent) {
         throw new Error(collected?.error?.message || 'Collect failed');
@@ -141,15 +146,22 @@ function TapToPayBody({
         throw new Error(confirmed?.error?.message || 'Confirm failed');
       }
 
-      const paymentIntentId = String(confirmed.paymentIntent.id || intent.paymentIntentId);
+      const paymentIntentId = String(
+        confirmed.paymentIntent.id || intent.paymentIntentId,
+      ).trim();
+      // Ledger must not block trip complete — charge already succeeded.
       setStatus('Recording fee split…');
-      await recordTapLedger({
-        paymentIntentId,
-        companyId: driver.companyId,
-        amountCents: intent.amountCents,
-        bookingId,
-        driverId: driver.id,
-      });
+      try {
+        await recordTapLedger({
+          paymentIntentId,
+          companyId: driver.companyId,
+          amountCents: intent.amountCents,
+          bookingId,
+          driverId: driver.id,
+        });
+      } catch (ledgerErr) {
+        console.warn('[TapToPay] recordTapLedger failed (continuing to close trip):', ledgerErr);
+      }
 
       setStatus('Paid');
       onPaid({ paymentIntentId, amountCents: intent.amountCents });
@@ -171,7 +183,9 @@ function TapToPayBody({
       </View>
       <Text style={styles.amount}>${(amountCents / 100).toFixed(2)}</Text>
       <Text style={styles.hint}>
-        Bank cards / wallets only. TM cards cannot use NFC — use Scan or manual entry for TM.
+        Bank cards / wallets only. Briefly tap near the phone’s NFC area (usually the back). TM
+        cards cannot use NFC — use Scan or manual entry for TM.
+        {shouldSimulateTapToPay() ? ' · SIMULATED mode (EXPO_PUBLIC_STRIPE_TERMINAL_SIMULATED=1).' : ''}
       </Text>
       <Text style={styles.status}>{status}</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
