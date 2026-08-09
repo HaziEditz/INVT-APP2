@@ -140,6 +140,18 @@ export function shouldSuppressMissAway(pendingTripSync: boolean): boolean {
   return !!pendingTripSync;
 }
 
+/**
+ * After trip clear / during payment complete, timed-out offers must not Away the
+ * driver — paymentJob is already cleared so driverHasConfirmedActiveTrip is false.
+ */
+export function shouldSuppressMissAwayAfterTripClear(args: {
+  pendingTripSync: boolean;
+  syncingBanner: boolean;
+  localCompletion: boolean;
+}): boolean {
+  return !!(args.pendingTripSync || args.syncingBanner || args.localCompletion);
+}
+
 /** Expired deferred offers: purge — never promote to timed-out decline→Away. */
 export function shouldPurgeExpiredDeferredOffer(expiresAt: number | undefined, now = Date.now()): boolean {
   return typeof expiresAt === 'number' && Number.isFinite(expiresAt) && expiresAt <= now;

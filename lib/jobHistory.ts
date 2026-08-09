@@ -12,6 +12,8 @@ export interface HistoryJob {
   dropoff: string;
   fare: number;
   paymentType?: PaymentType | string;
+  tmPaymentType?: string;
+  tmRemainderPaymentType?: string;
   passengerName?: string;
   completedAt: number;
   cancelledBy?: string;
@@ -96,6 +98,9 @@ function mapCompletedRecord(
     dropoff: String(r.dropAddress ?? r.DropAddress ?? r.dropoff ?? ''),
     fare: parseFloat(fare.toFixed(2)),
     paymentType: String(r.paymentType ?? r.PaymentType ?? 'Cash'),
+    tmPaymentType: String(r.tmPaymentType ?? r.TmPaymentType ?? '') || undefined,
+    tmRemainderPaymentType:
+      String(r.tmRemainderPaymentType ?? r.TmRemainderPaymentType ?? '') || undefined,
     passengerName: String(r.passengerName ?? r.PassengerName ?? ''),
     completedAt,
   };
@@ -134,6 +139,9 @@ function mapBookingRecord(
     dropoff: String(r.DropAddress ?? r.dropoff ?? r.to ?? ''),
     fare: terminal === 'completed' ? parseFloat(fare.toFixed(2)) : 0,
     paymentType: String(r.paymentType ?? r.PaymentType ?? ''),
+    tmPaymentType: String(r.tmPaymentType ?? r.TmPaymentType ?? '') || undefined,
+    tmRemainderPaymentType:
+      String(r.tmRemainderPaymentType ?? r.TmRemainderPaymentType ?? '') || undefined,
     passengerName: String(r.PassengerName ?? r.passengerName ?? ''),
     completedAt,
     cancelledBy: String(r.CancelledBy ?? r.cancelledBy ?? ''),

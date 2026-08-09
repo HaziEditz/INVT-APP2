@@ -55,3 +55,30 @@ export function formatPaymentLabel(raw?: string | PaymentType | null): string {
   const bucket = normalizePaymentBucket(raw);
   return EARNINGS_LABELS[bucket];
 }
+
+/**
+ * Closed Jobs list label — TM trips store remainder as paymentType (Cash/Card/…)
+ * plus tmPaymentType / tmRemainderPaymentType. Show "TM + Cash" not just "Cash".
+ */
+export function formatClosedJobPaymentLabel(job: {
+  paymentType?: string | PaymentType | null;
+  tmPaymentType?: string | null;
+  tmRemainderPaymentType?: string | null;
+  PaymentType?: string | null;
+}): string {
+  const remainder = String(
+    job.tmRemainderPaymentType || job.paymentType || job.PaymentType || '',
+  ).trim();
+  const tmMarker = String(job.tmPaymentType || '').toLowerCase();
+  const isTm =
+    !!job.tmRemainderPaymentType ||
+    tmMarker.includes('mobility') ||
+    tmMarker === 'tm' ||
+    tmMarker.includes('total_mobility');
+  if (!isTm) {
+    return formatPaymentLabel(remainder || job.paymentType);
+  }
+  const remLabel = formatPaymentLabel(remainder || 'Cash');
+  if (remLabel === 'Total Mobility') return 'Total Mobility';
+  return `TM + ${remLabel}`;
+}

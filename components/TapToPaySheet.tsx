@@ -192,6 +192,11 @@ function TapToPayBody({
       <Pressable style={[styles.primaryBtn, busy && styles.disabled]} onPress={start} disabled={busy}>
         {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Start tap</Text>}
       </Pressable>
+      {error ? (
+        <Pressable style={styles.secondaryBtn} onPress={onCancel} disabled={busy}>
+          <Text style={styles.secondaryBtnText}>Use another payment method</Text>
+        </Pressable>
+      ) : null}
       <Text style={styles.meta}>
         Company {driver?.companyId || '—'}
         {bookingId ? ` · Job ${bookingId}` : ''}
@@ -261,5 +266,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  secondaryBtn: {
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  secondaryBtnText: { color: Colors.accent, fontWeight: '700', fontSize: 15 },
   disabled: { opacity: 0.6 },
 });

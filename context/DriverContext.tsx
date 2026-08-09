@@ -153,7 +153,7 @@ import {
   GEOCODE_TIMEOUT_MS,
   shouldPurgeExpiredDeferredOffer,
   derivePresenceWriteStatusFromIntent,
-  shouldSuppressMissAway,
+  shouldSuppressMissAwayAfterTripClear,
 } from '@/lib/tripJournalFlushPolicy';
 import {
   SHIFT_BOOTSTRAP_GPS_BUDGET_MS,
@@ -733,6 +733,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [connectionNotice, setConnectionNotice] =
     useState<DriverConnectionNotice>(null);
   const [syncingBanner, setSyncingBanner] = useState<string | null>(null);
+  const syncingBannerRef = useRef<string | null>(null);
   const [pendingTripSync, setPendingTripSync] = useState(false);
   const [hailActive, setHailActive] = useState(false);
   const [hailPickupAddress, setHailPickupAddress] = useState<string | null>(null);
@@ -1015,6 +1016,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         // Only show Syncing when journal work is still pending — do not revive a
         // stale persisted banner after force-close / successful online complete.
         const resolved = await resolvePendingSyncBanner();
+        syncingBannerRef.current = resolved?.message ?? null;
         setSyncingBanner(resolved?.message ?? null);
         await savePendingSyncBanner(resolved);
         // Pending offline completes must not wait for a reconnect edge after remount.
@@ -1973,6 +1975,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     console.log('[Driver] showNextQueuedJobAsOffer → modal', q.id);
+    // Promote Queued→Assigned as soon as the popup appears so dispatch leaves UA
+    // immediately (do not wait for Accept / Arrived).
+    void (async () => {
+      try {
+        await promoteQueuedJob(q.id, driver.id);
+        console.log('[Driver] queue promote on popup → Assigned', q.id);
+      } catch (err) {
+        console.warn('[Driver] queue promote on popup failed (Accept may retry):', err);
+      }
+    })();
     setJobOffer({ ...q, silent: false, fromQueue: true });
     void alertDriverToOffer({ ...q, silent: false, fromQueue: true });
   };
@@ -2006,6 +2018,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         '[away-debug] syncPresenceAfterTripClear → Busy (trip or pending journal sync)',
         snap,
       );
+      // Pending Syncing must win over a stale miss→Away from an earlier offer.
+      if (awayIntentRef.current === 'missed') {
+        awayIntentRef.current = 'none';
+      }
       setPresenceStatus('Busy');
       setReadyForJobs(false);
       readyForJobsRef.current = false;
@@ -2903,6 +2919,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const applySyncingBanner = async (banner: PendingSyncBanner | null) => {
     if (banner) markPendingTripSyncBlocking();
+    syncingBannerRef.current = banner?.message ?? null;
     setSyncingBanner(banner?.message ?? null);
     await savePendingSyncBanner(banner);
   };
@@ -3628,7 +3645,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     if (offerSnapshot.fromQueue) {
       try {
-        const result = await promoteQueuedJob(offerSnapshot.id, driver.id);
+        let result: { version?: number; alreadyStatus?: string; ok?: boolean } = {};
+        try {
+          result = await promoteQueuedJob(offerSnapshot.id, driver.id);
+        } catch (promoteErr) {
+          // Popup may have already promoted Queued→Assigned — treat Assigned as success.
+          const msg = promoteErr instanceof Error ? promoteErr.message : String(promoteErr);
+          if (!/alreadyStatus|Assigned|invalid_transition/i.test(msg)) {
+            throw promoteErr;
+          }
+          console.log('[Driver] fromQueue accept — already Assigned (idempotent)', offerSnapshot.id);
+        }
         removeBroadcastOffer(offerSnapshot.id);
         setJobOffer(null);
         const job = defaultActiveJob(offerSnapshot);
@@ -3814,9 +3841,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         driverSetAway = timedOut;
       }
       removeBroadcastOffer(offerSnapshot.id);
-      const suppressMissAway = shouldSuppressMissAway(
-        pendingTripSyncBlocksOffersRef.current || !!syncingBanner,
-      );
+      const suppressMissAway = shouldSuppressMissAwayAfterTripClear({
+        pendingTripSync: pendingTripSyncBlocksOffersRef.current,
+        syncingBanner: !!syncingBannerRef.current,
+        localCompletion: localCompletionRef.current,
+      });
       if (
         shiftActive &&
         driverSetAway &&
@@ -3832,6 +3861,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           driverSetAway,
           hasTrip: driverHasConfirmedActiveTrip(),
           suppressMissAway,
+          pendingTripSync: pendingTripSyncBlocksOffersRef.current,
+          syncingBanner: !!syncingBannerRef.current,
+          localCompletion: localCompletionRef.current,
         });
       }
     }
@@ -4604,10 +4636,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     meterRef.current = null;
     activeJobIdRef.current = null;
     bookingRawRef.current = null;
-    localCompletionRef.current = false;
-    // Presence/storage must settle before the driver is treated as free for offers.
-    // Await with a hard cap so PaymentModal cannot hang on Saving… if RTDB stalls
-    // (Tap-to-Pay regression). On timeout, keep trying in the background.
+    // Keep localCompletionRef true through presence clear so a timed-out deferred
+    // offer cannot Away the driver while Syncing / journal flush is still running.
     const clearLocalAndPresence = async () => {
       await storeData(STORAGE_KEYS.activeJob, null);
       await storeData(STORAGE_KEYS.meterState, null);
@@ -4629,6 +4659,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       void clearLocalAndPresence().catch((bgErr) => {
         console.warn('[Driver] background presence clear after complete failed:', bgErr);
       });
+    } finally {
+      localCompletionRef.current = false;
     }
     refreshJobHistory().catch(() => undefined);
     releaseQueuedOffersAfterTrip();

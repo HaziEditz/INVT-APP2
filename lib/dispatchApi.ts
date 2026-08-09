@@ -662,7 +662,16 @@ export async function promoteQueuedJob(bookingId: string, driverId: string) {
     version?: number;
     alreadyStatus?: string;
     error?: string;
+    error_code?: string;
   };
+  // Idempotent: popup may have already promoted Queued→Assigned.
+  if (
+    data.ok === false &&
+    (String(data.alreadyStatus || '') === 'Assigned' ||
+      String(data.error_code || '') === 'invalid_transition')
+  ) {
+    return { ...data, ok: true, version: data.version };
+  }
   if (!res.ok || !data.ok) {
     throw new Error(data.error || `Promote queued failed for #${bookingId}`);
   }

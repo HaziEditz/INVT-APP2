@@ -5,7 +5,7 @@ import { ScreenScroll } from '@/components/ScreenScroll';
 import { useDriver } from '@/context/DriverContext';
 import { Colors } from '@/constants/theme';
 import { sharedStyles } from '@/constants/styles';
-import { formatPaymentLabel } from '@/lib/earnings';
+import { formatClosedJobPaymentLabel } from '@/lib/earnings';
 import { HistoryJob } from '@/lib/jobHistory';
 import {
   applyHistoryFilters,
@@ -50,7 +50,7 @@ function JobCard({ job }: { job: HistoryJob }) {
       {job.status === 'completed' ? (
         <>
           <Text style={styles.fare}>${job.fare.toFixed(2)}</Text>
-          <Text style={styles.paymentType}>{formatPaymentLabel(job.paymentType)}</Text>
+          <Text style={styles.paymentType}>{formatClosedJobPaymentLabel(job)}</Text>
         </>
       ) : null}
       <Text style={styles.route}>{job.pickup || '—'}</Text>

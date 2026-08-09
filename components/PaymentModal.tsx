@@ -891,6 +891,14 @@ export function PaymentModal() {
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   };
 
+  /** Leave TM flow entirely and pick Cash/Card/etc. from the main payment screen. */
+  const abandonTmForOtherPayment = () => {
+    setPaymentType('Cash');
+    setTmPassengerPaymentType('');
+    setPaymentStep('main');
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+  };
+
   const primaryCardReady =
     !!String(tmCardNumber || '').trim() && isCompleteCardholderName(tmCardName);
   const hoistQuestionDone = !isWav || hoistUsedAnswer != null;
@@ -1005,6 +1013,9 @@ export function PaymentModal() {
               </Text>
               <Pressable onPress={closeTmScreen} style={styles.backLink}>
                 <Text style={styles.backLinkText}>← Back to payment</Text>
+              </Pressable>
+              <Pressable onPress={abandonTmForOtherPayment} style={styles.backLink}>
+                <Text style={styles.backLinkText}>← Choose a different payment method</Text>
               </Pressable>
 
               <View style={styles.card}>
@@ -1391,6 +1402,9 @@ export function PaymentModal() {
                 style={styles.backLink}
               >
                 <Text style={styles.backLinkText}>← Edit TM details</Text>
+              </Pressable>
+              <Pressable onPress={abandonTmForOtherPayment} style={styles.backLink}>
+                <Text style={styles.backLinkText}>← Choose a different payment method</Text>
               </Pressable>
 
               <View style={styles.card}>
