@@ -17,7 +17,7 @@ function timeSince(ts?: number): string {
 }
 
 export function OffersPanel() {
-  const { visibleOffers, pickOfferFromList, shiftActive, isOffline } = useDriver();
+  const { visibleOffers, pickOfferFromList, shiftActive, isOffline, acceptingOfferId } = useDriver();
 
   if (!shiftActive) {
     return (
@@ -35,10 +35,21 @@ export function OffersPanel() {
     );
   }
 
+  const anyAccepting = !!acceptingOfferId;
+
   return (
     <ScrollView style={styles.list} contentContainerStyle={styles.listContent} nestedScrollEnabled showsVerticalScrollIndicator>
       {visibleOffers.map((o) => {
         const fare = o.fixedFare ?? o.estimatedFare;
+        const thisAccepting = acceptingOfferId === String(o.id);
+        const acceptDisabled = isOffline || anyAccepting;
+        const acceptTitle = isOffline
+          ? 'Reconnect to accept'
+          : thisAccepting
+            ? 'Accepting…'
+            : anyAccepting
+              ? 'Wait…'
+              : 'Accept';
         return (
           <View key={o.id} style={styles.card}>
             <View style={styles.cardHead}>
@@ -66,9 +77,11 @@ export function OffersPanel() {
             {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
             {fare != null ? <Text style={styles.fare}>Est. fare ${fare.toFixed(2)}</Text> : null}
             <Button
-              title={isOffline ? 'Reconnect to accept' : 'Accept'}
-              disabled={isOffline}
-              onPress={() => pickOfferFromList(o.id)}
+              title={acceptTitle}
+              disabled={acceptDisabled}
+              onPress={() => {
+                void pickOfferFromList(o.id);
+              }}
               style={{ marginTop: 10 }}
             />
           </View>

@@ -19,9 +19,9 @@ export function JobOfferModal() {
     isOffline,
     syncingBanner,
     pendingTripSync,
+    acceptingOfferId,
   } = useDriver();
   const [secondsLeft, setSecondsLeft] = useState(0);
-  const [accepting, setAccepting] = useState(false);
   const timedOutRef = useRef(false);
   /** Offer clock ran out while Syncing/trip hold — purge without miss→Away. */
   const expiredWhileHeldRef = useRef(false);
@@ -92,14 +92,12 @@ export function JobOfferModal() {
   }
 
   const estFare = jobOffer.fixedFare ?? jobOffer.estimatedFare;
+  const accepting = !!acceptingOfferId;
   const acceptDisabled = accepting || isOffline;
 
   const onAccept = () => {
     if (acceptDisabled) return;
-    setAccepting(true);
-    void acceptOffer()
-      .catch((err) => console.error('[JobOfferModal] accept', err))
-      .finally(() => setAccepting(false));
+    void acceptOffer().catch((err) => console.error('[JobOfferModal] accept', err));
   };
 
   return (

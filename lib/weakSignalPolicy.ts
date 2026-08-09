@@ -10,6 +10,8 @@ export const STAGE_HTTP_MAX_ATTEMPTS = 1;
 export const COMPLETE_HTTP_MAX_ATTEMPTS = 1;
 export const AUTH_TOKEN_REFRESH_TIMEOUT_MS = 3_000;
 export const HAIL_CREATE_TIMEOUT_MS = 8_000;
+/** Exclusive / Offers-tab accept claim — must not hang forever (locks acceptingOfferRef). */
+export const ACCEPT_HTTP_TIMEOUT_MS = 10_000;
 /** Cap address enrich before complete so weak RTDB/geocode cannot block payment. */
 export const COMPLETE_ENRICH_TIMEOUT_MS = 2_500;
 /**

@@ -12,6 +12,8 @@ function parseLatLng(raw?: string): { lat?: number; lng?: number } {
   if (!raw || typeof raw !== 'string') return {};
   const parts = raw.split(',').map((x) => parseFloat(x.trim()));
   if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+    // Reject Null Island sentinel written by older hail/create paths.
+    if (parts[0] === 0 && parts[1] === 0) return {};
     return { lat: parts[0], lng: parts[1] };
   }
   return {};

@@ -130,6 +130,11 @@ import {
   removePendingClosedJob,
   upsertPendingClosedJob,
 } from '@/lib/pendingClosedJob';
+import {
+  ACCEPT_ALREADY_PROCESSING_MESSAGE,
+  ACCEPT_ALREADY_PROCESSING_TITLE,
+  isAcceptAlreadyInFlight,
+} from '@/lib/acceptOfferPolicy';
 import { withTimeout } from '@/lib/asyncTimeout';
 import { runEndShiftRemoteFlow } from '@/lib/endShiftRemoteFlow';
 import {
@@ -293,6 +298,8 @@ interface DriverContextValue {
   acknowledgeEndShiftSummary: () => void;
   togglePresence: () => Promise<void>;
   acceptOffer: () => Promise<void>;
+  /** Booking id currently being accepted (Offer tab / modal share this). */
+  acceptingOfferId: string | null;
   declineOffer: (opts?: { timedOut?: boolean }) => Promise<void>;
   advanceStage: () => Promise<void>;
   setPaymentType: (payment: PaymentType) => void;
@@ -804,6 +811,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const tripOnTheWayRef = useRef(false);
   const acceptCoordsRef = useRef<{ jobId: string; lat: number; lng: number } | null>(null);
   const acceptingOfferRef = useRef(false);
+  const [acceptingOfferId, setAcceptingOfferId] = useState<string | null>(null);
   /** Unsynced trip journal (stages/terminals/hail) — blocks Available / auto-dispatch. */
   const pendingTripSyncBlocksOffersRef = useRef(false);
 
@@ -3589,7 +3597,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const acceptOffer = async () => {
-    if (!jobOffer || !driver || acceptingOfferRef.current) return;
+    if (!jobOffer || !driver) return;
+    if (isAcceptAlreadyInFlight(acceptingOfferRef.current)) {
+      Alert.alert(ACCEPT_ALREADY_PROCESSING_TITLE, ACCEPT_ALREADY_PROCESSING_MESSAGE);
+      return;
+    }
     if (
       !offerAcceptanceIsAllowed(
         networkConnectedRef.current,
@@ -3605,6 +3617,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
     acceptingOfferRef.current = true;
+    setAcceptingOfferId(String(jobOffer.id));
     try {
     const offerSnapshot = jobOffer;
     if (!isValidBookingId(offerSnapshot.id)) {
@@ -3629,11 +3642,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         });
         setActiveJob(job);
         activeJobIdRef.current = job.id;
-        await storeData(STORAGE_KEYS.activeJob, job);
+        await withTimeout(
+          storeData(STORAGE_KEYS.activeJob, job),
+          2_000,
+          'acceptOffer.storeActiveJob',
+        ).catch((err) => console.warn('[Driver] store activeJob after accept failed:', err));
         setQueuedOffers((prev) => prev.filter((o) => o.id !== offerSnapshot.id));
         setPreferredPanelTab('current');
-        await captureAcceptLocation(job.id);
-        const vehicleId = await resolveVehicleId();
+        await withTimeout(
+          captureAcceptLocation(job.id),
+          3_000,
+          'acceptOffer.captureAcceptLocation',
+        ).catch(() => undefined);
+        const vehicleId = await withTimeout(resolveVehicleId(), 2_000, 'acceptOffer.resolveVehicleId').catch(
+          () => '',
+        );
         if (vehicleId) {
           writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
           setPresenceStatus('Busy');
@@ -3703,11 +3726,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
     setActiveJob(job);
     activeJobIdRef.current = job.id;
-    await storeData(STORAGE_KEYS.activeJob, job);
+    await withTimeout(
+      storeData(STORAGE_KEYS.activeJob, job),
+      2_000,
+      'acceptOffer.storeActiveJob',
+    ).catch((err) => console.warn('[Driver] store activeJob after accept failed:', err));
     setPreferredPanelTab('current');
-    await captureAcceptLocation(job.id);
+    await withTimeout(
+      captureAcceptLocation(job.id),
+      3_000,
+      'acceptOffer.captureAcceptLocation',
+    ).catch(() => undefined);
 
-    const vehicleId = await resolveVehicleId();
+    const vehicleId = await withTimeout(resolveVehicleId(), 2_000, 'acceptOffer.resolveVehicleId').catch(
+      () => '',
+    );
     if (vehicleId) {
       writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
       syncJobStageToDispatch('pickup');
@@ -3715,6 +3748,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     await clearDriverNotification(driver.id);
     } finally {
       acceptingOfferRef.current = false;
+      setAcceptingOfferId(null);
     }
   };
 
@@ -3809,7 +3843,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const pickOfferFromList = async (offerId: string) => {
     const offer = visibleOffers.find((o) => o.id === offerId);
-    if (!offer || !driver || acceptingOfferRef.current) return;
+    if (!offer || !driver) return;
+    if (isAcceptAlreadyInFlight(acceptingOfferRef.current)) {
+      Alert.alert(ACCEPT_ALREADY_PROCESSING_TITLE, ACCEPT_ALREADY_PROCESSING_MESSAGE);
+      return;
+    }
     if (
       !offerAcceptanceIsAllowed(
         networkConnectedRef.current,
@@ -3823,6 +3861,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
     acceptingOfferRef.current = true;
+    setAcceptingOfferId(String(offer.id));
     try {
     try {
       const result = (await acceptJobOffer(offer.id, driver.id)) as {
@@ -3866,17 +3905,28 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
     setActiveJob(job);
     activeJobIdRef.current = job.id;
-    await storeData(STORAGE_KEYS.activeJob, job);
+    await withTimeout(
+      storeData(STORAGE_KEYS.activeJob, job),
+      2_000,
+      'pickOffer.storeActiveJob',
+    ).catch((err) => console.warn('[Driver] store activeJob after accept failed:', err));
     setPreferredPanelTab('current');
-    await captureAcceptLocation(job.id);
+    await withTimeout(
+      captureAcceptLocation(job.id),
+      3_000,
+      'pickOffer.captureAcceptLocation',
+    ).catch(() => undefined);
 
-    const vehicleId = await resolveVehicleId();
+    const vehicleId = await withTimeout(resolveVehicleId(), 2_000, 'pickOffer.resolveVehicleId').catch(
+      () => '',
+    );
     if (vehicleId) {
       writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
       syncJobStageToDispatch('pickup');
     }
     } finally {
       acceptingOfferRef.current = false;
+      setAcceptingOfferId(null);
     }
   };
 
@@ -5481,6 +5531,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         togglePresence,
         tariffLocked,
         acceptOffer,
+        acceptingOfferId,
         declineOffer,
         advanceStage,
         setPaymentType,

@@ -7,6 +7,7 @@ import { loadLiveMeterPresenceFields } from '@/lib/liveMeterPresence';
 import { getData, STORAGE_KEYS } from '@/lib/storage';
 import {
   AUTH_TOKEN_REFRESH_TIMEOUT_MS,
+  ACCEPT_HTTP_TIMEOUT_MS,
   COMPLETE_HTTP_MAX_ATTEMPTS,
   COMPLETE_HTTP_TIMEOUT_MS,
   HAIL_CREATE_TIMEOUT_MS,
@@ -356,7 +357,22 @@ export async function registerDriver(payload: Record<string, string>) {
 }
 
 export async function acceptJobOffer(jobId: string, driverId: string) {
-  return dispatchPost('/api/job/accept', { jobId, driverId });
+  const headers = await driverApiHeaders();
+  const body = await withDriverIdentity({ jobId, driverId });
+  const res = await fetchWithTimeout(
+    `${DISPATCH_API_URL}/api/job/accept`,
+    { method: 'POST', headers, body: JSON.stringify(body) },
+    ACCEPT_HTTP_TIMEOUT_MS,
+  );
+  const data = await parseJsonBody(res);
+  if (!res.ok) {
+    throw new DispatchApiError(
+      String(data.error || `Dispatch accept failed: ${res.status}`),
+      res.status,
+      data,
+    );
+  }
+  return data;
 }
 
 export async function declineJobOffer(
@@ -413,6 +429,26 @@ export async function createHailJobOnDispatch(params: {
   /** Vehicle type from the driver's selected vehicle (Closed Job / dispatch). */
   vehicleType?: string;
 }): Promise<{ jobId: string; bookingId: number; updateSeq: number; clientTripId: string; existing?: boolean }> {
+  const pickupCoords =
+    Number.isFinite(params.pickup.lat) &&
+    Number.isFinite(params.pickup.lng) &&
+    !(params.pickup.lat === 0 && params.pickup.lng === 0)
+      ? { lat: params.pickup.lat as number, lng: params.pickup.lng as number }
+      : {};
+  // Hail destination is unknown until End Trip — never mirror pickup as DropAddress
+  // (dispatch Active card would otherwise show pickup as dropoff).
+  // Never send Null Island 0,0 — omit coords when unknown (server persists empty).
+  const dropoff = params.dropoff?.address?.trim()
+    ? {
+        address: params.dropoff.address.trim(),
+        ...(Number.isFinite(params.dropoff.lat) &&
+        Number.isFinite(params.dropoff.lng) &&
+        !(params.dropoff.lat === 0 && params.dropoff.lng === 0)
+          ? { lat: params.dropoff.lat as number, lng: params.dropoff.lng as number }
+          : {}),
+      }
+    : { address: '' };
+
   const body: Record<string, unknown> = {
     companyId: params.companyId,
     source: 'hail',
@@ -422,18 +458,9 @@ export async function createHailJobOnDispatch(params: {
     clientTripId: params.clientTripId,
     pickup: {
       address: params.pickup.address,
-      lat: params.pickup.lat ?? 0,
-      lng: params.pickup.lng ?? 0,
+      ...pickupCoords,
     },
-    // Hail destination is unknown until End Trip — never mirror pickup as DropAddress
-    // (dispatch Active card would otherwise show pickup as dropoff).
-    dropoff: params.dropoff?.address?.trim()
-      ? {
-          address: params.dropoff.address.trim(),
-          lat: params.dropoff.lat ?? 0,
-          lng: params.dropoff.lng ?? 0,
-        }
-      : { address: '', lat: 0, lng: 0 },
+    dropoff,
     passengers: 1,
   };
   const vehicleType = String(params.vehicleType || '').trim();
@@ -620,12 +647,17 @@ export async function pruneDriverQueueOnDispatch(opts?: { dryRun?: boolean }): P
 export async function promoteQueuedJob(bookingId: string, driverId: string) {
   const bid = parseInt(bookingId, 10);
   if (!bid) throw new Error('promoteQueuedJob: invalid bookingId');
-  const res = await fetch(`${DISPATCH_API_URL}/api/job/promote-queued`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bookingId: bid, driverId }),
-  });
-  const data = (await res.json().catch(() => ({}))) as {
+  const headers = await driverApiHeaders();
+  const res = await fetchWithTimeout(
+    `${DISPATCH_API_URL}/api/job/promote-queued`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ bookingId: bid, driverId }),
+    },
+    ACCEPT_HTTP_TIMEOUT_MS,
+  );
+  const data = (await parseJsonBody(res)) as {
     ok?: boolean;
     version?: number;
     alreadyStatus?: string;

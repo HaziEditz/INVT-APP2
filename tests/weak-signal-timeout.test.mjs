@@ -7,6 +7,7 @@ import test from 'node:test';
 import { withTimeout } from '../lib/asyncTimeout.ts';
 import {
   AUTH_TOKEN_REFRESH_TIMEOUT_MS,
+  ACCEPT_HTTP_TIMEOUT_MS,
   COMPLETE_ENRICH_TIMEOUT_MS,
   COMPLETE_PRESENCE_CLEAR_TIMEOUT_MS,
   COMPLETE_HTTP_MAX_ATTEMPTS,
@@ -35,6 +36,7 @@ test('P0 budgets are short (not the old 45s×retry walls)', () => {
   assert.ok(STAGE_HTTP_TIMEOUT_MS <= 12_000);
   assert.ok(COMPLETE_HTTP_TIMEOUT_MS <= 15_000);
   assert.ok(HAIL_CREATE_TIMEOUT_MS <= 10_000);
+  assert.ok(ACCEPT_HTTP_TIMEOUT_MS <= 12_000);
   assert.ok(AUTH_TOKEN_REFRESH_TIMEOUT_MS <= 5_000);
   assert.ok(COMPLETE_ENRICH_TIMEOUT_MS <= 5_000);
   assert.ok(COMPLETE_PRESENCE_CLEAR_TIMEOUT_MS <= 5_000);
