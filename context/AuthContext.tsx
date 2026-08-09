@@ -287,3 +287,8 @@ export function useAuth() {
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
+
+/** Non-throwing variant for boot screens that may render before AuthProvider. */
+export function useAuthOptional() {
+  return useContext(AuthContext);
+}

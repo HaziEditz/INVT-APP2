@@ -5,8 +5,7 @@ import { DriverProvider } from '@/context/DriverContext';
 import { AuthNavigator } from '@/components/AuthNavigator';
 import { Colors } from '@/constants/theme';
 import { JobOfferModal } from '@/components/JobOfferModal';
-import { PaymentModal } from '@/components/PaymentModal';
-import { PaymentModalFallback } from '@/components/PaymentModalFallback';
+import { LazyPaymentModalHost } from '@/components/LazyPaymentModalHost';
 import { EndShiftFlow } from '@/components/EndShiftFlow';
 import { DriverInAppBanner } from '@/components/DriverInAppBanner';
 import { SosNotificationBootstrap } from '@/components/SosNotificationBootstrap';
@@ -66,14 +65,8 @@ export default function RootLayout() {
         <ErrorBoundary name="JobOfferModal">
           <JobOfferModal />
         </ErrorBoundary>
-        <ErrorBoundary
-          name="PaymentModal"
-          renderFallback={(error, reset) => (
-            <PaymentModalFallback errorMessage={error.message} onRetry={reset} />
-          )}
-        >
-          <PaymentModal />
-        </ErrorBoundary>
+        {/* Lazy: OCR/camera/Terminal must not block AuthProvider mount */}
+        <LazyPaymentModalHost />
         <ErrorBoundary name="EndShiftFlow">
           <EndShiftFlow />
         </ErrorBoundary>

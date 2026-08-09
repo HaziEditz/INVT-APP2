@@ -1,10 +1,16 @@
-import { useAuth } from '@/context/AuthContext';
+import { useAuthOptional } from '@/context/AuthContext';
 import { Colors } from '@/constants/theme';
 import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
 export default function Index() {
-  const { firebaseUser, loading } = useAuth();
+  // Optional: if root layout failed to mount AuthProvider (e.g. native module
+  // import crash), do not hard-crash — fall through to login.
+  const auth = useAuthOptional();
+
+  if (!auth) return <Redirect href="/(auth)/login" />;
+
+  const { firebaseUser, loading } = auth;
 
   if (loading) {
     return (
