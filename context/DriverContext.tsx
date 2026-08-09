@@ -138,6 +138,7 @@ import {
 } from '@/lib/offlineCompletePolicy';
 import {
   COMPLETE_ENRICH_TIMEOUT_MS,
+  COMPLETE_PRESENCE_CLEAR_TIMEOUT_MS,
   STAGE_VERIFY_TIMEOUT_MS,
   runOnlineCompleteWithJournalFallback,
   runOnlineHailCreateWithJournalFallback,
@@ -775,6 +776,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const lastStagePresenceWriteRef = useRef<{ status: FirebaseDriverStatus; at: number } | null>(null);
   const prevQueuedOfferIdsRef = useRef<Set<string>>(new Set());
   const repairPresenceRef = useRef<((reason?: string) => Promise<void>) | null>(null);
+  const syncBgLocationFirebaseStatusRef = useRef<
+    ((status: FirebaseDriverStatus) => Promise<void>) | null
+  >(null);
   const refreshActiveJobRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const reconcileOffersRef = useRef<((reason?: string) => Promise<void>) | null>(null);
   const flushPendingTripJournalRef = useRef<(() => Promise<void>) | null>(null);
@@ -1940,6 +1944,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const showNextQueuedJobAsOffer = () => {
     if (!driver || !shiftActiveRef.current) return;
     if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
+    // Same gates as deferred exclusive offers — do not surface queue jobs while
+    // Syncing / not ready (finalizePayment used to race release vs presence clear).
+    if (!readyForJobsRef.current) {
+      console.log('[Driver] showNextQueuedJobAsOffer deferred — not readyForJobs');
+      return;
+    }
+    if (pendingTripSyncBlocksOffersRef.current) {
+      console.log('[Driver] showNextQueuedJobAsOffer deferred — pending trip sync');
+      return;
+    }
 
     const q = queuedOffersRef.current[0];
     if (!q) return;
@@ -1961,7 +1975,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const syncPresenceAfterTripClear = async () => {
     const pendingJournal = await refreshPendingTripSyncGate();
     const snap = {
-      shiftActive,
+      shiftActive: shiftActiveRef.current,
       hailActive: hailActiveRef.current,
       activeJobId: activeJobIdRef.current,
       paymentJobId: paymentJobRef.current?.id ?? null,
@@ -1970,7 +1984,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       pendingJournal,
     };
     console.log('[away-debug] syncPresenceAfterTripClear enter', snap);
-    if (!driver || !shiftActive) {
+    if (!driver || !shiftActiveRef.current) {
       console.log('[away-debug] syncPresenceAfterTripClear skip — no driver or shift');
       return;
     }
@@ -1984,19 +1998,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         '[away-debug] syncPresenceAfterTripClear → Busy (trip or pending journal sync)',
         snap,
       );
-      writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
       setPresenceStatus('Busy');
       setReadyForJobs(false);
       readyForJobsRef.current = false;
+      // Await presence write so GPS heartbeats cannot race with a stale Busy/Available flip.
+      await syncBgLocationFirebaseStatusRef.current?.('Busy');
+      await writeOnlinePresence(driver, vehicleId, 'Busy');
       return;
     }
     awayIntentRef.current = 'none';
     console.log('[away-debug] syncPresenceAfterTripClear → Available');
     readyForJobsRef.current = true;
     setReadyForJobs(true);
-    writeOnlinePresence(driver, vehicleId, 'Available').catch(() => undefined);
     setPresenceStatus('Online');
+    await syncBgLocationFirebaseStatusRef.current?.('Available');
+    await writeOnlinePresence(driver, vehicleId, 'Available');
     flushDeferredOfferPopupNowRef.current?.('syncPresenceAfterTripClear');
+    // Pending Syncing may have blocked the post-complete queue release — retry now.
+    releaseQueuedOffersAfterTrip();
   };
 
   const restoreAvailableAfterJobClear = async () => {
@@ -2771,6 +2790,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       // non-fatal
     }
   };
+  syncBgLocationFirebaseStatusRef.current = syncBgLocationFirebaseStatus;
 
   const repairPresenceIfNeeded = async (reason = 'repair') => {
     if (!driver || !shiftActiveRef.current) return;
@@ -4535,23 +4555,31 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     activeJobIdRef.current = null;
     bookingRawRef.current = null;
     localCompletionRef.current = false;
-    // Trip is already cleared in React state — never await slow storage/presence here
-    // or PaymentModal can sit on "Saving…" / finalizePayment never settles.
-    void (async () => {
-      try {
-        await storeData(STORAGE_KEYS.activeJob, null);
-        await storeData(STORAGE_KEYS.meterState, null);
-      } catch (err) {
-        console.warn('[Driver] clear local job/meter storage after complete failed:', err);
+    // Presence/storage must settle before the driver is treated as free for offers.
+    // Await with a hard cap so PaymentModal cannot hang on Saving… if RTDB stalls
+    // (Tap-to-Pay regression). On timeout, keep trying in the background.
+    const clearLocalAndPresence = async () => {
+      await storeData(STORAGE_KEYS.activeJob, null);
+      await storeData(STORAGE_KEYS.meterState, null);
+      if (driver && shiftActiveRef.current) {
+        await syncPresenceAfterTripClear();
       }
-      if (driver && shiftActive) {
-        try {
-          await syncPresenceAfterTripClear();
-        } catch (err) {
-          console.warn('[Driver] syncPresenceAfterTripClear after complete failed:', err);
-        }
-      }
-    })();
+    };
+    try {
+      await withTimeout(
+        clearLocalAndPresence(),
+        COMPLETE_PRESENCE_CLEAR_TIMEOUT_MS,
+        'finalizePayment.presenceClear',
+      );
+    } catch (err) {
+      console.warn(
+        '[Driver] presence/storage clear after complete timed out or failed — continuing in background:',
+        err,
+      );
+      void clearLocalAndPresence().catch((bgErr) => {
+        console.warn('[Driver] background presence clear after complete failed:', bgErr);
+      });
+    }
     refreshJobHistory().catch(() => undefined);
     releaseQueuedOffersAfterTrip();
   };

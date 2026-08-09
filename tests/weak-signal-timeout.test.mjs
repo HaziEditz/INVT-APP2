@@ -8,6 +8,7 @@ import { withTimeout } from '../lib/asyncTimeout.ts';
 import {
   AUTH_TOKEN_REFRESH_TIMEOUT_MS,
   COMPLETE_ENRICH_TIMEOUT_MS,
+  COMPLETE_PRESENCE_CLEAR_TIMEOUT_MS,
   COMPLETE_HTTP_MAX_ATTEMPTS,
   COMPLETE_HTTP_TIMEOUT_MS,
   HAIL_CREATE_TIMEOUT_MS,
@@ -36,6 +37,7 @@ test('P0 budgets are short (not the old 45s×retry walls)', () => {
   assert.ok(HAIL_CREATE_TIMEOUT_MS <= 10_000);
   assert.ok(AUTH_TOKEN_REFRESH_TIMEOUT_MS <= 5_000);
   assert.ok(COMPLETE_ENRICH_TIMEOUT_MS <= 5_000);
+  assert.ok(COMPLETE_PRESENCE_CLEAR_TIMEOUT_MS <= 5_000);
   assert.ok(STAGE_VERIFY_TIMEOUT_MS <= 5_000);
   assert.equal(STAGE_HTTP_MAX_ATTEMPTS, 1);
   assert.equal(COMPLETE_HTTP_MAX_ATTEMPTS, 1);
@@ -136,6 +138,26 @@ test('Complete: hanging enrich is skipped via withTimeout race', async () => {
   }
   assert.equal(closed.pickup, '');
   assert.ok(Date.now() - started < 400);
+});
+
+test('Complete: hanging presence clear is skipped via withTimeout race', async () => {
+  let presenceCleared = false;
+  const started = Date.now();
+  try {
+    await withTimeout(
+      (async () => {
+        await neverResolves();
+        presenceCleared = true;
+      })(),
+      100,
+      'finalizePayment.presenceClear',
+    );
+  } catch {
+    // expected — UI must not wait forever (Tap Saving… hang)
+  }
+  assert.equal(presenceCleared, false);
+  assert.ok(Date.now() - started < 400);
+  assert.ok(COMPLETE_PRESENCE_CLEAR_TIMEOUT_MS >= 2_000);
 });
 
 test('Complete: online success clears without journal', async () => {

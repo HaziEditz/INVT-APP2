@@ -12,6 +12,12 @@ export const AUTH_TOKEN_REFRESH_TIMEOUT_MS = 3_000;
 export const HAIL_CREATE_TIMEOUT_MS = 8_000;
 /** Cap address enrich before complete so weak RTDB/geocode cannot block payment. */
 export const COMPLETE_ENRICH_TIMEOUT_MS = 2_500;
+/**
+ * After payment confirm: await storage + presence clear so dispatch sees Available
+ * before the driver is treated as free — but never hang Saving… if RTDB stalls
+ * (Tap-to-Pay hang regression). On timeout, continue in background.
+ */
+export const COMPLETE_PRESENCE_CLEAR_TIMEOUT_MS = 4_000;
 /** Cap Firebase stage verify on transport failure (prefer journal). */
 export const STAGE_VERIFY_TIMEOUT_MS = 3_000;
 
