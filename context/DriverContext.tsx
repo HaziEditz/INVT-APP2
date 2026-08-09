@@ -307,6 +307,10 @@ interface DriverContextValue {
       accountPending?: boolean;
       accountRef?: string;
     },
+    cardPaymentDetails?: {
+      stripePaymentIntentId?: string;
+      stripeChargeId?: string;
+    },
   ) => Promise<void>;
   dismissPayment: () => void;
   completionBusy: boolean;
@@ -4115,6 +4119,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       accountPending?: boolean;
       accountRef?: string;
     },
+    cardPaymentDetails?: {
+      stripePaymentIntentId?: string;
+      stripeChargeId?: string;
+    },
   ) => {
     const job = paymentJob ?? activeJob;
     if (!job || !driver?.companyId) {
@@ -4138,6 +4146,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         : {}),
       ...(String(extras.accPoNo || '').trim()
         ? { accPoNo: String(extras.accPoNo).trim() }
+        : {}),
+      ...(String(cardPaymentDetails?.stripePaymentIntentId || '').trim()
+        ? {
+            stripePaymentIntentId: String(cardPaymentDetails!.stripePaymentIntentId).trim(),
+          }
+        : {}),
+      ...(String(cardPaymentDetails?.stripeChargeId || '').trim()
+        ? { stripeChargeId: String(cardPaymentDetails!.stripeChargeId).trim() }
         : {}),
     };
     if (accountId && driver.companyId) {

@@ -23,6 +23,7 @@
         "NSLocationWhenInUseUsageDescription": "BookaWaka Driver needs your location for dispatch and navigation.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "BookaWaka Driver tracks location in the background while you are online or on a job.",
         "NSLocationAlwaysUsageDescription": "BookaWaka Driver tracks location in the background while you are online or on a job.",
+        "NSCameraUsageDescription": "BookaWaka Driver uses the camera to scan Total Mobility and payment cards.",
         "UIBackgroundModes": ["location", "fetch", "remote-notification"]
       }
     },
@@ -47,7 +48,9 @@
         "WAKE_LOCK",
         "POST_NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "CAMERA",
+        "android.permission.NFC"
       ]
     },
     "platforms": ["ios", "android"],
@@ -72,6 +75,23 @@
           "color": "#1a73e8",
           "sounds": ["./assets/sounds/alert.wav"]
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow BookaWaka Driver to scan Total Mobility and payment cards.",
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-ocr-kit",
+      [
+        "@stripe/stripe-terminal-react-native",
+        {
+          "bluetoothBackgroundMode": false,
+          "locationWhenInUsePermission": "Location is required to accept card payments.",
+          "tapToPayCheck": true,
+          "appDelegate": true
+        }
       ]
     ],
     "experiments": {
@@ -89,7 +109,8 @@
       "eas": {
         "projectId": "8cf080aa-8fbc-4bce-b653-6c865d1db592"
       },
-      "dispatchApiUrl": "https://invt-production.up.railway.app"
+      "dispatchApiUrl": "https://invt-production.up.railway.app",
+      "paymentsApiUrl": "https://invt-superadmin-production.up.railway.app"
     },
     "owner": "lovesaf"
   }

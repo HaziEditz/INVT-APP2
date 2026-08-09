@@ -20,6 +20,9 @@ export const Colors = {
 
 export const DISPATCH_API_URL = 'https://invt-production.up.railway.app';
 
+/** Shared platform payment API (Tap to Pay ConnectionTokens / PaymentIntents). */
+export const PAYMENTS_API_URL = 'https://invt-superadmin-production.up.railway.app';
+
 export const PAYMENT_TYPES = [
   'Cash',
   'Card',
