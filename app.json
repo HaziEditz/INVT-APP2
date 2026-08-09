@@ -92,6 +92,14 @@
           "tapToPayCheck": true,
           "appDelegate": true
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
       ]
     ],
     "experiments": {
