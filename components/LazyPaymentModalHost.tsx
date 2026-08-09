@@ -10,19 +10,31 @@ type State = {
 };
 
 /**
- * Dynamic require keeps expo-camera / stripe-terminal / OCR off the critical
- * path for app/_layout.tsx so AuthProvider always mounts.
+ * Deferred load of PaymentModal so camera/OCR/Terminal stay off the critical
+ * AuthProvider mount path.
+ *
+ * IMPORTANT: use a relative require(). Metro does not reliably resolve `@/`
+ * aliases inside require(), which produced:
+ *   Cannot read property 'PaymentModal' of undefined
  */
 export class LazyPaymentModalHost extends Component<object, State> {
   state: State = { Comp: null, loadError: null };
 
   private load = () => {
     try {
+      // Relative path — do not use `@/…` here.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const mod = require('@/components/PaymentModal') as {
-        PaymentModal: React.ComponentType;
+      const mod = require('./PaymentModal') as {
+        PaymentModal?: React.ComponentType;
+        default?: React.ComponentType;
       };
-      this.setState({ Comp: mod.PaymentModal, loadError: null });
+      const Comp = mod?.PaymentModal ?? mod?.default ?? null;
+      if (!Comp) {
+        throw new Error(
+          'PaymentModal module loaded but export is missing (expected named PaymentModal).',
+        );
+      }
+      this.setState({ Comp, loadError: null });
     } catch (err: unknown) {
       console.error('[LazyPaymentModalHost] failed to load PaymentModal:', err);
       const message =

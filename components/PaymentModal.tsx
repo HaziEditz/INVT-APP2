@@ -9,6 +9,7 @@ import {
 } from '@/lib/accountCache';
 import { searchBusinessAccounts, type DriverAccountSearchHit } from '@/lib/dispatchApi';
 import { normalizeDriverPaymentType } from '@/lib/driverPayment';
+import type { CardScanFields } from '@/lib/cardOcrParse';
 import {
   buildTmHoistEntries,
   calcTmPaymentBreakdown,
@@ -26,10 +27,12 @@ import {
   TmPaymentDetails,
 } from '@/types';
 import NetInfo from '@react-native-community/netinfo';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  findNodeHandle,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -40,8 +43,42 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type NativeSyntheticEvent,
+  type TextInputFocusEventData,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+/** Deferred so expo-camera / Terminal stay off PaymentModal's static import graph. */
+function loadCardScanModal(): ComponentType<{
+  visible: boolean;
+  title?: string;
+  onCancel: () => void;
+  onConfirm: (fields: CardScanFields) => void;
+}> | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('./CardScanModal').CardScanModal;
+  } catch (err) {
+    console.warn('[PaymentModal] CardScanModal unavailable:', err);
+    return null;
+  }
+}
+
+function loadTapToPaySheet(): ComponentType<{
+  visible: boolean;
+  amountCents: number;
+  bookingId?: string | null;
+  onCancel: () => void;
+  onPaid: (info: { paymentIntentId: string; amountCents: number }) => void;
+}> | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('./TapToPaySheet').TapToPaySheet;
+  } catch (err) {
+    console.warn('[PaymentModal] TapToPaySheet unavailable:', err);
+    return null;
+  }
+}
 
 type ExtraKey = 'eftposSurcharge' | 'airportFee' | 'bikeCarry' | 'tolls' | 'other';
 
@@ -143,6 +180,9 @@ export function PaymentModal() {
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvc, setCardCvc] = useState('');
+  const [cardScanOpen, setCardScanOpen] = useState(false);
+  const [cardScanTarget, setCardScanTarget] = useState<'bank' | 'tmPrimary'>('bank');
+  const [tapToPayOpen, setTapToPayOpen] = useState(false);
   const [eftposRef, setEftposRef] = useState('');
   const [eftposSurchargeOn, setEftposSurchargeOn] = useState(false);
   const [eftposSurchargeAmt, setEftposSurchargeAmt] = useState('');
@@ -156,11 +196,51 @@ export function PaymentModal() {
   const [accountAllowFreeText, setAccountAllowFreeText] = useState(false);
   const accountSearchSeq = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
+  const [keyboardInset, setKeyboardInset] = useState(0);
 
-  const scrollAccountFieldIntoView = () => {
-    // Account fields sit mid-form; lift them above the sticky footer + keyboard.
-    requestAnimationFrame(() => {
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = Keyboard.addListener(showEvt, (e) => {
+      setKeyboardInset(e.endCoordinates?.height || 0);
+    });
+    const onHide = Keyboard.addListener(hideEvt, () => setKeyboardInset(0));
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, []);
+
+  const scrollAccountFieldIntoView = (
+    e?: NativeSyntheticEvent<TextInputFocusEventData>,
+  ) => {
+    // Keep the account search field above the sticky footer + on-screen keyboard.
+    const run = () => {
+      const nativeTarget = e?.nativeEvent?.target;
+      const target =
+        typeof nativeTarget === 'number'
+          ? nativeTarget
+          : findNodeHandle(e?.target as unknown as never);
+      const responder = (
+        scrollRef.current as ScrollView & {
+          getScrollResponder?: () => {
+            scrollResponderScrollNativeHandleToKeyboard?: (
+              node: number,
+              offset: number,
+              animated: boolean,
+            ) => void;
+          };
+        }
+      )?.getScrollResponder?.();
+      if (target && responder?.scrollResponderScrollNativeHandleToKeyboard) {
+        responder.scrollResponderScrollNativeHandleToKeyboard(target, 160, true);
+        return;
+      }
       scrollRef.current?.scrollTo({ y: 420, animated: true });
+    };
+    requestAnimationFrame(() => {
+      run();
+      setTimeout(run, Platform.OS === 'ios' ? 60 : 140);
     });
   };
   const [accClaimNo, setAccClaimNo] = useState('');
@@ -432,10 +512,6 @@ export function PaymentModal() {
       : {}),
   };
 
-  const onScanCard = () => {
-    Alert.alert('Scan card', 'Camera card scan is not available in this build. Enter card details manually.');
-  };
-
   const onConfirm = async () => {
     if (isTmPayment && !tmPassengerPaymentType) {
       Alert.alert(
@@ -593,9 +669,39 @@ export function PaymentModal() {
                 onChangeText={setCardCvc}
               />
             </View>
-            <TouchableOpacity style={styles.scanBtn} onPress={onScanCard}>
-              <Text style={styles.scanBtnText}>Scan Card</Text>
+            <TouchableOpacity
+              style={styles.scanBtn}
+              onPress={() => {
+                if (!loadCardScanModal()) {
+                  Alert.alert(
+                    'Scan unavailable',
+                    'Card scan needs a rebuilt app with camera/OCR. You can still type the card details.',
+                  );
+                  return;
+                }
+                setCardScanTarget('bank');
+                setCardScanOpen(true);
+              }}
+            >
+              <Text style={styles.scanBtnText}>Scan card</Text>
             </TouchableOpacity>
+            {Platform.OS === 'android' ? (
+              <TouchableOpacity
+                style={[styles.scanBtn, { marginTop: 8 }]}
+                onPress={() => {
+                  if (!loadTapToPaySheet()) {
+                    Alert.alert(
+                      'Tap to Pay unavailable',
+                      'NFC Tap to Pay needs a rebuilt app with Stripe Terminal.',
+                    );
+                    return;
+                  }
+                  setTapToPayOpen(true);
+                }}
+              >
+                <Text style={styles.scanBtnText}>Tap to Pay (NFC)</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         );
       case 'EFTPOS':
@@ -873,6 +979,7 @@ export function PaymentModal() {
   };
 
   return (
+    <>
     <Modal visible animationType="slide" presentationStyle="fullScreen">
       <KeyboardAvoidingView
         style={styles.screen}
@@ -886,7 +993,7 @@ export function PaymentModal() {
               style={styles.scroll}
               contentContainerStyle={[
                 styles.scrollContent,
-                { paddingTop: insets.top + 12, paddingBottom: 120 },
+                { paddingTop: insets.top + 12, paddingBottom: 120 + keyboardInset },
               ]}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
@@ -928,6 +1035,22 @@ export function PaymentModal() {
                   value={tmCardExpiry}
                   onChangeText={(v) => setTmCardExpiry(formatTmCardExpiryInput(v))}
                 />
+                <TouchableOpacity
+                  style={styles.scanBtn}
+                  onPress={() => {
+                    if (!loadCardScanModal()) {
+                      Alert.alert(
+                        'Scan unavailable',
+                        'Card scan needs a rebuilt app with camera/OCR. You can still type the TM card details.',
+                      );
+                      return;
+                    }
+                    setCardScanTarget('tmPrimary');
+                    setCardScanOpen(true);
+                  }}
+                >
+                  <Text style={styles.scanBtnText}>Scan TM card</Text>
+                </TouchableOpacity>
               </View>
 
               {isWav ? (
@@ -1366,7 +1489,7 @@ export function PaymentModal() {
               style={styles.scroll}
               contentContainerStyle={[
                 styles.scrollContent,
-                { paddingTop: insets.top + 12, paddingBottom: 120 },
+                { paddingTop: insets.top + 12, paddingBottom: 120 + keyboardInset },
               ]}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
@@ -1513,6 +1636,69 @@ export function PaymentModal() {
         )}
       </KeyboardAvoidingView>
     </Modal>
+    {cardScanOpen
+      ? (() => {
+          const CardScanModal = loadCardScanModal();
+          if (!CardScanModal) return null;
+          return (
+            <CardScanModal
+              visible={cardScanOpen}
+              title={cardScanTarget === 'tmPrimary' ? 'Scan TM card' : 'Scan bank card'}
+              onCancel={() => setCardScanOpen(false)}
+              onConfirm={(fields: CardScanFields) => {
+                if (cardScanTarget === 'tmPrimary') {
+                  if (fields.cardNumber) setTmCardNumber(fields.cardNumber);
+                  if (fields.cardName) setTmCardName(fields.cardName);
+                  if (fields.cardExpiry) setTmCardExpiry(formatTmCardExpiryInput(fields.cardExpiry));
+                } else {
+                  if (fields.cardNumber) setCardNumber(fields.cardNumber);
+                  if (fields.cardExpiry) setCardExpiry(fields.cardExpiry);
+                }
+                setCardScanOpen(false);
+              }}
+            />
+          );
+        })()
+      : null}
+    {tapToPayOpen
+      ? (() => {
+          const TapToPaySheet = loadTapToPaySheet();
+          if (!TapToPaySheet) return null;
+          return (
+            <TapToPaySheet
+              visible={tapToPayOpen}
+              amountCents={Math.max(1, Math.round(Number(totalDue || 0) * 100))}
+              bookingId={paymentJob?.id || null}
+              onCancel={() => setTapToPayOpen(false)}
+              onPaid={(info) => {
+                setTapToPayOpen(false);
+                setPaymentType('Card');
+                void (async () => {
+                  setSubmitting(true);
+                  try {
+                    await finalizePayment('Card', builtExtras, subtotal, undefined, undefined, {
+                      stripePaymentIntentId: info.paymentIntentId,
+                    });
+                  } catch (err) {
+                    console.error('[PaymentModal] Tap finalizePayment failed:', err);
+                    Alert.alert(
+                      'Card charged — trip not closed',
+                      `${completionErrorMessage(err)}\n\nPaymentIntent ${info.paymentIntentId}. Retry Confirm payment, or contact support.`,
+                      [
+                        { text: 'Back', style: 'cancel' },
+                        { text: 'Retry complete', onPress: () => void onConfirm() },
+                      ],
+                    );
+                  } finally {
+                    setSubmitting(false);
+                  }
+                })();
+              }}
+            />
+          );
+        })()
+      : null}
+    </>
   );
 }
 
