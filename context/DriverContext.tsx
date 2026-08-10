@@ -2030,6 +2030,26 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       await writeOnlinePresence(driver, vehicleId, 'Busy');
       return;
     }
+    // Queued job waiting to promote — stay Busy. Writing Available here races the
+    // queue popup promote into DSC auto-recall / Cancelled / fake Completed.
+    if (queuedOffersRef.current.length > 0) {
+      console.log(
+        '[away-debug] syncPresenceAfterTripClear → Busy (queued job pending promote)',
+        { queued: queuedOffersRef.current.map((o) => o.id) },
+      );
+      if (awayIntentRef.current === 'missed') {
+        awayIntentRef.current = 'none';
+      }
+      setPresenceStatus('Busy');
+      // readyForJobs true so showNextQueuedJobAsOffer is not deferred forever
+      readyForJobsRef.current = true;
+      setReadyForJobs(true);
+      await syncBgLocationFirebaseStatusRef.current?.('Busy');
+      await writeOnlinePresence(driver, vehicleId, 'Busy');
+      flushDeferredOfferPopupNowRef.current?.('syncPresenceAfterTripClear/queued');
+      releaseQueuedOffersAfterTrip();
+      return;
+    }
     awayIntentRef.current = 'none';
     console.log('[away-debug] syncPresenceAfterTripClear → Available');
     readyForJobsRef.current = true;
