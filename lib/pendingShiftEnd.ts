@@ -56,6 +56,7 @@ export async function journalShiftEndLogFailure(args: {
   reason: PendingShiftEndReason;
   shiftEndAt: number;
   shiftStartAt?: number;
+  sessionStartedAt?: number;
   workedMinutes: number;
   weeklyWorkedMinutes?: number;
 }): Promise<void> {
@@ -103,6 +104,7 @@ export async function flushPendingShiftEnds(driver?: DriverProfile | null): Prom
         await writeShiftEndLog(current.companyId, current.uid, {
           shiftEndAt: current.shiftEndAt,
           shiftStartAt: current.shiftStartAt,
+          sessionStartedAt: current.sessionStartedAt,
           workedMinutes: current.workedMinutes,
           weeklyWorkedMinutes: current.weeklyWorkedMinutes,
           driverId: current.driverId,

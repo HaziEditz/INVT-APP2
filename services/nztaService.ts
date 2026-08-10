@@ -43,6 +43,7 @@ export const NZTA_WEEKLY_LIMIT_SIGNOUT_MESSAGE =
 const DEFAULT: NztaHoursState = {
   shiftStartedAt: null,
   shiftWindowEndsAt: null,
+  sessionStartedAt: null,
   workedMinutes: 0,
   weeklyWorkedMinutes: 0,
   weekStartedAt: null,
@@ -210,6 +211,7 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
         weeklyWorkedMinutes: lastWeekly,
         shiftStartedAt: null,
         shiftWindowEndsAt: null,
+        sessionStartedAt: null,
         continuedWindow: false,
         pendingLimitSignOut: null,
       };
@@ -221,10 +223,12 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
   let next: NztaHoursState;
   if (canContinueWindow) {
     // Same shift continues — clock resumes from original start.
+    // sessionStartedAt is set when startShiftClock actually goes online.
     next = {
       ...state,
       shiftStartedAt: lastStart,
       shiftWindowEndsAt: shiftWindowEndMs(lastStart!),
+      sessionStartedAt: null,
       workedMinutes: lastWorked,
       weeklyWorkedMinutes: lastWeekly,
       lastShiftEndAt: lastEnd,
@@ -241,6 +245,7 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
       ...state,
       shiftStartedAt: null,
       shiftWindowEndsAt: null,
+      sessionStartedAt: null,
       workedMinutes: 0,
       weeklyWorkedMinutes: lastWeekly,
       lastShiftEndAt: lastEnd,
@@ -281,6 +286,8 @@ export async function startShiftClock(companyId: string, uid: string) {
     ...base,
     shiftStartedAt: resume ? resumeAnchor! : now,
     shiftWindowEndsAt: resume ? shiftWindowEndMs(resumeAnchor!) : shiftWindowEndMs(now),
+    // Every Start Shift / resume is a new online stint — even inside the same 14h window.
+    sessionStartedAt: now,
     workedMinutes: resume ? base.workedMinutes : 0,
     breakReminderShown: resume ? base.breakReminderShown : false,
     breakDeferredUntil: resume ? base.breakDeferredUntil : null,
@@ -318,6 +325,7 @@ export async function persistLocalNztaEndShift(
   state: NztaHoursState;
   shiftEndAt: number;
   shiftStartAt?: number;
+  sessionStartedAt?: number;
   workedMinutes: number;
   weeklyWorkedMinutes: number;
 }> {
@@ -326,6 +334,7 @@ export async function persistLocalNztaEndShift(
   const elapsed = Math.max(state.workedMinutes, shiftElapsedMinutes(state));
   // CRITICAL: never fall back to lastShiftStartAt — that reused Jul 10 across Aug end-logs.
   const shiftStartAt = resolveShiftStartAtForEndLog(state);
+  const sessionStartedAt = state.sessionStartedAt ?? undefined;
 
   let lockoutUntil: number | null = null;
   let lockoutReason: NztaLockoutReason = null;
@@ -341,6 +350,7 @@ export async function persistLocalNztaEndShift(
     ...state,
     shiftStartedAt: null,
     shiftWindowEndsAt: null,
+    sessionStartedAt: null,
     workedMinutes: elapsed,
     lastShiftEndAt: now,
     // Only remember this shift's real start (or clear) — do not preserve a stale last.
@@ -359,6 +369,7 @@ export async function persistLocalNztaEndShift(
     state: next,
     shiftEndAt: now,
     shiftStartAt,
+    sessionStartedAt,
     workedMinutes: elapsed,
     weeklyWorkedMinutes: state.weeklyWorkedMinutes,
   };
@@ -386,6 +397,7 @@ export async function endShiftClock(
       reason,
       shiftEndAt: local.shiftEndAt,
       shiftStartAt: local.shiftStartAt,
+      sessionStartedAt: local.sessionStartedAt,
       workedMinutes: local.workedMinutes,
       weeklyWorkedMinutes: local.weeklyWorkedMinutes,
     }).catch((journalErr) => {
@@ -399,6 +411,7 @@ export async function endShiftClock(
     writeShiftEndLog(companyId, uid, {
       shiftEndAt: local.shiftEndAt,
       shiftStartAt: local.shiftStartAt,
+      sessionStartedAt: local.sessionStartedAt,
       workedMinutes: local.workedMinutes,
       weeklyWorkedMinutes: local.weeklyWorkedMinutes,
       driverId,
@@ -416,6 +429,7 @@ export async function endShiftClock(
       reason,
       shiftEndAt: local.shiftEndAt,
       shiftStartAt: local.shiftStartAt,
+      sessionStartedAt: local.sessionStartedAt,
       workedMinutes: local.workedMinutes,
       weeklyWorkedMinutes: local.weeklyWorkedMinutes,
     }).catch((journalErr) => {

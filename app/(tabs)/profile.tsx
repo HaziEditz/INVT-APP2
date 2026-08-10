@@ -34,6 +34,7 @@ import { Alert, RefreshControl, StyleSheet, Switch, Text, View } from 'react-nat
 const EMPTY_NZTA: NztaHoursState = {
   shiftStartedAt: null,
   shiftWindowEndsAt: null,
+  sessionStartedAt: null,
   workedMinutes: 0,
   weeklyWorkedMinutes: 0,
   weekStartedAt: null,

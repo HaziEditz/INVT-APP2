@@ -40,12 +40,14 @@ function makeDeps(overrides = {}) {
       return {
         shiftEndAt: 1_700_000_000_000,
         shiftStartAt: 1_700_000_000_000 - 45 * 60_000,
+        sessionStartedAt: 1_700_000_000_000 - 40 * 60_000,
         workedMinutes: 45,
         weeklyWorkedMinutes: 45,
       };
     },
-    writeShiftEndLog: async () => {
+    writeShiftEndLog: async (args) => {
       calls.writeShiftEndLog += 1;
+      calls.lastWrite = args;
     },
     clearOnlinePresence: async () => {
       calls.clearOnlinePresence += 1;
@@ -195,6 +197,24 @@ test('Profile End Shift online success: no journal when remotes ok', async () =>
   assert.equal(calls.clearOnlinePresence, 1);
   assert.equal(calls.clearVehicleCurrentDriver, 1);
   assert.equal(journalCalls.length, 0);
+  assert.equal(calls.lastWrite.sessionStartedAt, 1_700_000_000_000 - 40 * 60_000);
+  assert.equal(calls.lastWrite.shiftStartAt, 1_700_000_000_000 - 45 * 60_000);
+});
+
+test('Profile End Shift offline journals sessionStartedAt for deferred write', async () => {
+  const { deps, journalCalls } = makeDeps();
+  await profileEndShiftButtonPath({
+    hasTripInProgress: false,
+    likelyOffline: true,
+    deps,
+    timeoutMs: 200,
+    signOut: async () => {},
+    endShiftLocal: () => {},
+    navigateLogin: () => {},
+  });
+  assert.equal(journalCalls.length, 1);
+  assert.equal(journalCalls[0].sessionStartedAt, 1_700_000_000_000 - 40 * 60_000);
+  assert.equal(journalCalls[0].shiftStartAt, 1_700_000_000_000 - 45 * 60_000);
 });
 
 test('Profile End Shift blocked when trip in progress', async () => {

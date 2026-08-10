@@ -204,6 +204,8 @@ export type NztaLimitSignOutReason = 'shift14h' | 'weekly70h';
 export interface NztaHoursState {
   shiftStartedAt: number | null;
   shiftWindowEndsAt: number | null;
+  /** When this online stint began (may differ from shiftStartedAt under continuedWindow). */
+  sessionStartedAt: number | null;
   workedMinutes: number;
   weeklyWorkedMinutes: number;
   /** Monday 00:00 local ms for the active weekly bucket */

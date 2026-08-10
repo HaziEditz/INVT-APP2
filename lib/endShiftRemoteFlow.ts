@@ -40,6 +40,7 @@ export type EndShiftRemoteFlowDeps = {
   }) => Promise<{
     shiftEndAt: number;
     shiftStartAt?: number;
+    sessionStartedAt?: number;
     workedMinutes: number;
     weeklyWorkedMinutes?: number;
   }>;
@@ -50,6 +51,7 @@ export type EndShiftRemoteFlowDeps = {
     vehicleId?: string | null;
     shiftEndAt: number;
     shiftStartAt?: number;
+    sessionStartedAt?: number;
     workedMinutes: number;
     weeklyWorkedMinutes?: number;
   }) => Promise<void>;
@@ -63,6 +65,7 @@ export type EndShiftRemoteFlowDeps = {
     reason: PendingShiftEndReason;
     shiftEndAt: number;
     shiftStartAt?: number;
+    sessionStartedAt?: number;
     workedMinutes: number;
     weeklyWorkedMinutes?: number;
     needsShiftLog: boolean;
@@ -99,6 +102,7 @@ export async function runEndShiftRemoteFlow(
 
   let shiftEndAt = Date.now();
   let shiftStartAt: number | undefined;
+  let sessionStartedAt: number | undefined;
   let workedMinutes = 0;
   let weeklyWorkedMinutes: number | undefined;
 
@@ -111,6 +115,7 @@ export async function runEndShiftRemoteFlow(
     });
     shiftEndAt = local.shiftEndAt;
     shiftStartAt = local.shiftStartAt;
+    sessionStartedAt = local.sessionStartedAt;
     workedMinutes = local.workedMinutes;
     weeklyWorkedMinutes = local.weeklyWorkedMinutes;
   }
@@ -128,6 +133,7 @@ export async function runEndShiftRemoteFlow(
         reason: input.reason,
         shiftEndAt,
         shiftStartAt,
+        sessionStartedAt,
         workedMinutes,
         weeklyWorkedMinutes,
         needsShiftLog: true,
@@ -156,6 +162,7 @@ export async function runEndShiftRemoteFlow(
         vehicleId: input.vehicleId,
         shiftEndAt,
         shiftStartAt,
+        sessionStartedAt,
         workedMinutes,
         weeklyWorkedMinutes,
       }),
@@ -191,6 +198,7 @@ export async function runEndShiftRemoteFlow(
       reason: input.reason,
       shiftEndAt,
       shiftStartAt,
+      sessionStartedAt,
       workedMinutes,
       weeklyWorkedMinutes,
       needsShiftLog: !shiftLogOk,

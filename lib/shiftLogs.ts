@@ -3,11 +3,14 @@ import { getDatabaseInstance } from '@/lib/firebase';
 
 export type ShiftLogEntry = {
   shiftEndAt: number;
+  /** NZTA 14h window open (may be shared across multiple End Shift writes). */
   shiftStartAt?: number;
+  /** This online stint's login — differs from shiftStartAt under continuedWindow. */
+  sessionStartedAt?: number;
   workedMinutes?: number;
   weeklyWorkedMinutes?: number;
   driverId?: string;
-  /** Taxi / fleet number (e.g. "201") — required for Shift Reports vehicle columns. */
+  /** Taxi / ticket number (e.g. "201") — required for Shift Reports vehicle columns. */
   vehicleId?: string;
 };
 
@@ -44,6 +47,7 @@ export async function loadLastShiftEnd(
       const entry: ShiftLogEntry = {
         shiftEndAt: Number(v.shiftEndAt ?? v.endedAt ?? 0),
         shiftStartAt: v.shiftStartAt != null ? Number(v.shiftStartAt) : undefined,
+        sessionStartedAt: v.sessionStartedAt != null ? Number(v.sessionStartedAt) : undefined,
         workedMinutes: v.workedMinutes != null ? Number(v.workedMinutes) : undefined,
         weeklyWorkedMinutes:
           v.weeklyWorkedMinutes != null ? Number(v.weeklyWorkedMinutes) : undefined,
@@ -71,6 +75,7 @@ export async function writeShiftEndLog(
   const record = sanitizeForFirebase({
     shiftEndAt: payload.shiftEndAt || Date.now(),
     shiftStartAt: payload.shiftStartAt ?? null,
+    sessionStartedAt: payload.sessionStartedAt ?? null,
     workedMinutes: payload.workedMinutes ?? null,
     weeklyWorkedMinutes: payload.weeklyWorkedMinutes ?? null,
     driverId: payload.driverId ?? null,

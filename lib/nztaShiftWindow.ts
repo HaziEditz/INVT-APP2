@@ -85,6 +85,7 @@ export function healStaleNztaState(state: NztaHoursState, now = Date.now()): Nzt
       ...next,
       shiftStartedAt: null,
       shiftWindowEndsAt: null,
+      sessionStartedAt: null,
       workedMinutes: 0,
       continuedWindow: false,
       pendingLimitSignOut: null,

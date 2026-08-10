@@ -13,6 +13,7 @@ export type PendingShiftEndRecord = {
   reason: PendingShiftEndReason;
   shiftEndAt: number;
   shiftStartAt?: number;
+  sessionStartedAt?: number;
   workedMinutes: number;
   weeklyWorkedMinutes?: number;
   /** Retry Firebase shiftLogs write. */
@@ -34,6 +35,7 @@ export function buildPendingShiftEnd(args: {
   reason: PendingShiftEndReason;
   shiftEndAt: number;
   shiftStartAt?: number;
+  sessionStartedAt?: number;
   workedMinutes: number;
   weeklyWorkedMinutes?: number;
   needsShiftLog: boolean;
@@ -48,6 +50,7 @@ export function buildPendingShiftEnd(args: {
     reason: args.reason,
     shiftEndAt: args.shiftEndAt,
     shiftStartAt: args.shiftStartAt,
+    sessionStartedAt: args.sessionStartedAt,
     workedMinutes: args.workedMinutes,
     weeklyWorkedMinutes: args.weeklyWorkedMinutes,
     needsShiftLog: !!args.needsShiftLog,

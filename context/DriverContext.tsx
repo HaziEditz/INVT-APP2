@@ -3427,6 +3427,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           return {
             shiftEndAt: local.shiftEndAt,
             shiftStartAt: local.shiftStartAt,
+            sessionStartedAt: local.sessionStartedAt,
             workedMinutes: local.workedMinutes,
             weeklyWorkedMinutes: local.weeklyWorkedMinutes,
           };
@@ -3435,6 +3436,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           await writeShiftEndLog(args.companyId, args.uid, {
             shiftEndAt: args.shiftEndAt,
             shiftStartAt: args.shiftStartAt,
+            sessionStartedAt: args.sessionStartedAt,
             workedMinutes: args.workedMinutes,
             weeklyWorkedMinutes: args.weeklyWorkedMinutes,
             driverId: args.driverId,
