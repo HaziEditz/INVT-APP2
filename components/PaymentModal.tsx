@@ -215,12 +215,15 @@ export function PaymentModal() {
     e?: NativeSyntheticEvent<TextInputFocusEventData>,
   ) => {
     // Keep the account search field above the sticky footer + on-screen keyboard.
+    // Capture target handles synchronously — React reuses/nullifies synthetic events
+    // before requestAnimationFrame / setTimeout callbacks run.
+    const nativeTarget = e?.nativeEvent?.target;
+    const reactTarget = e?.target;
     const run = () => {
-      const nativeTarget = e?.nativeEvent?.target;
       const target =
         typeof nativeTarget === 'number'
           ? nativeTarget
-          : findNodeHandle(e?.target as unknown as never);
+          : findNodeHandle(reactTarget as unknown as never);
       const responder = (
         scrollRef.current as ScrollView & {
           getScrollResponder?: () => {
