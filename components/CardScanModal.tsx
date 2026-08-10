@@ -155,6 +155,9 @@ export function CardScanModal({
                 <Text style={styles.primaryBtnText}>Capture</Text>
               )}
             </Pressable>
+            {error ? (
+              <Text style={styles.hint}>Tip: fill the frame, avoid glare, and keep the card flat.</Text>
+            ) : null}
           </View>
         )}
       </View>

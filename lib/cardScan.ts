@@ -4,13 +4,26 @@
  * (expo-ocr-kit is not available in Expo Go).
  */
 import { File } from 'expo-file-system';
-import { parseCardOcrText, type CardScanFields } from '@/lib/cardOcrParse';
+import {
+  assessCardScanQuality,
+  parseCardOcrText,
+  type CardScanFields,
+} from '@/lib/cardOcrParse';
 
 export type { CardScanFields };
 
 export type CardScanResult = CardScanFields & {
   rawText: string;
 };
+
+export class CardScanQualityError extends Error {
+  fields: CardScanFields;
+  constructor(message: string, fields: CardScanFields = {}) {
+    super(message);
+    this.name = 'CardScanQualityError';
+    this.fields = fields;
+  }
+}
 
 async function discardImage(uri: string | null | undefined): Promise<void> {
   if (!uri) return;
@@ -25,6 +38,7 @@ async function discardImage(uri: string | null | undefined): Promise<void> {
 /**
  * Run OCR on a local image URI, parse fields, then delete the file.
  * Throws a clear error if the native OCR module is missing (Expo Go / stale build).
+ * Throws CardScanQualityError when the read is too weak — UI should prompt Scan again.
  */
 export async function scanCardFromImageUri(uri: string): Promise<CardScanResult> {
   let recognizeText: (imageUri: string) => Promise<{ text?: string; blocks?: { text?: string }[] }>;
@@ -52,8 +66,15 @@ export async function scanCardFromImageUri(uri: string): Promise<CardScanResult>
     await discardImage(uri);
   }
 
-  const fields = parseCardOcrText(ocrText);
-  return { ...fields, rawText: ocrText };
+  const parsed = parseCardOcrText(ocrText);
+  const quality = assessCardScanQuality(parsed, ocrText);
+  if (!quality.ok) {
+    throw new CardScanQualityError(
+      quality.reason || 'Could not read the card. Please scan again.',
+      quality.fields,
+    );
+  }
+  return { ...quality.fields, rawText: ocrText };
 }
 
 export function isCardScanNativeAvailable(): boolean {
