@@ -3438,6 +3438,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             workedMinutes: args.workedMinutes,
             weeklyWorkedMinutes: args.weeklyWorkedMinutes,
             driverId: args.driverId,
+            vehicleId: args.vehicleId ?? undefined,
           });
         },
         clearOnlinePresence: async (vid) => {

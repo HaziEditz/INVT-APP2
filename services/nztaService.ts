@@ -402,6 +402,7 @@ export async function endShiftClock(
       workedMinutes: local.workedMinutes,
       weeklyWorkedMinutes: local.weeklyWorkedMinutes,
       driverId,
+      vehicleId: opts?.vehicleId ? String(opts.vehicleId).trim() : undefined,
     }),
     timeoutMs,
     'writeShiftEndLog',

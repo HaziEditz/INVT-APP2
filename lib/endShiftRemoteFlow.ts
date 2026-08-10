@@ -47,6 +47,7 @@ export type EndShiftRemoteFlowDeps = {
     companyId: string;
     uid: string;
     driverId: string;
+    vehicleId?: string | null;
     shiftEndAt: number;
     shiftStartAt?: number;
     workedMinutes: number;
@@ -152,6 +153,7 @@ export async function runEndShiftRemoteFlow(
         companyId: input.companyId,
         uid: input.uid,
         driverId: input.driverId,
+        vehicleId: input.vehicleId,
         shiftEndAt,
         shiftStartAt,
         workedMinutes,

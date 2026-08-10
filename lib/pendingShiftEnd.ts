@@ -106,6 +106,7 @@ export async function flushPendingShiftEnds(driver?: DriverProfile | null): Prom
           workedMinutes: current.workedMinutes,
           weeklyWorkedMinutes: current.weeklyWorkedMinutes,
           driverId: current.driverId,
+          vehicleId: current.vehicleId ?? undefined,
         });
         current = markPendingShiftEndSynced(current, { shiftLog: true });
         flushed += 1;

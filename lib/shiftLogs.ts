@@ -7,6 +7,8 @@ export type ShiftLogEntry = {
   workedMinutes?: number;
   weeklyWorkedMinutes?: number;
   driverId?: string;
+  /** Taxi / fleet number (e.g. "201") — required for Shift Reports vehicle columns. */
+  vehicleId?: string;
 };
 
 /** Firebase RTDB rejects `undefined`; coerce missing fields to null. */
@@ -65,12 +67,14 @@ export async function writeShiftEndLog(
   if (!companyId || !uid) return;
   const database = getDatabaseInstance();
   const entryRef = push(ref(database, `shiftLogs/${companyId}/${uid}`));
+  const vehicleId = String(payload.vehicleId || '').trim() || null;
   const record = sanitizeForFirebase({
     shiftEndAt: payload.shiftEndAt || Date.now(),
     shiftStartAt: payload.shiftStartAt ?? null,
     workedMinutes: payload.workedMinutes ?? null,
     weeklyWorkedMinutes: payload.weeklyWorkedMinutes ?? null,
     driverId: payload.driverId ?? null,
+    vehicleId,
     loggedAt: Date.now(),
   });
   await set(entryRef, record);
