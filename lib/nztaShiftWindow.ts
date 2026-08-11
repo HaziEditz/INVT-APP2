@@ -7,6 +7,7 @@ import type { NztaHoursState } from '../types/index.ts';
 /** Keep in sync with constants/theme.ts */
 const NZTA_MAX_SHIFT_HOURS = 14;
 const NZTA_REST_CONTINUE_HOURS = 10;
+const NZTA_BREAK_AFTER_HOURS = 7;
 
 const MS_HOUR = 3600000;
 const MS_MINUTE = 60000;
@@ -21,6 +22,23 @@ export function shiftWindowEndMs(shiftStartAt: number): number {
 export function isShiftWindowExpired(shiftStartAt: number | null | undefined, now = Date.now()): boolean {
   if (!shiftStartAt) return false;
   return now >= shiftWindowEndMs(shiftStartAt);
+}
+
+/**
+ * 7h break reminder — based on accumulated active/worked minutes (ticks),
+ * NOT wall-clock since the 14h window opened (offline gaps must not count).
+ */
+export function isBreakDueByActiveWork(
+  state: Pick<
+    NztaHoursState,
+    'shiftStartedAt' | 'workedMinutes' | 'breakReminderShown' | 'breakDeferredUntil'
+  >,
+  now = Date.now(),
+): boolean {
+  if (!state.shiftStartedAt) return false;
+  if (state.breakReminderShown) return false;
+  if (state.breakDeferredUntil && now < state.breakDeferredUntil) return false;
+  return Math.max(0, Number(state.workedMinutes) || 0) >= NZTA_BREAK_AFTER_HOURS * 60;
 }
 
 /**

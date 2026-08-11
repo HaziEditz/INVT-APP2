@@ -1,5 +1,4 @@
 import {
-  NZTA_BREAK_AFTER_HOURS,
   NZTA_MAX_SHIFT_HOURS,
   NZTA_REST_CONTINUE_HOURS,
   NZTA_WEEKLY_LOCKOUT_HOURS,
@@ -9,6 +8,7 @@ import { attemptWithTimeout, END_SHIFT_RTDB_TIMEOUT_MS } from '@/lib/asyncTimeou
 import { journalShiftEndLogFailure } from '@/lib/pendingShiftEnd';
 import {
   healStaleNztaState,
+  isBreakDueByActiveWork,
   isShiftWindowExpired,
   isStaleShiftRestLockout,
   resolveEndShiftHourTotals,
@@ -25,6 +25,7 @@ export type EndShiftReason = 'manual' | NztaLimitSignOutReason;
 
 export {
   healStaleNztaState,
+  isBreakDueByActiveWork,
   isShiftWindowExpired,
   isStaleShiftRestLockout,
   resolveEndShiftHourTotals,
@@ -291,8 +292,9 @@ export async function startShiftClock(companyId: string, uid: string) {
     // Every Start Shift / resume is a new online stint — even inside the same 14h window.
     sessionStartedAt: now,
     workedMinutes: resume ? base.workedMinutes : 0,
-    breakReminderShown: resume ? base.breakReminderShown : false,
-    breakDeferredUntil: resume ? base.breakDeferredUntil : null,
+    // Fresh break cycle per online stint (offline gaps must not keep a stale "already reminded").
+    breakReminderShown: false,
+    breakDeferredUntil: null,
     pendingLimitSignOut: null,
     continuedWindow: resume,
   };
@@ -513,12 +515,9 @@ export function remainingWorkMinutesToday(state: NztaHoursState): number {
   return remainingShiftMinutes(state);
 }
 
-/** 7-hour dismissible break reminder (wall-clock from shift start). */
+/** 7-hour dismissible break reminder — active/worked minutes only (not window wall). */
 export function needsBreak(state: NztaHoursState) {
-  if (!state.shiftStartedAt) return false;
-  if (state.breakReminderShown) return false;
-  if (state.breakDeferredUntil && Date.now() < state.breakDeferredUntil) return false;
-  return shiftElapsedMinutes(state) >= NZTA_BREAK_AFTER_HOURS * 60;
+  return isBreakDueByActiveWork(state);
 }
 
 export function exceedsMaxShiftHours(state: NztaHoursState) {
