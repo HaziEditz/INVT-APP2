@@ -22,24 +22,28 @@ export function EndShiftSummaryModal({ visible, summary, onContinue }: Props) {
 
         <View style={styles.card}>
           <View style={styles.row}>
-            <Text style={styles.label}>Shift duration</Text>
+            <Text style={styles.label}>Shift window (wall clock)</Text>
             <Text style={styles.value}>{formatHours(summary.shiftElapsedMinutes)}</Text>
           </View>
           <View style={styles.row}>
-            <Text style={styles.label}>Work time logged</Text>
+            <Text style={styles.label}>Work time (ticks + catch-up)</Text>
             <Text style={styles.value}>{formatHours(summary.workedMinutes)}</Text>
           </View>
           <View style={styles.row}>
-            <Text style={styles.label}>Break time</Text>
+            <Text style={styles.label}>Breaks confirmed</Text>
             <Text style={styles.value}>{formatHours(summary.breakMinutes)}</Text>
           </View>
           <View style={[styles.row, styles.rowLast]}>
-            <Text style={styles.label}>Weekly total</Text>
+            <Text style={styles.label}>Weekly total (ticks + catch-up)</Text>
             <Text style={styles.valueHighlight}>{formatHours(summary.weeklyWorkedMinutes)}</Text>
           </View>
         </View>
 
         <Text style={styles.hint}>
+          Window time is wall clock from when this 14h shift window opened (includes offline).
+          Work and weekly totals use logged minutes, plus catch-up if the app was backgrounded.
+          Breaks only count when you confirm a break reminder — they are not window minus work.
+          {'\n\n'}
           Tap continue to sign out and return to the login screen.
         </Text>
 

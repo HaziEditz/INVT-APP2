@@ -11,6 +11,7 @@ import {
   healStaleNztaState,
   isShiftWindowExpired,
   isStaleShiftRestLockout,
+  resolveEndShiftHourTotals,
   resolveShiftStartAtForEndLog,
   sanitizeLastShiftStartAt,
   shiftWindowEndMs,
@@ -26,6 +27,7 @@ export {
   healStaleNztaState,
   isShiftWindowExpired,
   isStaleShiftRestLockout,
+  resolveEndShiftHourTotals,
   resolveShiftStartAtForEndLog,
   sanitizeLastShiftStartAt,
   shiftWindowEndMs,
@@ -307,11 +309,12 @@ export type EndShiftSummary = {
 
 export async function captureEndShiftSummary(companyId: string, uid: string): Promise<EndShiftSummary> {
   const state = await loadNztaHours(companyId, uid);
+  const totals = resolveEndShiftHourTotals(state);
   return {
-    workedMinutes: state.workedMinutes,
-    weeklyWorkedMinutes: state.weeklyWorkedMinutes,
-    breakMinutes: state.breakMinutes,
-    shiftElapsedMinutes: shiftElapsedMinutes(state),
+    workedMinutes: totals.workedMinutes,
+    weeklyWorkedMinutes: totals.weeklyWorkedMinutes,
+    breakMinutes: totals.breakMinutes,
+    shiftElapsedMinutes: totals.shiftElapsedMinutes,
   };
 }
 
@@ -331,7 +334,8 @@ export async function persistLocalNztaEndShift(
 }> {
   const state = clearExpiredLockout(ensureWeekBucket(await loadNztaHours(companyId, uid)));
   const now = Date.now();
-  const elapsed = Math.max(state.workedMinutes, shiftElapsedMinutes(state));
+  const totals = resolveEndShiftHourTotals(state, now);
+  const elapsed = totals.workedMinutes;
   // CRITICAL: never fall back to lastShiftStartAt — that reused Jul 10 across Aug end-logs.
   const shiftStartAt = resolveShiftStartAtForEndLog(state);
   const sessionStartedAt = state.sessionStartedAt ?? undefined;
@@ -356,7 +360,7 @@ export async function persistLocalNztaEndShift(
     // Only remember this shift's real start (or clear) — do not preserve a stale last.
     lastShiftStartAt: state.shiftStartedAt ?? null,
     lastWorkedMinutes: elapsed,
-    weeklyWorkedMinutes: state.weeklyWorkedMinutes,
+    weeklyWorkedMinutes: totals.weeklyWorkedMinutes,
     lockoutUntil,
     lockoutReason,
     pendingLimitSignOut: null,
@@ -371,7 +375,7 @@ export async function persistLocalNztaEndShift(
     shiftStartAt,
     sessionStartedAt,
     workedMinutes: elapsed,
-    weeklyWorkedMinutes: state.weeklyWorkedMinutes,
+    weeklyWorkedMinutes: totals.weeklyWorkedMinutes,
   };
 }
 

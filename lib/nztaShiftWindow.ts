@@ -33,6 +33,45 @@ export function resolveShiftStartAtForEndLog(
   return state.shiftStartedAt ?? undefined;
 }
 
+export type EndShiftHourTotals = {
+  workedMinutes: number;
+  weeklyWorkedMinutes: number;
+  breakMinutes: number;
+  shiftElapsedMinutes: number;
+  /** Wall ahead of tick counter — added to both work and weekly on End Shift. */
+  catchUpMinutes: number;
+};
+
+/**
+ * End Shift hour totals — pure, no I/O.
+ * Work already uses max(tick, wall). Weekly must get the same catch-up delta
+ * or the 70h NZTA counter silently under-reports after background/kill.
+ */
+export function resolveEndShiftHourTotals(
+  state: Pick<
+    NztaHoursState,
+    'workedMinutes' | 'weeklyWorkedMinutes' | 'breakMinutes' | 'shiftStartedAt'
+  >,
+  now = Date.now(),
+): EndShiftHourTotals {
+  const wallElapsed =
+    state.shiftStartedAt != null
+      ? Math.max(0, Math.floor((now - state.shiftStartedAt) / MS_MINUTE))
+      : 0;
+  const tickWorked = Math.max(0, Number(state.workedMinutes) || 0);
+  const workedMinutes = Math.max(tickWorked, wallElapsed);
+  const catchUpMinutes = Math.max(0, workedMinutes - tickWorked);
+  const weeklyWorkedMinutes =
+    Math.max(0, Number(state.weeklyWorkedMinutes) || 0) + catchUpMinutes;
+  return {
+    workedMinutes,
+    weeklyWorkedMinutes,
+    breakMinutes: Math.max(0, Number(state.breakMinutes) || 0),
+    shiftElapsedMinutes: wallElapsed,
+    catchUpMinutes,
+  };
+}
+
 /** Drop expired remote/local last starts so they cannot resume or poison End Shift. */
 export function sanitizeLastShiftStartAt(
   lastStart: number | null | undefined,
