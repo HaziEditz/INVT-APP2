@@ -179,6 +179,8 @@ test('PaymentModal source: corrected order + silent Yes + hoist $ on confirm', (
   assert.match(modalSrc, /Confirm Payment/);
   assert.match(modalSrc, /Hoist fee \(/);
   assert.match(modalSrc, /Passenger \(meter share\)/);
+  assert.match(modalSrc, /tmConfigConfirmBlockReason/);
+  assert.match(modalSrc, /tmConfigLoading/);
   assert.doesNotMatch(modalSrc, /title="Done"/);
   assert.doesNotMatch(modalSrc, /Use primary card/);
   assert.doesNotMatch(modalSrc, /Prefill from primary/);

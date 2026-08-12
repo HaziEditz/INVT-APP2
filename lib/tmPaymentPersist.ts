@@ -40,6 +40,7 @@ export function buildTmPersistFields(
   tmDetails: TmPaymentDetails,
   opts?: { councilId?: string; remainderPaymentType?: string },
 ): Record<string, unknown> {
+  assertTmPaymentDetailsWritable(tmDetails);
   const hoist =
     Number(tmDetails.tmSubsidyHoist != null ? tmDetails.tmSubsidyHoist : tmDetails.hoistTotal) || 0;
   // Claim fields are meter %/cap only — never fold flat hoist into tmSubsidy/tmCouncilPays.
@@ -77,6 +78,25 @@ export function buildTmPersistFields(
     tmRemainderPaymentType: opts?.remainderPaymentType || undefined,
     ...(councilId ? { councilId, tmCouncilId: councilId } : {}),
   };
+}
+
+/**
+ * Second-line write guard: never persist a TM trip that looks like the silent
+ * missing-config zero-subsidy footgun (positive meter, $0 meter subsidy).
+ */
+export function assertTmPaymentDetailsWritable(tmDetails: TmPaymentDetails): void {
+  const meter = Number(tmDetails.meterFare) || 0;
+  const hoist =
+    Number(tmDetails.tmSubsidyHoist != null ? tmDetails.tmSubsidyHoist : tmDetails.hoistTotal) || 0;
+  const meterSub =
+    tmDetails.tmSubsidyFare != null
+      ? Number(tmDetails.tmSubsidyFare) || 0
+      : Math.max(0, (Number(tmDetails.councilPays) || 0) - hoist);
+  if (meter > 0.009 && meterSub <= 0) {
+    throw new Error(
+      'TM payment refused: subsidy is $0 with a positive meter fare. Wait for TM settings to load, or ask the office to configure council TM rates.',
+    );
+  }
 }
 
 export type TmTripStatusSeed = {

@@ -90,6 +90,20 @@ test('buildTmPersistFields keeps remainder method separate from TM markers', () 
   assert.equal(fields.hoistTotal, 10);
 });
 
+test('buildTmPersistFields refuses silent $0 meter subsidy with positive meter', () => {
+  assert.throws(
+    () =>
+      buildTmPersistFields({
+        councilPays: 0,
+        passengerPays: 5.55,
+        meterFare: 5.55,
+        tmSubsidyFare: 0,
+        totalFare: 5.55,
+      }),
+    /subsidy is \$0/i,
+  );
+});
+
 test('buildTmPersistFields writes meter claim only — hoist stays separate', () => {
   // Driver UI grand total still includes hoist in councilPays; persist must strip it.
   const fields = buildTmPersistFields({

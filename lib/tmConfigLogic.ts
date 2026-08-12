@@ -20,7 +20,7 @@ export type TmPaymentBreakdown = {
   hoistCostPerUnit: number;
   /** Always hoistCount × rate; 100% council. */
   hoistTotal: number;
-  /** Subsidy on meterFare only (percent, then cap). */
+  /** Subsidy on meterFare only (percent, then cap when cap > 0). */
   councilPaysMeter: number;
   passengerPaysMeter: number;
   /** === hoistTotal */
@@ -33,6 +33,8 @@ export type TmPaymentBreakdown = {
   passengerPays: number;
   /** meterFare + hoistTotal */
   totalFare: number;
+  /** True when cap was missing/≤0 so meter subsidy used uncapped %. */
+  meterSubsidyUncapped: boolean;
 };
 
 export function parseTmConfigRecord(d: Record<string, unknown> | null | undefined): TmConfig {
@@ -70,17 +72,56 @@ export function mapCouncilRecordToCompanyTmConfig(
   };
 }
 
-/** Meter-only subsidy split (legacy helper). Prefer calcTmPaymentBreakdown for payments. */
+/**
+ * True when company TM economics can be used to confirm a payment.
+ * Null/undefined = still loading or missing at write time.
+ * Percent ≤ 0 = DEFAULT / not configured (do not treat as a real 0% policy silently).
+ */
+export function isTmConfigReadyForConfirm(config: TmConfig | null | undefined): boolean {
+  return tmConfigConfirmBlockReason(config) === null;
+}
+
+/**
+ * Human-readable block reason for TM confirm. Null means OK to proceed.
+ * Pass `loading: true` while `loadTmConfig` has not settled (config may still be null).
+ */
+export function tmConfigConfirmBlockReason(
+  config: TmConfig | null | undefined,
+  opts?: { loading?: boolean },
+): string | null {
+  if (opts?.loading || config == null) {
+    return 'TM subsidy settings are still loading. Wait a moment, then try again.';
+  }
+  const pct = Number(config.councilSubsidyPercent);
+  if (!Number.isFinite(pct) || pct <= 0) {
+    return 'TM subsidy percent is not configured for this company. Ask the office to set council TM rates before completing a TM payment.';
+  }
+  return null;
+}
+
+/**
+ * Meter-only subsidy split (legacy helper). Prefer calcTmPaymentBreakdown for payments.
+ *
+ * Cap ≤ 0 / missing = no valid cap configured → uncapped percentage only.
+ * Never `Math.min(pctAmount, 0)` — that silently zeros a valid %.
+ */
 export function calcTmSplit(
   meterFare: number,
   config: TmConfig,
-): { councilPays: number; passengerPays: number } {
+): { councilPays: number; passengerPays: number; uncapped: boolean } {
   const fare = Math.max(0, Number(meterFare) || 0);
   const pct = Math.max(0, Number(config.councilSubsidyPercent) || 0);
-  const cap = Math.max(0, Number(config.councilCapAmount) || 0);
-  const councilPays = Math.min((fare * pct) / 100, cap);
+  const capRaw = Number(config.councilCapAmount);
+  const cap = Number.isFinite(capRaw) && capRaw > 0 ? capRaw : 0;
+  const pctAmount = (fare * pct) / 100;
+  const uncapped = cap <= 0;
+  const councilPays = uncapped ? pctAmount : Math.min(pctAmount, cap);
   const passengerPays = Math.max(0, fare - councilPays);
-  return { councilPays: +councilPays.toFixed(2), passengerPays: +passengerPays.toFixed(2) };
+  return {
+    councilPays: +councilPays.toFixed(2),
+    passengerPays: +passengerPays.toFixed(2),
+    uncapped,
+  };
 }
 
 /**
@@ -108,6 +149,7 @@ export function calcTmPaymentBreakdown(
     councilPays: +(meterSplit.councilPays + hoistTotal).toFixed(2),
     passengerPays: meterSplit.passengerPays,
     totalFare: +(meter + hoistTotal).toFixed(2),
+    meterSubsidyUncapped: meterSplit.uncapped,
   };
 }
 

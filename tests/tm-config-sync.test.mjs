@@ -9,9 +9,12 @@ import { fileURLToPath } from 'node:url';
 import {
   buildTmHoistEntries,
   calcTmPaymentBreakdown,
+  calcTmSplit,
+  isTmConfigReadyForConfirm,
   mapCouncilRecordToCompanyTmConfig,
   parseTmConfigRecord,
   resolvePrimaryTmCard,
+  tmConfigConfirmBlockReason,
 } from '../lib/tmConfigLogic.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -138,9 +141,79 @@ test('calcTmPaymentBreakdown keeps hoist out of meter %/cap split', () => {
   assert.equal(b.councilPays, 46); // 26 + 20
   assert.equal(b.passengerPays, 14); // hoist never charged to passenger
   assert.equal(b.totalFare, 60);
+  assert.equal(b.meterSubsidyUncapped, false);
   // Regression: old bug applied %/cap to meter+hoist ($60 → would change passenger share).
   const wronglyOnCombined = calcTmPaymentBreakdown(60, 0, cfg);
   assert.notEqual(b.passengerPays, wronglyOnCombined.passengerPays);
+});
+
+test('cap===0 with valid pct uses uncapped percentage (never silent $0)', () => {
+  const cfg = {
+    councilSubsidyPercent: 65,
+    councilCapAmount: 0,
+    hoistCostPerUnit: 10,
+  };
+  const split = calcTmSplit(5.55, cfg);
+  assert.equal(split.uncapped, true);
+  assert.equal(split.councilPays, 3.61); // 65% of 5.55
+  assert.equal(split.passengerPays, 1.94);
+  const b = calcTmPaymentBreakdown(5.55, 0, cfg);
+  assert.equal(b.councilPaysMeter, 3.61);
+  assert.equal(b.meterSubsidyUncapped, true);
+  // Missing/NaN cap same as 0
+  const missingCap = calcTmSplit(40, {
+    councilSubsidyPercent: 65,
+    councilCapAmount: Number.NaN,
+    hoistCostPerUnit: 0,
+  });
+  assert.equal(missingCap.uncapped, true);
+  assert.equal(missingCap.councilPays, 26);
+});
+
+test('null/loading tmConfig blocks confirm; DEFAULT pct=0 also blocked', () => {
+  assert.match(
+    tmConfigConfirmBlockReason(null) || '',
+    /still loading/i,
+  );
+  assert.match(
+    tmConfigConfirmBlockReason(undefined, { loading: true }) || '',
+    /still loading/i,
+  );
+  assert.equal(isTmConfigReadyForConfirm(null), false);
+  assert.match(
+    tmConfigConfirmBlockReason({
+      councilSubsidyPercent: 0,
+      councilCapAmount: 0,
+      hoistCostPerUnit: 0,
+    }) || '',
+    /not configured/i,
+  );
+  assert.equal(
+    isTmConfigReadyForConfirm({
+      councilSubsidyPercent: 65,
+      councilCapAmount: 0,
+      hoistCostPerUnit: 10,
+    }),
+    true,
+  );
+  assert.equal(
+    tmConfigConfirmBlockReason({
+      councilSubsidyPercent: 65,
+      councilCapAmount: 26,
+      hoistCostPerUnit: 10,
+    }),
+    null,
+  );
+});
+
+test('PaymentModal blocks TM confirm while tmConfig null/loading', () => {
+  const modalSrc = readFileSync(join(root, 'components/PaymentModal.tsx'), 'utf8');
+  assert.match(modalSrc, /tmConfigLoading/);
+  assert.match(modalSrc, /tmConfigConfirmBlockReason/);
+  assert.match(modalSrc, /TM settings not ready/);
+  assert.match(modalSrc, /Waiting for TM settings/);
+  assert.match(modalSrc, /disabled=\{submitting \|\| !tmConfigReady\}/);
+  assert.match(modalSrc, /if \(!tmConfigReady\) return false/);
 });
 
 test('Phase 2A.1 portal config edit + audit + hoist 100% council', () => {

@@ -6,9 +6,11 @@ import {
   calcTmPaymentBreakdown,
   calcTmSplit,
   DEFAULT_TM_CONFIG,
+  isTmConfigReadyForConfirm,
   mapCouncilRecordToCompanyTmConfig,
   parseTmConfigRecord,
   resolvePrimaryTmCard,
+  tmConfigConfirmBlockReason,
   type TmConfig,
   type TmHoistEntry,
   type TmPaymentBreakdown,
@@ -20,9 +22,11 @@ export {
   calcTmPaymentBreakdown,
   calcTmSplit,
   DEFAULT_TM_CONFIG,
+  isTmConfigReadyForConfirm,
   mapCouncilRecordToCompanyTmConfig,
   parseTmConfigRecord,
   resolvePrimaryTmCard,
+  tmConfigConfirmBlockReason,
 };
 
 export function tmConfigStorageKey(companyId: string): string {

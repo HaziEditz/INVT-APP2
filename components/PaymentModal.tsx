@@ -15,6 +15,7 @@ import {
   calcTmPaymentBreakdown,
   loadTmConfig,
   resolvePrimaryTmCard,
+  tmConfigConfirmBlockReason,
   TmConfig,
 } from '@/lib/tmConfig';
 import { formatTmCardExpiryInput, isCompleteCardholderName } from '@/lib/tmPaymentPersist';
@@ -48,7 +49,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-/** Deferred so expo-camera / Terminal stay off PaymentModal's static import graph. */
+/** Deferred so Vision Camera / OCR / Terminal stay off PaymentModal's static import graph. */
 function loadCardScanModal(): ComponentType<{
   visible: boolean;
   title?: string;
@@ -176,6 +177,8 @@ export function PaymentModal() {
   const [otherNote, setOtherNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [tmConfig, setTmConfig] = useState<TmConfig | null>(null);
+  /** True while loadTmConfig is in flight — never confirm TM on null/stale zero-subsidy fallback. */
+  const [tmConfigLoading, setTmConfigLoading] = useState(false);
 
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
@@ -413,9 +416,22 @@ export function PaymentModal() {
   useEffect(() => {
     if (!isTmPayment || !driver?.companyId) {
       setTmConfig(null);
+      setTmConfigLoading(false);
       return;
     }
-    void loadTmConfig(driver.companyId).then(setTmConfig);
+    let cancelled = false;
+    setTmConfig(null);
+    setTmConfigLoading(true);
+    void loadTmConfig(driver.companyId)
+      .then((cfg) => {
+        if (!cancelled) setTmConfig(cfg);
+      })
+      .finally(() => {
+        if (!cancelled) setTmConfigLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [isTmPayment, driver?.companyId]);
 
   const fare = useMemo(() => {
@@ -516,6 +532,14 @@ export function PaymentModal() {
   };
 
   const onConfirm = async () => {
+    if (isTmPayment) {
+      const block = tmConfigConfirmBlockReason(tmConfig, { loading: tmConfigLoading });
+      if (block) {
+        Alert.alert('TM settings not ready', block);
+        setPaymentStep('tm');
+        return;
+      }
+    }
     if (isTmPayment && !tmPassengerPaymentType) {
       Alert.alert(
         'Remaining payment required',
@@ -906,7 +930,12 @@ export function PaymentModal() {
     !!String(tmCardNumber || '').trim() && isCompleteCardholderName(tmCardName);
   const hoistQuestionDone = !isWav || hoistUsedAnswer != null;
   const tmRemainderReady = !!tmPassengerPaymentType;
+  const tmConfigBlockReason = isTmPayment
+    ? tmConfigConfirmBlockReason(tmConfig, { loading: tmConfigLoading })
+    : null;
+  const tmConfigReady = !tmConfigBlockReason;
   const tmCanReview = (() => {
+    if (!tmConfigReady) return false;
     if (!primaryCardReady) return false;
     if (!hoistQuestionDone) return false;
     if (!tmRemainderReady) return false;
@@ -966,13 +995,15 @@ export function PaymentModal() {
     if (!tmCanReview) {
       Alert.alert(
         'Complete TM details',
-        !primaryCardReady
-          ? 'Enter the primary TM card number and full passenger name (first and last).'
-          : !hoistQuestionDone
-            ? 'Choose whether a hoist was used.'
-            : !tmRemainderReady
-              ? 'Select how the passenger pays the remaining fare.'
-              : 'Complete any additional hoist passenger card details (full name required).',
+        tmConfigBlockReason
+          ? tmConfigBlockReason
+          : !primaryCardReady
+            ? 'Enter the primary TM card number and full passenger name (first and last).'
+            : !hoistQuestionDone
+              ? 'Choose whether a hoist was used.'
+              : !tmRemainderReady
+                ? 'Select how the passenger pays the remaining fare.'
+                : 'Complete any additional hoist passenger card details (full name required).',
       );
       return;
     }
@@ -1020,6 +1051,15 @@ export function PaymentModal() {
               <Pressable onPress={abandonTmForOtherPayment} style={styles.backLink}>
                 <Text style={styles.backLinkText}>← Choose a different payment method</Text>
               </Pressable>
+
+              {tmConfigBlockReason ? (
+                <View style={styles.tmConfigBanner}>
+                  <Text style={styles.tmConfigBannerTitle}>
+                    {tmConfigLoading ? 'Loading TM settings…' : 'TM settings blocked'}
+                  </Text>
+                  <Text style={styles.tmConfigBannerBody}>{tmConfigBlockReason}</Text>
+                </View>
+              ) : null}
 
               <View style={styles.card}>
                 <Text style={styles.stepLabel}>1. Primary TM card *</Text>
@@ -1363,15 +1403,19 @@ export function PaymentModal() {
 
             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
               <Text style={styles.footerNote}>
-                {!primaryCardReady
-                  ? 'Enter primary TM card and full passenger name (first & last)'
-                  : !hoistQuestionDone
-                    ? 'Choose Yes or No for hoist'
-                    : !tmRemainderReady
-                      ? 'Select remaining payment method to continue'
-                      : `Meter subsidy ${fmtMoney(tmSplit.councilPaysMeter)}${
-                          hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''
-                        } · Collect ${fmtMoney(tmSplit.passengerPays)} via ${tmPassengerPaymentType}`}
+                {tmConfigBlockReason
+                  ? tmConfigLoading
+                    ? 'Waiting for TM subsidy settings…'
+                    : tmConfigBlockReason
+                  : !primaryCardReady
+                    ? 'Enter primary TM card and full passenger name (first & last)'
+                    : !hoistQuestionDone
+                      ? 'Choose Yes or No for hoist'
+                      : !tmRemainderReady
+                        ? 'Select remaining payment method to continue'
+                        : `Meter subsidy ${fmtMoney(tmSplit.councilPaysMeter)}${
+                            hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''
+                          } · Collect ${fmtMoney(tmSplit.passengerPays)} via ${tmPassengerPaymentType}`}
               </Text>
               <Button
                 title="Review payment →"
@@ -1409,6 +1453,15 @@ export function PaymentModal() {
               <Pressable onPress={abandonTmForOtherPayment} style={styles.backLink}>
                 <Text style={styles.backLinkText}>← Choose a different payment method</Text>
               </Pressable>
+
+              {tmConfigBlockReason ? (
+                <View style={styles.tmConfigBanner}>
+                  <Text style={styles.tmConfigBannerTitle}>
+                    {tmConfigLoading ? 'Loading TM settings…' : 'TM settings blocked'}
+                  </Text>
+                  <Text style={styles.tmConfigBannerBody}>{tmConfigBlockReason}</Text>
+                </View>
+              ) : null}
 
               <View style={styles.card}>
                 <Text style={styles.stepLabel}>Payment breakdown</Text>
@@ -1488,13 +1541,26 @@ export function PaymentModal() {
 
             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
               <Text style={styles.footerNote}>
-                Collect {fmtMoney(tmSplit.passengerPays)} via {tmPassengerPaymentType}
-                {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}
+                {tmConfigBlockReason
+                  ? tmConfigLoading
+                    ? 'Waiting for TM subsidy settings…'
+                    : tmConfigBlockReason
+                  : `Collect ${fmtMoney(tmSplit.passengerPays)} via ${tmPassengerPaymentType}${
+                      hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''
+                    }`}
               </Text>
               <Button
-                title={submitting ? 'Saving…' : 'Confirm Payment'}
+                title={
+                  submitting
+                    ? 'Saving…'
+                    : tmConfigLoading
+                      ? 'Waiting for TM settings…'
+                      : tmConfigBlockReason
+                        ? 'TM settings required'
+                        : 'Confirm Payment'
+                }
                 onPress={onConfirm}
-                disabled={submitting}
+                disabled={submitting || !tmConfigReady}
                 style={styles.confirmBtn}
               />
             </View>
@@ -2098,6 +2164,25 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 13,
     marginBottom: 6,
+  },
+  tmConfigBanner: {
+    backgroundColor: '#FFF4E5',
+    borderWidth: 1,
+    borderColor: '#E6A23C',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    gap: 4,
+  },
+  tmConfigBannerTitle: {
+    color: '#8A5A00',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  tmConfigBannerBody: {
+    color: '#8A5A00',
+    fontSize: 13,
+    lineHeight: 18,
   },
   totalDue: {
     color: Colors.success,
