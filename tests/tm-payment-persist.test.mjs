@@ -124,6 +124,28 @@ test('buildTmPersistFields writes meter claim only — hoist stays separate', ()
   assert.equal(fields.hoistTotal, 10);
 });
 
+test('buildTmPersistFields stamps hoistUsedConfirmed only when explicit Yes', () => {
+  const yes = buildTmPersistFields({
+    councilPays: 26,
+    passengerPays: 14,
+    tmSubsidyFare: 26,
+    hoistTotal: 10,
+    hoistCount: 1,
+    hoistUsedConfirmed: true,
+    totalFare: 50,
+    tmCardNumber: '44818303',
+  });
+  assert.equal(yes.hoistUsedConfirmed, true);
+  const no = buildTmPersistFields({
+    councilPays: 26,
+    passengerPays: 14,
+    tmSubsidyFare: 26,
+    totalFare: 40,
+    tmCardNumber: '44818303',
+  });
+  assert.equal(no.hoistUsedConfirmed, undefined);
+});
+
 test('buildTmPersistFields subtracts hoist when tmSubsidyFare missing', () => {
   const fields = buildTmPersistFields({
     councilPays: 36,

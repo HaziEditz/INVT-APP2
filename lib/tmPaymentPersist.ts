@@ -70,6 +70,8 @@ export function buildTmPersistFields(
     hoistCount: tmDetails.hoistCount,
     tmHoistCount: tmDetails.hoistCount,
     tmHoists: tmDetails.tmHoists?.length ? tmDetails.tmHoists : undefined,
+    // Explicit driver "Hoist used? Yes" — server auto-creates hoist cards only when set.
+    ...(tmDetails.hoistUsedConfirmed === true ? { hoistUsedConfirmed: true } : {}),
     tmCardNumber: card || undefined,
     tmCardName: tmDetails.tmCardName || undefined,
     tmCardExpiry: tmDetails.tmCardExpiry || undefined,
@@ -152,6 +154,7 @@ const TM_FORWARD_KEYS = [
   'hoistCount',
   'tmHoistCount',
   'tmHoists',
+  'hoistUsedConfirmed',
   'tmCardNumber',
   'tmCardName',
   'tmCardExpiry',
@@ -197,6 +200,7 @@ export function pickTmFieldsFromPayload(
       tmSubsidyHoist:
         payload.tmSubsidyHoist != null ? Number(payload.tmSubsidyHoist) : undefined,
       hoistCount: payload.hoistCount != null ? Number(payload.hoistCount) : undefined,
+      hoistUsedConfirmed: payload.hoistUsedConfirmed === true,
       tmHoists: Array.isArray(payload.tmHoists)
         ? (payload.tmHoists as TmPaymentDetails['tmHoists'])
         : undefined,

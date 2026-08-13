@@ -620,6 +620,7 @@ export function PaymentModal() {
           tmSubsidyHoist: hoistTotal > 0 ? hoistTotal : undefined,
           hoistCount: hoistUnits > 0 ? hoistUnits : undefined,
           tmHoists: tmHoistEntries.length ? tmHoistEntries : undefined,
+          hoistUsedConfirmed: isWav && hoistUsedAnswer === 'yes' ? true : undefined,
           tmCardNumber: primary.tmCardNumber,
           tmCardExpiry: primary.tmCardExpiry,
           tmCardName: primary.tmCardName,

@@ -362,6 +362,8 @@ export interface TmPaymentDetails {
   hoistTotal?: number;
   tmSubsidyHoist?: number;
   hoistCount?: number;
+  /** True only when driver answered "Hoist used? Yes" in payment UI. */
+  hoistUsedConfirmed?: boolean;
   /** One entry per hoist use / wheelchair passenger card. */
   tmHoists?: TmHoistEntryDetails[];
   tmCardNumber?: string;
