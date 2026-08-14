@@ -1,4 +1,4 @@
-import { get, push, ref, set, update } from 'firebase/database';
+import { get, ref, set, update } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { cleanObject } from '@/lib/cleanObject';
 import { resolveClosedJobCompletedAtMs } from '@/lib/closedJobSync';
@@ -134,25 +134,51 @@ export async function writeClosedJob(
 
   const completedRef = ref(database, `completedJobs/${companyId}/${job.id}`);
   let alreadyHasCompleted = false;
+  let existingCompleted: Record<string, unknown> | null = null;
   try {
     const existing = await get(completedRef);
     alreadyHasCompleted = existing.exists();
+    existingCompleted =
+      alreadyHasCompleted && existing.val() && typeof existing.val() === 'object'
+        ? (existing.val() as Record<string, unknown>)
+        : null;
   } catch {
     alreadyHasCompleted = false;
   }
 
-  // Idempotent: skip closedJobs push when completedJobs already exists (server
-  // upsert or a prior flush already wrote the trip).
-  let closedPushKey = String(job.id);
-  if (!alreadyHasCompleted) {
-    const entryRef = push(ref(database, `closedJobs/${companyId}`));
-    closedPushKey = entryRef.key ?? String(job.id);
-    await set(entryRef, record);
+  // Deterministic closedJobs key — one row per bookingId (complete + hail writers).
+  const closedPath = `closedJobs/${companyId}/job_${job.id}`;
+  const closedRef = ref(database, closedPath);
+  const alreadyPushed =
+    existingCompleted?.closedJobsPushed === true ||
+    existingCompleted?.closedJobsKey === `job_${job.id}` ||
+    existingCompleted?.closedJobsKey === closedPath;
+
+  let closedPushKey = `job_${job.id}`;
+  if (!alreadyPushed) {
+    let existingClosed: Record<string, unknown> | null = null;
+    try {
+      const snap = await get(closedRef);
+      if (snap.exists() && snap.val() && typeof snap.val() === 'object') {
+        existingClosed = snap.val() as Record<string, unknown>;
+      }
+    } catch {
+      existingClosed = null;
+    }
+    if (existingClosed) {
+      const mergedClosed: Record<string, unknown> = { ...existingClosed };
+      for (const [k, v] of Object.entries(record)) {
+        fillIfEmpty(mergedClosed, k, v);
+      }
+      await update(closedRef, cleanObject(mergedClosed));
+    } else {
+      await set(closedRef, record);
+    }
   }
 
   try {
     if (alreadyHasCompleted) {
-      const existingVal = (await get(completedRef)).val() as Record<string, unknown> | null;
+      const existingVal = existingCompleted;
       const merged: Record<string, unknown> = {
         ...(existingVal && typeof existingVal === 'object' ? existingVal : {}),
       };
@@ -161,6 +187,8 @@ export async function writeClosedJob(
         bookingId: job.id,
         companyId,
         status: 'Completed',
+        closedJobsPushed: true,
+        closedJobsKey: `job_${job.id}`,
       })) {
         fillIfEmpty(merged, k, v);
       }
@@ -174,6 +202,8 @@ export async function writeClosedJob(
         merged.closedAt = existingVal.closedAt ?? existingVal.completedAt;
         if (existingVal.JobCompleteTime) merged.JobCompleteTime = existingVal.JobCompleteTime;
       }
+      merged.closedJobsPushed = true;
+      merged.closedJobsKey = `job_${job.id}`;
       await update(completedRef, cleanObject(merged));
     } else {
       await set(completedRef, {
@@ -181,10 +211,12 @@ export async function writeClosedJob(
         bookingId: job.id,
         companyId,
         status: 'Completed',
+        closedJobsPushed: true,
+        closedJobsKey: `job_${job.id}`,
       });
     }
   } catch {
-    // non-fatal — closedLogs push is primary when we pushed
+    // non-fatal — closedJobs write is primary when we wrote
   }
 
   // Seed claim pipeline so council portal / SA batches can see the trip.

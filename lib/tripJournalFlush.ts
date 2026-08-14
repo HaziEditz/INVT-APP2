@@ -392,8 +392,19 @@ async function flushTerminalEventsForJournal(
 /**
  * Phase 5c–5e — flush hail creates, Arrived/OnBoard stages, then terminal events.
  * Does not call /api/syncOfflineTrip (full trip journal enrichment stays deferred).
+ * Single-flight: overlapping reconnect triggers share one in-flight flush.
  */
+let flushTripJournalInFlight: Promise<number> | null = null;
+
 export async function flushTripJournal(hooks: TripJournalFlushHooks = {}): Promise<number> {
+  if (flushTripJournalInFlight) return flushTripJournalInFlight;
+  flushTripJournalInFlight = flushTripJournalOnce(hooks).finally(() => {
+    flushTripJournalInFlight = null;
+  });
+  return flushTripJournalInFlight;
+}
+
+async function flushTripJournalOnce(hooks: TripJournalFlushHooks): Promise<number> {
   const state = await NetInfo.fetch();
   if (!state.isConnected) return 0;
 

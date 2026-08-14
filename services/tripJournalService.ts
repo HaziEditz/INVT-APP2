@@ -117,15 +117,22 @@ export async function setTripJournalSyncState(
   });
 }
 
-export async function listPendingHailCreates(): Promise<TripJournal[]> {
+/** How long a hail may stay `creating` before reconnect flush may re-POST. */
+export const HAIL_CREATING_STALE_MS = 60_000;
+
+export async function listPendingHailCreates(nowMs: number = Date.now()): Promise<TripJournal[]> {
   const rows = await listTripJournals();
-  return rows.filter(
-    (j) =>
-      j.source === 'hail' &&
-      !!j.hailCreate &&
-      (j.syncState === 'pending' || j.syncState === 'creating' || j.syncState === 'failed') &&
-      !j.serverJobId,
-  );
+  return rows.filter((j) => {
+    if (j.source !== 'hail' || !j.hailCreate || j.serverJobId) return false;
+    if (j.syncState === 'pending' || j.syncState === 'failed') return true;
+    if (j.syncState === 'creating') {
+      const updated = Number(j.updatedAt || j.createdAt || 0);
+      // Only retry when the lease is genuinely stale — overlapping flushes must
+      // not re-POST while the first create is still in flight.
+      return updated > 0 && nowMs - updated >= HAIL_CREATING_STALE_MS;
+    }
+    return false;
+  });
 }
 
 export { dispatchJournalKey, resolveJournalClientTripId };

@@ -93,12 +93,12 @@ test('resolveClosedJobCompletedAtMs prefers confirm/stepTimes over flush clock',
   );
 });
 
-test('writeClosedJob skips closedJobs push when completedJobs exists (source gate)', () => {
+test('writeClosedJob uses deterministic closedJobs key (source gate)', () => {
   const src = readFileSync(join(root, 'lib/closedJobs.ts'), 'utf8');
-  assert.match(src, /alreadyHasCompleted/);
-  assert.match(src, /skip closedJobs push/i);
+  assert.match(src, /alreadyPushed|closedJobsPushed/);
   assert.match(src, /resolveClosedJobCompletedAtMs/);
   assert.match(src, /completedAtMs/);
+  assert.match(src, /job_\$\{job\.id\}/);
 });
 
 test('pendingClosedJob passes confirm-time completedAt into writeClosedJob', () => {
