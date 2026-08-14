@@ -31,6 +31,7 @@ import {
 } from '@/types';
 import NetInfo from '@react-native-community/netinfo';
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { shouldBumpNetworkResume } from '@/lib/networkResume';
 import {
   ActivityIndicator,
   Alert,
@@ -199,9 +200,29 @@ export function PaymentModal() {
   const [accountSearchError, setAccountSearchError] = useState('');
   const [accountFromCache, setAccountFromCache] = useState(false);
   const [accountAllowFreeText, setAccountAllowFreeText] = useState(false);
+  /**
+   * Bumps only on offline→online so TM config + Account search re-run without
+   * leaving PaymentModal (drivers shouldn't need to back out after a signal drop).
+   */
+  const [networkResumeEpoch, setNetworkResumeEpoch] = useState(0);
+  const wasOfflineRef = useRef<boolean | null>(null);
+  const tmConfigRef = useRef<TmConfig | null>(null);
   const accountSearchSeq = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
+
+  tmConfigRef.current = tmConfig;
+
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener((state) => {
+      const offline = state.isConnected === false;
+      if (shouldBumpNetworkResume(wasOfflineRef.current, offline)) {
+        setNetworkResumeEpoch((n) => n + 1);
+      }
+      wasOfflineRef.current = offline;
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -413,6 +434,7 @@ export function PaymentModal() {
     paymentJob?.id,
     driver?.companyId,
     tmPassengerPaymentType,
+    networkResumeEpoch,
   ]);
 
   useEffect(() => {
@@ -425,7 +447,10 @@ export function PaymentModal() {
     const companyId = driver.companyId;
     // Cache-first: unblock Confirm immediately when a valid cached config exists.
     // Never clear a ready config while a background refresh is in flight.
-    setTmConfigLoading(true);
+    // On networkResumeEpoch: re-fetch so a first-open-offline DEFAULT (0%) can
+    // become ready once Firebase answers — without greying Review if already ready.
+    const alreadyReady = isTmConfigReadyForConfirm(tmConfigRef.current);
+    if (!alreadyReady) setTmConfigLoading(true);
     void (async () => {
       try {
         const cached = await loadCachedTmConfig(companyId).catch(() => null);
@@ -446,7 +471,7 @@ export function PaymentModal() {
     return () => {
       cancelled = true;
     };
-  }, [isTmPayment, driver?.companyId]);
+  }, [isTmPayment, driver?.companyId, networkResumeEpoch]);
 
   const fare = useMemo(() => {
     if (!paymentJob) {

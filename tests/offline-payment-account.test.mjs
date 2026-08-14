@@ -92,6 +92,14 @@ test('PaymentModal wires ACC claim/PO and EFTPOS ref into extras', () => {
   assert.match(src, /rememberBusinessAccount/);
 });
 
+test('PaymentModal Account search re-runs on network resume', () => {
+  const src = readFileSync(join(root, 'components/PaymentModal.tsx'), 'utf8');
+  assert.match(src, /NetInfo\.addEventListener/);
+  assert.match(src, /networkResumeEpoch/);
+  assert.match(src, /You appear offline/);
+  assert.match(src, /tmPassengerPaymentType,\s*networkResumeEpoch,/);
+});
+
 test('finalizePayment journals payment refs and pending account', () => {
   const src = readFileSync(join(root, 'context/DriverContext.tsx'), 'utf8');
   assert.match(src, /accountPending:\s*true,\s*AccountPending:\s*true/);

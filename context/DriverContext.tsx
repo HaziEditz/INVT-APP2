@@ -1176,9 +1176,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setCompany(null);
       return;
     }
-    loadCompanyInfo(driver.companyId, driver.uid)
+    const companyId = driver.companyId;
+    loadCompanyInfo(companyId, driver.uid)
       .then(setCompany)
       .catch((err) => console.error('[Driver] loadCompanyInfo', err));
+    // Prefetch TM split config into AsyncStorage so a driver's first-ever TM trip
+    // can still Confirm offline (PaymentModal alone only caches after first online open).
+    void import('@/lib/tmConfig')
+      .then(({ loadTmConfig }) => loadTmConfig(companyId))
+      .catch((err) => console.warn('[Driver] prefetch tmConfig failed:', err));
   }, [driver?.companyId, driver?.uid], 'Driver-company');
 
   const refreshJobHistory = async () => {

@@ -51,6 +51,32 @@ test('PaymentModal hydrates cached TM config before network settle', () => {
   assert.match(src, /Cache-first/);
 });
 
+test('PaymentModal auto-resumes TM config + Account search on reconnect', () => {
+  const src = readFileSync(join(root, 'components/PaymentModal.tsx'), 'utf8');
+  assert.match(src, /NetInfo\.addEventListener/);
+  assert.match(src, /networkResumeEpoch/);
+  assert.match(src, /wasOfflineRef/);
+  assert.match(src, /shouldBumpNetworkResume/);
+  // TM load and Account search both depend on resume epoch
+  const tmEffectDeps = src.match(
+    /\[isTmPayment,\s*driver\?\.companyId,\s*networkResumeEpoch\]/,
+  );
+  assert.ok(tmEffectDeps, 'TM load effect must re-run on networkResumeEpoch');
+  assert.match(src, /tmPassengerPaymentType,\s*networkResumeEpoch,/);
+  // Reconnect refresh must not grey Review when config already ready
+  assert.match(src, /alreadyReady/);
+  assert.match(src, /if \(!alreadyReady\) setTmConfigLoading\(true\)/);
+});
+
+test('DriverContext prefetches tmConfig at company hydrate', () => {
+  const src = readFileSync(join(root, 'context/DriverContext.tsx'), 'utf8');
+  assert.match(src, /Driver-company/);
+  assert.match(src, /prefetch tmConfig/);
+  assert.match(src, /loadTmConfig\(companyId\)/);
+  // Must not block company hydrate on prefetch failure
+  assert.match(src, /prefetch tmConfig failed/);
+});
+
 test('valid cached config unblocks confirm; 0% still blocks', () => {
   const ready = parseTmConfigRecord({ councilSubsidyPercent: 65, councilCapAmount: 40 });
   assert.equal(isTmConfigReadyForConfirm(ready), true);
