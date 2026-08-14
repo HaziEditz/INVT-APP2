@@ -373,6 +373,13 @@ export interface TmPaymentDetails {
   totalFare: number;
   /** Council id for claims (from company tmConfig.sourceCouncilId or card). */
   councilId?: string;
+  /**
+   * Optional fee collected on top of passenger meter share (any remainder method).
+   * Never folded into meterFare / subsidy / passengerPays / claim totals.
+   */
+  transactionFee?: number;
+  /** passengerPays + transactionFee — what the driver actually collects. */
+  passengerCollectedTotal?: number;
 }
 
 export const TM_PASSENGER_PAYMENT_TYPES = [

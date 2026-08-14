@@ -3,6 +3,16 @@
  */
 import type { TmPaymentDetails } from '@/types';
 
+function parsePersistTransactionFee(raw: unknown): number {
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return +raw.toFixed(2);
+  }
+  const n = parseFloat(String(raw ?? '').trim());
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return +n.toFixed(2);
+}
+
 /** Auto-format MMYY / MM/YY typing into MM/YY (max 5 chars). */
 export function formatTmCardExpiryInput(raw: string): string {
   const digits = String(raw || '')
@@ -49,6 +59,14 @@ export function buildTmPersistFields(
       ? Number(tmDetails.tmSubsidyFare) || 0
       : Math.max(0, (Number(tmDetails.councilPays) || 0) - hoist);
   const passengerPays = Number(tmDetails.passengerPays) || 0;
+  const fee = parsePersistTransactionFee(tmDetails.transactionFee);
+  const collected =
+    fee > 0
+      ? tmDetails.passengerCollectedTotal != null &&
+        Number.isFinite(Number(tmDetails.passengerCollectedTotal))
+        ? +Number(tmDetails.passengerCollectedTotal).toFixed(2)
+        : +(passengerPays + fee).toFixed(2)
+      : passengerPays;
   const card = String(tmDetails.tmCardNumber || '').trim();
   const councilId = String(opts?.councilId || tmDetails.councilId || '').trim();
   return {
@@ -78,6 +96,13 @@ export function buildTmPersistFields(
     tmVoucherNo: card || undefined,
     tmTotalFare: tmDetails.totalFare,
     tmRemainderPaymentType: opts?.remainderPaymentType || undefined,
+    // Non-economic collect fee — never fold into passengerPays / subsidy / claims.
+    ...(fee > 0
+      ? {
+          transactionFee: fee,
+          passengerCollectedTotal: collected,
+        }
+      : {}),
     ...(councilId ? { councilId, tmCouncilId: councilId } : {}),
   };
 }
@@ -166,6 +191,8 @@ const TM_FORWARD_KEYS = [
   'tmVoucherNo',
   'tmTotalFare',
   'tmRemainderPaymentType',
+  'transactionFee',
+  'passengerCollectedTotal',
   'councilId',
   'tmCouncilId',
 ] as const;
@@ -214,6 +241,12 @@ export function pickTmFieldsFromPayload(
       tmCardExpiry: payload.tmCardExpiry != null ? String(payload.tmCardExpiry) : undefined,
       totalFare: Number(payload.totalFare ?? payload.fare ?? 0) || 0,
       councilId: payload.councilId != null ? String(payload.councilId) : undefined,
+      transactionFee:
+        payload.transactionFee != null ? Number(payload.transactionFee) : undefined,
+      passengerCollectedTotal:
+        payload.passengerCollectedTotal != null
+          ? Number(payload.passengerCollectedTotal)
+          : undefined,
     },
     {
       councilId: payload.councilId != null ? String(payload.councilId) : undefined,

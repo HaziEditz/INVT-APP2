@@ -14,6 +14,7 @@ export interface HistoryJob {
   paymentType?: PaymentType | string;
   tmPaymentType?: string;
   tmRemainderPaymentType?: string;
+  transactionFee?: number;
   passengerName?: string;
   completedAt: number;
   cancelledBy?: string;
@@ -101,6 +102,10 @@ function mapCompletedRecord(
     tmPaymentType: String(r.tmPaymentType ?? r.TmPaymentType ?? '') || undefined,
     tmRemainderPaymentType:
       String(r.tmRemainderPaymentType ?? r.TmRemainderPaymentType ?? '') || undefined,
+    transactionFee:
+      r.transactionFee != null && Number.isFinite(Number(r.transactionFee))
+        ? Number(r.transactionFee)
+        : undefined,
     passengerName: String(r.passengerName ?? r.PassengerName ?? ''),
     completedAt,
   };

@@ -21,6 +21,11 @@ import {
   TmConfig,
 } from '@/lib/tmConfig';
 import { formatTmCardExpiryInput, isCompleteCardholderName } from '@/lib/tmPaymentPersist';
+import {
+  parseTransactionFeeAmount,
+  passengerCollectedTotal,
+  tmTransactionFeeLabel,
+} from '@/lib/tmTransactionFee';
 import { computePaymentFareSummary, completionErrorMessage } from '@/lib/tripCompletionHelpers';
 import {
   DRIVER_PAYMENT_TYPES,
@@ -192,6 +197,8 @@ export function PaymentModal() {
   const [eftposRef, setEftposRef] = useState('');
   const [eftposSurchargeOn, setEftposSurchargeOn] = useState(false);
   const [eftposSurchargeAmt, setEftposSurchargeAmt] = useState('');
+  /** Optional fee on TM remainder — never enters meter/subsidy math. */
+  const [tmTransactionFeeAmt, setTmTransactionFeeAmt] = useState('');
   const [accountId, setAccountId] = useState('');
   const [accountName, setAccountName] = useState('');
   const [accountSearch, setAccountSearch] = useState('');
@@ -317,6 +324,7 @@ export function PaymentModal() {
     setEftposRef('');
     setEftposSurchargeOn(false);
     setEftposSurchargeAmt('');
+    setTmTransactionFeeAmt('');
     setAccountId(String(paymentJob.accountId || '').trim());
     setAccountName(String(paymentJob.accountName || '').trim());
     setAccountSearch('');
@@ -544,7 +552,19 @@ export function PaymentModal() {
         councilPaysHoist: 0,
         meterFare: meterSubtotal,
       };
-  const totalDue = isTmPayment ? tmSplit.passengerPays : subtotal;
+  const totalDue = isTmPayment
+    ? passengerCollectedTotal(
+        tmSplit.passengerPays,
+        parseTransactionFeeAmount(tmTransactionFeeAmt),
+      )
+    : subtotal;
+  const tmTransactionFee = isTmPayment
+    ? parseTransactionFeeAmount(tmTransactionFeeAmt)
+    : 0;
+  const tmFeeLabel = tmTransactionFeeLabel(tmPassengerPaymentType || '');
+  const tmCollectedFromPassenger = isTmPayment
+    ? passengerCollectedTotal(tmSplit.passengerPays, tmTransactionFee)
+    : tmSplit.passengerPays;
 
   const builtExtras: PaymentExtras = {
     bikeCarry: parseExtra('bikeCarry'),
@@ -650,6 +670,7 @@ export function PaymentModal() {
           return;
         }
         const councilId = String(tmConfig?.sourceCouncilId || '').trim() || undefined;
+        const fee = parseTransactionFeeAmount(tmTransactionFeeAmt);
         tmDetails = {
           councilPays: tmSplit.councilPays,
           passengerPays: tmSplit.passengerPays,
@@ -665,6 +686,12 @@ export function PaymentModal() {
           tmCardName: primary.tmCardName,
           totalFare: subtotal,
           councilId,
+          ...(fee > 0
+            ? {
+                transactionFee: fee,
+                passengerCollectedTotal: passengerCollectedTotal(tmSplit.passengerPays, fee),
+              }
+            : {}),
         };
       }
 
@@ -910,9 +937,23 @@ export function PaymentModal() {
         return (
           <View style={styles.detailsBlock}>
             <View style={styles.tmRow}>
+              <Text style={styles.tmLabel}>Passenger share</Text>
+              <Text style={[styles.tmValue, styles.tmPassenger]}>
+                {fmtMoney(tmSplit.passengerPays)}
+              </Text>
+            </View>
+            {tmTransactionFee > 0 ? (
+              <View style={styles.tmRow}>
+                <Text style={styles.tmLabel}>{tmFeeLabel}</Text>
+                <Text style={[styles.tmValue, styles.tmPassenger]}>
+                  {fmtMoney(tmTransactionFee)}
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.tmRow}>
               <Text style={styles.tmLabel}>Collect from passenger</Text>
               <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
-                {fmtMoney(tmSplit.passengerPays)}
+                {fmtMoney(tmCollectedFromPassenger)}
               </Text>
             </View>
             <View style={styles.tmRow}>
@@ -962,6 +1003,7 @@ export function PaymentModal() {
   const abandonTmForOtherPayment = () => {
     setPaymentType('Cash');
     setTmPassengerPaymentType('');
+    setTmTransactionFeeAmt('');
     setPaymentStep('main');
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   };
@@ -1277,7 +1319,11 @@ export function PaymentModal() {
                     {isWav ? '3' : '2'}. Remaining payment method *
                   </Text>
                   <Text style={styles.hint}>
-                    Collects the passenger meter share ({fmtMoney(tmSplit.passengerPays)}).
+                    Collects the passenger meter share ({fmtMoney(tmSplit.passengerPays)}
+                    {tmTransactionFee > 0
+                      ? ` + ${tmFeeLabel.toLowerCase()} ${fmtMoney(tmTransactionFee)} = ${fmtMoney(tmCollectedFromPassenger)}`
+                      : ''}
+                    ).
                   </Text>
                   <Dropdown
                     label="Passenger pays remaining via"
@@ -1286,6 +1332,22 @@ export function PaymentModal() {
                     placeholder="Select payment method…"
                     onChange={setTmPassengerPaymentType}
                   />
+                  {tmPassengerPaymentType ? (
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={styles.hint}>
+                        Optional {tmFeeLabel.toLowerCase()} — added on top of passenger share only
+                        (does not change council subsidy).
+                      </Text>
+                      <TextInput
+                        style={styles.field}
+                        placeholder={`${tmFeeLabel} (optional)`}
+                        placeholderTextColor={Colors.textMuted}
+                        keyboardType="decimal-pad"
+                        value={tmTransactionFeeAmt}
+                        onChangeText={setTmTransactionFeeAmt}
+                      />
+                    </View>
+                  ) : null}
                   {tmPassengerPaymentType === 'Account' ? (
                     <View style={{ marginTop: 12 }}>
                       {accountId ? (
@@ -1433,9 +1495,25 @@ export function PaymentModal() {
                   </Text>
                 </View>
                 <View style={styles.tmRow}>
-                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Collect from passenger</Text>
-                  <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
+                  <Text style={styles.tmLabel}>Passenger share</Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger]}>
                     {fmtMoney(tmSplit.passengerPays)}
+                  </Text>
+                </View>
+                {tmTransactionFee > 0 ? (
+                  <View style={styles.tmRow}>
+                    <Text style={styles.tmLabel}>{tmFeeLabel}</Text>
+                    <Text style={[styles.tmValue, styles.tmPassenger]}>
+                      {fmtMoney(tmTransactionFee)}
+                    </Text>
+                  </View>
+                ) : null}
+                <View style={styles.tmRow}>
+                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>
+                    Collect from passenger
+                  </Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
+                    {fmtMoney(tmCollectedFromPassenger)}
                   </Text>
                 </View>
               </View>
@@ -1455,7 +1533,11 @@ export function PaymentModal() {
                         ? 'Select remaining payment method to continue'
                         : `Meter subsidy ${fmtMoney(tmSplit.councilPaysMeter)}${
                             hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''
-                          } · Collect ${fmtMoney(tmSplit.passengerPays)} via ${tmPassengerPaymentType}`}
+                          } · Collect ${fmtMoney(tmCollectedFromPassenger)} via ${tmPassengerPaymentType}${
+                            tmTransactionFee > 0
+                              ? ` (share ${fmtMoney(tmSplit.passengerPays)} + ${tmFeeLabel.toLowerCase()} ${fmtMoney(tmTransactionFee)})`
+                              : ''
+                          }`}
               </Text>
               <Button
                 title="Review payment →"
@@ -1534,9 +1616,25 @@ export function PaymentModal() {
                   </Text>
                 </View>
                 <View style={styles.tmRow}>
-                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>Collect from passenger</Text>
-                  <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
+                  <Text style={styles.tmLabel}>Passenger share</Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger]}>
                     {fmtMoney(tmSplit.passengerPays)}
+                  </Text>
+                </View>
+                {tmTransactionFee > 0 ? (
+                  <View style={styles.tmRow}>
+                    <Text style={styles.tmLabel}>{tmFeeLabel}</Text>
+                    <Text style={[styles.tmValue, styles.tmPassenger]}>
+                      {fmtMoney(tmTransactionFee)}
+                    </Text>
+                  </View>
+                ) : null}
+                <View style={styles.tmRow}>
+                  <Text style={[styles.tmLabel, { fontWeight: '700' }]}>
+                    Collect from passenger
+                  </Text>
+                  <Text style={[styles.tmValue, styles.tmPassenger, { fontWeight: '700' }]}>
+                    {fmtMoney(tmCollectedFromPassenger)}
                   </Text>
                 </View>
                 <View style={styles.tmRow}>
@@ -1585,9 +1683,11 @@ export function PaymentModal() {
                   ? tmConfigLoading
                     ? 'Waiting for TM subsidy settings…'
                     : tmConfigBlockReason
-                  : `Collect ${fmtMoney(tmSplit.passengerPays)} via ${tmPassengerPaymentType}${
-                      hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''
-                    }`}
+                  : `Collect ${fmtMoney(tmCollectedFromPassenger)} via ${tmPassengerPaymentType}${
+                      tmTransactionFee > 0
+                        ? ` (share ${fmtMoney(tmSplit.passengerPays)} + ${tmFeeLabel.toLowerCase()} ${fmtMoney(tmTransactionFee)})`
+                        : ''
+                    }${hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}`}
               </Text>
               <Button
                 title={
@@ -1726,7 +1826,10 @@ export function PaymentModal() {
                 <Text style={styles.footerNote}>
                   Meter subsidy {fmtMoney(tmSplit.councilPaysMeter)}
                   {hoistTotal > 0 ? ` · Hoist ${fmtMoney(hoistTotal)} (council)` : ''}
-                  {' · '}Collect {fmtMoney(tmSplit.passengerPays)}
+                  {' · '}Collect {fmtMoney(tmCollectedFromPassenger)}
+                  {tmTransactionFee > 0
+                    ? ` (share ${fmtMoney(tmSplit.passengerPays)} + ${fmtMoney(tmTransactionFee)})`
+                    : ''}
                 </Text>
               ) : extrasTotal > 0 || hoistTotal > 0 ? (
                 <Text style={styles.footerNote}>

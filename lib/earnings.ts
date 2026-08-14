@@ -65,6 +65,7 @@ export function formatClosedJobPaymentLabel(job: {
   tmPaymentType?: string | null;
   tmRemainderPaymentType?: string | null;
   PaymentType?: string | null;
+  transactionFee?: number | null;
 }): string {
   const remainder = String(
     job.tmRemainderPaymentType || job.paymentType || job.PaymentType || '',
@@ -75,10 +76,12 @@ export function formatClosedJobPaymentLabel(job: {
     tmMarker.includes('mobility') ||
     tmMarker === 'tm' ||
     tmMarker.includes('total_mobility');
+  const fee = Number(job.transactionFee) || 0;
+  const feeNote = fee > 0 ? ` + fee` : '';
   if (!isTm) {
-    return formatPaymentLabel(remainder || job.paymentType);
+    return formatPaymentLabel(remainder || job.paymentType) + feeNote;
   }
   const remLabel = formatPaymentLabel(remainder || 'Cash');
-  if (remLabel === 'Total Mobility') return 'Total Mobility';
-  return `TM + ${remLabel}`;
+  if (remLabel === 'Total Mobility') return 'Total Mobility' + feeNote;
+  return `TM + ${remLabel}${feeNote}`;
 }

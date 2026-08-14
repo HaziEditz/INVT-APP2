@@ -211,6 +211,8 @@ test('dispatch complete whitelist + tmTripStatus seed', () => {
   const src = readFileSync(join(invtRoot, 'server.js'), 'utf8');
   assert.match(src, /tmCouncilPays/);
   assert.match(src, /tmRemainderPaymentType/);
+  assert.match(src, /transactionFee/);
+  assert.match(src, /passengerCollectedTotal/);
   assert.match(src, /tmTripStatus\/\$\{_cid\}\/\$\{bookingId\}/);
   assert.match(src, /isTotalMobility/);
 });
