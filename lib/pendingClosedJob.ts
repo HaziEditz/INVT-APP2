@@ -125,7 +125,11 @@ export async function flushPendingClosedJobs(opts?: {
         row.extras,
         row.totalFare,
         row.tmDetails,
-        { driverName: row.driverName, vehicleId: row.vehicleId },
+        {
+          driverName: row.driverName,
+          vehicleId: row.vehicleId,
+          completedAtMs: row.completedAt,
+        },
       );
       try {
         const vehicleType = String(

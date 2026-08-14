@@ -4588,7 +4588,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             extras,
             totalFare,
             tmDetails,
-            { driverName: driver.name, vehicleId },
+            { driverName: driver.name, vehicleId, completedAtMs: completedAt },
           );
           await removePendingClosedJob({
             localJobId: String(job.id),

@@ -117,6 +117,7 @@ export function buildTmTripStatusSeed(
   companyId: string,
   councilId: string,
   tmDetails: TmPaymentDetails,
+  opts?: { submittedAt?: number },
 ): TmTripStatusSeed {
   const hoist =
     Number(tmDetails.tmSubsidyHoist != null ? tmDetails.tmSubsidyHoist : tmDetails.hoistTotal) || 0;
@@ -124,11 +125,15 @@ export function buildTmTripStatusSeed(
     tmDetails.tmSubsidyFare != null
       ? Number(tmDetails.tmSubsidyFare) || 0
       : Math.max(0, (Number(tmDetails.councilPays) || 0) - hoist);
+  const submittedAt =
+    typeof opts?.submittedAt === 'number' && opts.submittedAt > 0
+      ? opts.submittedAt
+      : Date.now();
   return {
     status: 'pending',
     councilId: String(councilId).trim(),
     companyId: String(companyId).trim(),
-    submittedAt: Date.now(),
+    submittedAt,
     source: 'driver_complete',
     isTotalMobility: true,
     tmCardNumber: tmDetails.tmCardNumber,

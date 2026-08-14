@@ -18,6 +18,7 @@ import {
 } from '@/lib/hailAddressResolve';
 import { catchUpJobStagesOnDispatch } from '@/lib/jobServerSync';
 import { pickTmFieldsFromPayload } from '@/lib/tmPaymentPersist';
+import { stepTimesToClosedMirrors } from '@/lib/closedJobSync';
 import {
   GEOCODE_TIMEOUT_MS,
   isRetryableStageFlushError,
@@ -210,6 +211,14 @@ async function flushTerminalEvent(args: {
       ...(accPoNo ? { accPoNo, AccPoNo: accPoNo } : {}),
     };
     const tmFields = pickTmFieldsFromPayload(payload, { remainderPaymentType: paymentType });
+    const stepTimeMirrors =
+      stepTimes && typeof stepTimes === 'object'
+        ? stepTimesToClosedMirrors(stepTimes as import('@/types').ActiveJob['stepTimes'])
+        : {};
+    const jobCompleteIso =
+      asString(payload.JobCompleteTime) ||
+      asString(stepTimeMirrors.JobCompleteTime) ||
+      undefined;
     await completeJobPayment({
       jobId,
       bookingId: jobId,
@@ -255,6 +264,8 @@ async function flushTerminalEvent(args: {
         finalDropAddress,
         driverComments,
         stepTimes,
+        ...stepTimeMirrors,
+        ...(jobCompleteIso ? { JobCompleteTime: jobCompleteIso } : {}),
         fareBreakdown,
         FareBreakdown: fareBreakdown,
         VehicleType: vehicleType,

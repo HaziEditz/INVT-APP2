@@ -1,6 +1,24 @@
 import { firstNonEmptyString } from './jobAddressFields.ts';
 import type { ActiveJob, PaymentExtras, TmPaymentDetails } from '../types/index.ts';
 
+/** Prefer confirm-time / stepTimes complete over flush clock. */
+export function resolveClosedJobCompletedAtMs(
+  job: { stepTimes?: ActiveJob['stepTimes']; completedAt?: number },
+  explicitMs?: number | null,
+): number {
+  const candidates = [
+    explicitMs,
+    job.stepTimes?.completeAt,
+    job.stepTimes?.hailEndedAt,
+    job.completedAt,
+  ];
+  for (const raw of candidates) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n;
+  }
+  return Date.now();
+}
+
 /** Flatten stepTimes into Closed Jobs timeline top-level keys. */
 export function stepTimesToClosedMirrors(
   stepTimes: ActiveJob['stepTimes'] | undefined,
@@ -115,6 +133,8 @@ export function closedJobFieldsForJournal(job: ActiveJob): Record<string, unknow
     type: f.type,
     source: f.source,
     stepTimes: f.stepTimes,
+    // Preserve confirm/end-trip time through offline journal flush (not upload clock).
+    ...(f.stepTimes ? stepTimesToClosedMirrors(f.stepTimes) : {}),
     clientTripId: f.clientTripId,
     meterSnapshot: job.meterSnapshot,
     distanceKm: job.distanceKm,

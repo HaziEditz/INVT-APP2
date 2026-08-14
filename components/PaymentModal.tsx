@@ -13,6 +13,8 @@ import type { CardScanFields } from '@/lib/cardOcrParse';
 import {
   buildTmHoistEntries,
   calcTmPaymentBreakdown,
+  isTmConfigReadyForConfirm,
+  loadCachedTmConfig,
   loadTmConfig,
   resolvePrimaryTmCard,
   tmConfigConfirmBlockReason,
@@ -420,15 +422,27 @@ export function PaymentModal() {
       return;
     }
     let cancelled = false;
-    setTmConfig(null);
+    const companyId = driver.companyId;
+    // Cache-first: unblock Confirm immediately when a valid cached config exists.
+    // Never clear a ready config while a background refresh is in flight.
     setTmConfigLoading(true);
-    void loadTmConfig(driver.companyId)
-      .then((cfg) => {
-        if (!cancelled) setTmConfig(cfg);
-      })
-      .finally(() => {
+    void (async () => {
+      try {
+        const cached = await loadCachedTmConfig(companyId).catch(() => null);
+        if (cancelled) return;
+        if (cached && isTmConfigReadyForConfirm(cached)) {
+          setTmConfig(cached);
+          setTmConfigLoading(false);
+        }
+        const cfg = await loadTmConfig(companyId);
+        if (cancelled) return;
+        setTmConfig(cfg);
+      } catch (err) {
+        console.warn('[PaymentModal] loadTmConfig failed:', err);
+      } finally {
         if (!cancelled) setTmConfigLoading(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
