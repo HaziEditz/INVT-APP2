@@ -51,7 +51,7 @@ export default function LoginScreen() {
   const handleSignIn = async () => {
     const trimmed = loginId.trim();
     if (!trimmed || !password) {
-      Alert.alert('Missing fields', 'Enter your email or Driver ID (e.g. D001) and password.');
+      Alert.alert('Missing fields', 'Enter your email or full Driver ID (e.g. D001) and password.');
       return;
     }
 
@@ -90,7 +90,7 @@ export default function LoginScreen() {
           <View style={sharedStyles.card}>
             <Input
               label="Email or Driver ID"
-              placeholder="D001 or you@email.com"
+              placeholder="D001 or you@company.com"
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="default"

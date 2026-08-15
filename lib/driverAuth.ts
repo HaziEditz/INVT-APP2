@@ -6,13 +6,15 @@ import {
   extractDriverIdFromRecord,
   looksLikeCompanyId,
   looksLikeFirebaseAuthUid,
-  normalizeDriverId,
+  parseDriverIdForLogin,
 } from '@/lib/driverIdNormalize';
 import { getData, STORAGE_KEYS } from '@/lib/storage';
 import { DriverProfile } from '@/types';
 
 export {
+  DRIVER_ID_FORMAT_ERROR,
   normalizeDriverId,
+  parseDriverIdForLogin,
   driverIdsMatch,
   extractDriverIdFromRecord,
 } from '@/lib/driverIdNormalize';
@@ -88,12 +90,8 @@ export async function resolveEmailForLogin(loginId: string): Promise<string> {
   const trimmed = loginId.trim();
   if (trimmed.includes('@')) return trimmed.toLowerCase();
 
-  const idNorm = normalizeDriverId(trimmed);
-  if (!/^D\d+$/i.test(idNorm)) {
-    throw new Error(
-      `Enter a Driver ID like D001 (or email). "${trimmed}" is not a recognized Driver ID.`,
-    );
-  }
+  // Require owner-panel format (D001). Reject bare 001 / 1 before any lookup.
+  const idNorm = parseDriverIdForLogin(trimmed);
 
   let liveError: unknown = null;
   try {
