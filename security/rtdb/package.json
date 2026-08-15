@@ -1,0 +1,13 @@
+{
+  "name": "bookawaka-rtdb-rules-harness",
+  "private": true,
+  "description": "Isolated Firebase RTDB rules emulator harness. Keeps firebase@10 + @firebase/rules-unit-testing out of the driver app's firebase@11 tree.",
+  "scripts": {
+    "test:deny-matrix": "node ./node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --project demo-bookawaka-phase0 --config firebase.json --only database \"node --test ./rtdb-deny-matrix.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "^10.14.1",
+    "firebase-tools": "13.35.1"
+  }
+}

@@ -1,0 +1,539 @@
+{
+  "rules": {
+    "Passengerjobs": {
+      "$uid": {
+        ".validate": "$uid!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "sosHistory": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null && root.child('adminAccess').child($companyId).child(auth.uid).exists()",
+        ".write": false,
+        "$incidentId": {
+          ".validate": "$incidentId!='null'",
+          ".read": "auth != null && root.child('adminAccess').child($companyId).child(auth.uid).exists()",
+          ".write": false
+        }
+      }
+    },
+    "Emergency": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$Companyid": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$driverid": {
+          ".validate": "$driverid!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "offered": {
+      ".read": true,
+      ".write": true,
+      "$cartype": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "chat": {
+      "$driverid": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "notification": {
+      "$driverid": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "notificationSos": {
+      "$driverid": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "lastshifttime": {
+      "$driverid": {
+        ".validate": "$driverid!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "autodisp": {
+      "$driverid": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "JobDispatching": {
+      "$driverid": {
+        ".validate": "$driverid!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "DriverEngaged": {
+      "$driverid": {
+        ".validate": "$driverid!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "passengernumber": {
+      "$uid": {
+        ".validate": "$uid!='null'",
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid"
+      }
+    },
+    "links": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "smscode": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "appversion": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "TotalmobileDiscount": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "online": {
+      ".read": true,
+      ".write": "auth != null",
+      "$companyid": {
+        ".validate": "$companyid!='null'",
+        "$vehicleid": {
+          ".validate": "$vehicleid!='null'",
+          ".write": "auth != null",
+          "current": {
+            ".read": true,
+            ".write": "auth != null"
+          },
+          "zone": {
+            ".read": true,
+            ".write": "auth != null"
+          },
+          "$uid": {
+            ".validate": "$uid!='null'",
+            ".write": "$uid === auth.uid"
+          }
+        }
+      }
+    },
+    "joback": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$bookingid": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$driverid": {
+          ".validate": "$driverid!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "jobs": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$companyid": {
+        ".validate": "$companyid!='null'",
+        "$vehicleid": {
+          ".validate": "$vehicleid!='null'",
+          "$uid": {
+            ".validate": "$uid!='null'"
+          }
+        }
+      }
+    },
+    "collecteddata": {
+      "$uid": {
+        ".validate": "$uid!='null'",
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid"
+      }
+    },
+    "closedJobs": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null && (root.child('drivers').child($companyId).child(auth.uid).exists() || root.child('adminAccess').child($companyId).child(auth.uid).exists())",
+        ".write": "auth != null && (root.child('drivers').child($companyId).child(auth.uid).exists() || root.child('adminAccess').child($companyId).child(auth.uid).exists())",
+        ".indexOn": ["bookingId", "jobId", "completedAt"]
+      }
+    },
+    "companies": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$companyid": {
+        ".validate": "$companyid!='null'",
+        "onlineAgents": {
+          "$userid": {
+            ".validate": "$userid!='null'",
+            ".read": "auth != null",
+            ".write": "auth != null"
+          }
+        }
+      }
+    },
+    "locationConfig": {
+      ".read": true,
+      ".write": true
+    },
+    "chat_history": {
+      "$chatId": {
+        ".validate": "$chatId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$messageId": {
+          ".validate": "$messageId!='null'",
+          "senderId": {},
+          "receiverId": {},
+          "text": {},
+          "timestamp": {},
+          "$other": {}
+        }
+      }
+    },
+    "tariffZones": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "tariffs": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null && root.child('drivers').child(auth.uid).exists()",
+        ".write": "auth != null"
+      }
+    },
+    "zones": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "drivers": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "vehicles": {
+      ".read": true,
+      ".write": "auth != null"
+    },
+    "allbookings": {
+      "$companyId": {
+        ".read": "auth != null && (root.child('adminAccess').child($companyId).child(auth.uid).exists() || root.child('drivers').child(auth.uid).exists())",
+        "$bookingId": {
+          ".read": "auth != null && (root.child('adminAccess').child($companyId).child(auth.uid).exists() || (!data.exists() || data.child('DriverId').val() == root.child('drivers').child(auth.uid).child('id').val() || data.child('driverId').val() == root.child('drivers').child(auth.uid).child('id').val() || data.child('driverid').val() == root.child('drivers').child(auth.uid).child('id').val() || data.child('AssignedDriverId').val() == root.child('drivers').child(auth.uid).child('id').val() || data.child('assignedDriverId').val() == root.child('drivers').child(auth.uid).child('id').val() || data.child('PlayerId').val() == auth.uid))",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "bookingEvents": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$bookingId": {
+          ".validate": "$bookingId!='null'",
+          ".read": "auth != null",
+          ".write": false,
+          ".indexOn": ["seq", "timestamp"]
+        }
+      }
+    },
+    "dispatchConsole": {
+      "$companyId": {
+        ".read": "auth != null",
+        ".write": false
+      }
+    },
+    "pendingjobs": {
+      "$companyId": {
+        ".read": true,
+        "$bookingId": {
+          ".read": true,
+          ".write": "auth != null"
+        }
+      }
+    },
+    "bookings": {
+      "$companyId": {
+        ".read": "auth != null",
+        "$bookingId": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "ratings": {
+      "$companyId": {
+        "$bookingId": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "completedJobs": {
+      "$companyId": {
+        ".indexOn": ["bookingId", "driverId"],
+        ".read": "auth != null && (root.child('drivers').child($companyId).child(auth.uid).exists() || root.child('adminAccess').child($companyId).child(auth.uid).exists())",
+        "$bookingId": {
+          ".read": "auth != null && (root.child('adminAccess').child($companyId).child(auth.uid).exists() || (root.child('drivers').child($companyId).child(auth.uid).exists() && (!data.exists() || data.child('driverId').val() == root.child('drivers').child($companyId).child(auth.uid).child('id').val() || data.child('DriverId').val() == root.child('drivers').child($companyId).child(auth.uid).child('id').val() || data.child('driverid').val() == root.child('drivers').child($companyId).child(auth.uid).child('id').val() || data.child('PlayerId').val() == auth.uid)))",
+          ".write": "auth != null && (root.child('drivers').child($companyId).child(auth.uid).exists() || root.child('adminAccess').child($companyId).child(auth.uid).exists())"
+        }
+      }
+    },
+    "jobDetails": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$bookingId": {
+          ".validate": "$bookingId!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "rideStatus": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$bookingId": {
+          ".validate": "$bookingId!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "driverEarnings": {
+      "taxi": {
+        "$companyId": {
+          ".validate": "$companyId!='null'",
+          "$driverId": {
+            ".validate": "$driverId!='null'",
+            ".read": "auth != null",
+            ".write": "auth != null"
+          }
+        }
+      }
+    },
+    "shiftLogs": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$uid": {
+          ".validate": "$uid!='null'",
+          ".read": "auth != null && auth.uid === $uid && root.child('drivers').child(auth.uid).exists()",
+          ".write": "auth != null && auth.uid === $uid && root.child('drivers').child(auth.uid).exists()",
+          ".indexOn": ["shiftEndAt"],
+          "$logId": {
+            ".validate": "$logId!='null'",
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && auth.uid === $uid"
+          }
+        }
+      }
+    },
+    "superClients": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "companySettings": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null && (root.child('drivers').child($companyId).child(auth.uid).exists() || root.child('adminAccess').child($companyId).child(auth.uid).exists())",
+        ".write": "auth != null && root.child('adminAccess').child($companyId).child(auth.uid).exists()"
+      }
+    },
+    "tmTripStatus": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$bookingId": {
+          ".validate": "$bookingId!='null'",
+          ".read": "auth != null && (root.child('drivers').child($companyId).child(auth.uid).exists() || root.child('adminAccess').child($companyId).child(auth.uid).exists())",
+          ".write": "auth != null && (root.child('drivers').child($companyId).child(auth.uid).exists() || root.child('adminAccess').child($companyId).child(auth.uid).exists())"
+        }
+      }
+    },
+    "chatMessages": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$conversationId": {
+          ".validate": "$conversationId!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "towRequests": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "driverRatings": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$bookingId": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "freightOrders": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$bookingId": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "foodOrders": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "driverMsg": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$msgId": {
+          ".validate": "$msgId!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "suspended": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        "$vehicleId": {
+          ".validate": "$vehicleId!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "notifications": {
+      "$companyId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "adminAccess": {
+      "$companyId": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid"
+        }
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "driverRegistrations": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "rentalTaxiRequests": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$requestId": {
+        ".validate": "$requestId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "onboardRequests": {
+      "$refId": {
+        ".validate": "$refId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "accClients": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "driverContactLog": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        "$bookingId": {
+          ".validate": "$bookingId!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "businessAccounts": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "purchaseOrders": {
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "driverQueue": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$driverId": {
+          ".validate": "$driverId!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null",
+          "current": {
+            ".validate": "!newData.exists() || newData.hasChildren(['jobId'])"
+          },
+          "queued": {
+            ".validate": "!newData.exists() || newData.hasChildren(['jobId','acceptedAt'])"
+          }
+        }
+      }
+    },
+    "activeDispatchers": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$companyId": {
+        ".validate": "$companyId!='null'",
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$sessionId": {
+          ".validate": "$sessionId!='null'",
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    }
+  }
+}
