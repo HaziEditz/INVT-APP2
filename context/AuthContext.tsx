@@ -5,22 +5,9 @@ import type { DataSnapshot } from 'firebase/database';
 import { get, ref } from 'firebase/database';
 import { getAuthInstance, getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
 import { getData, removeData, storeData, STORAGE_KEYS } from '@/lib/storage';
+import { extractDriverIdFromRecord, normalizeDriverId } from '@/lib/driverIdNormalize';
 import { extractAssignedVehicleIds } from '@/lib/vehicles';
 import { DriverProfile } from '@/types';
-
-function normalizeDriverId(id: string) {
-  const s = id.trim();
-  const m = s.match(/^([dD])(\d+)$/i);
-  if (m) return 'D' + String(parseInt(m[2], 10)).padStart(3, '0');
-  return s;
-}
-
-function extractDriverIdFromRecord(fb: Record<string, unknown> | null | undefined): string {
-  if (!fb || typeof fb !== 'object') return '';
-  return normalizeDriverId(
-    String(fb.id ?? fb.driverId ?? fb.DriverId ?? fb.dispatcherId ?? ''),
-  );
-}
 
 function buildProfileFromFirebase(
   uid: string,
@@ -122,11 +109,15 @@ async function loadDriverProfile(
 }
 
 async function resolveCompanyId(uid: string, displayName: string | null): Promise<string> {
-  const fromDisplay = displayName?.trim();
-  if (fromDisplay) return fromDisplay;
+  // Auth displayName is set to companyId by owner ensure-driver-auth — but only trust
+  // it when it looks like a company id (digits). Never treat a person's name as companyId.
+  const fromDisplay = displayName?.trim() || '';
+  if (/^\d{4,}$/.test(fromDisplay)) return fromDisplay;
 
   const saved = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
-  if (saved?.uid === uid && saved.companyId) return saved.companyId;
+  if (saved?.uid === uid && saved.companyId && /^\d{4,}$/.test(String(saved.companyId))) {
+    return saved.companyId;
+  }
 
   try {
     const database = getDatabaseInstance();

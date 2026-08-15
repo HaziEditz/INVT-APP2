@@ -90,8 +90,10 @@ export default function LoginScreen() {
           <View style={sharedStyles.card}>
             <Input
               label="Email or Driver ID"
-              placeholder="you@email.com or D001"
+              placeholder="D001 or you@email.com"
               autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="default"
               value={loginId}
               onChangeText={setLoginId}
               onSubmitEditing={handleSignIn}

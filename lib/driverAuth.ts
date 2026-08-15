@@ -1,29 +1,21 @@
 import type { DataSnapshot } from 'firebase/database';
 import { get, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
+import {
+  driverIdsMatch,
+  extractDriverIdFromRecord,
+  looksLikeCompanyId,
+  looksLikeFirebaseAuthUid,
+  normalizeDriverId,
+} from '@/lib/driverIdNormalize';
 import { getData, STORAGE_KEYS } from '@/lib/storage';
 import { DriverProfile } from '@/types';
 
-export function normalizeDriverId(id: string): string {
-  const s = id.trim();
-  const m = s.match(/^([dD])(\d+)$/i);
-  if (m) return 'D' + String(parseInt(m[2], 10)).padStart(3, '0');
-  return s;
-}
-
-export function driverIdsMatch(a: string | undefined | null, b: string | undefined | null): boolean {
-  const na = normalizeDriverId(String(a ?? ''));
-  const nb = normalizeDriverId(String(b ?? ''));
-  if (!na || !nb) return false;
-  return na.toLowerCase() === nb.toLowerCase();
-}
-
-function extractDriverIdFromRecord(fb: Record<string, unknown> | null | undefined): string {
-  if (!fb || typeof fb !== 'object') return '';
-  return normalizeDriverId(
-    String(fb.id ?? fb.driverId ?? fb.DriverId ?? fb.dispatcherId ?? ''),
-  );
-}
+export {
+  normalizeDriverId,
+  driverIdsMatch,
+  extractDriverIdFromRecord,
+} from '@/lib/driverIdNormalize';
 
 function forEachChild(snap: DataSnapshot, fn: (child: DataSnapshot) => void): void {
   if (!snap.exists()) return;
@@ -36,44 +28,103 @@ function forEachChild(snap: DataSnapshot, fn: (child: DataSnapshot) => void): vo
   });
 }
 
-/** Resolve D001-style login to Firebase Auth email via drivers tree scan. */
+type EmailCandidate = {
+  email: string;
+  companyId: string;
+  recordKey: string;
+  score: number;
+};
+
+function scoreCandidate(companyId: string, recordKey: string, email: string): number {
+  let score = 0;
+  if (email.includes('@')) score += 10;
+  if (looksLikeCompanyId(companyId)) score += 5;
+  if (looksLikeFirebaseAuthUid(recordKey)) score += 8;
+  if (recordKey.startsWith('-')) score -= 2;
+  return score;
+}
+
+function collectCandidatesFromDriversTree(
+  driversSnap: DataSnapshot,
+  idNorm: string,
+): EmailCandidate[] {
+  const out: EmailCandidate[] = [];
+
+  const pushHit = (companyId: string, recordKey: string, d: Record<string, unknown>) => {
+    if (!driverIdsMatch(extractDriverIdFromRecord(d), idNorm)) return;
+    const email = String(d.email ?? d.Email ?? '').trim();
+    if (!email.includes('@')) return;
+    out.push({
+      email,
+      companyId,
+      recordKey,
+      score: scoreCandidate(companyId, recordKey, email),
+    });
+  };
+
+  forEachChild(driversSnap, (levelOne) => {
+    const k1 = levelOne.key || '';
+    forEachChild(levelOne, (levelTwo) => {
+      const d = levelTwo.val() as Record<string, unknown> | null;
+      if (!d || typeof d !== 'object') return;
+      pushHit(k1, levelTwo.key || '', d);
+    });
+    const d = levelOne.val() as Record<string, unknown> | null;
+    if (d && typeof d === 'object') {
+      pushHit(String(d.companyId ?? ''), k1, d);
+    }
+  });
+
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
+/**
+ * Resolve D001-style login to Firebase Auth email via drivers tree scan.
+ * Prefers live RTDB over cached session email (stale cache caused wrong-email
+ * sign-in on shared devices). Cache is offline fallback only.
+ */
 export async function resolveEmailForLogin(loginId: string): Promise<string> {
   const trimmed = loginId.trim();
   if (trimmed.includes('@')) return trimmed.toLowerCase();
 
   const idNorm = normalizeDriverId(trimmed);
-  const cached = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
-  if (cached?.id && driverIdsMatch(cached.id, idNorm) && cached.email?.includes('@')) {
-    return cached.email.toLowerCase();
+  if (!/^D\d+$/i.test(idNorm)) {
+    throw new Error(
+      `Enter a Driver ID like D001 (or email). "${trimmed}" is not a recognized Driver ID.`,
+    );
   }
 
-  const database = getDatabaseInstance();
-  const driversSnap = await get(ref(database, 'drivers'));
-  if (!driversSnap.exists()) {
-    throw new Error(`Driver ID "${idNorm}" not found. Try your email or contact your fleet administrator.`);
-  }
-
-  let foundEmail = '';
-  forEachChild(driversSnap, (levelOne) => {
-    if (foundEmail) return;
-    forEachChild(levelOne, (levelTwo) => {
-      if (foundEmail) return;
-      const d = levelTwo.val() as Record<string, unknown> | null;
-      if (!d || typeof d !== 'object') return;
-      if (driverIdsMatch(extractDriverIdFromRecord(d), idNorm)) {
-        const email = String(d.email ?? '').trim();
-        if (email.includes('@')) foundEmail = email;
-      }
-    });
-    if (!foundEmail) {
-      const d = levelOne.val() as Record<string, unknown> | null;
-      if (d && typeof d === 'object' && driverIdsMatch(extractDriverIdFromRecord(d), idNorm)) {
-        const email = String(d.email ?? '').trim();
-        if (email.includes('@')) foundEmail = email;
+  let liveError: unknown = null;
+  try {
+    const database = getDatabaseInstance();
+    const driversSnap = await get(ref(database, 'drivers'));
+    if (driversSnap.exists()) {
+      const candidates = collectCandidatesFromDriversTree(driversSnap, idNorm);
+      if (candidates.length > 0) {
+        return candidates[0].email.toLowerCase();
       }
     }
-  });
+  } catch (err) {
+    liveError = err;
+    console.warn('[driverAuth] live drivers lookup failed:', err);
+  }
 
-  if (foundEmail) return foundEmail.toLowerCase();
-  throw new Error(`Driver ID "${idNorm}" not found. Log in with your email once, or contact your administrator.`);
+  try {
+    const cached = await getData<DriverProfile>(STORAGE_KEYS.driverSession);
+    if (cached?.id && driverIdsMatch(cached.id, idNorm) && cached.email?.includes('@')) {
+      return cached.email.toLowerCase();
+    }
+  } catch {
+    /* ignore */
+  }
+
+  if (liveError) {
+    throw new Error(
+      `Could not look up Driver ID "${idNorm}" (network error). Try your email, or check connection.`,
+    );
+  }
+  throw new Error(
+    `Driver ID "${idNorm}" not found. Log in with your email once, or contact your administrator.`,
+  );
 }
