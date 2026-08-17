@@ -31,6 +31,23 @@ test('TapToPay uses server PI via retrievePaymentIntent (no dual create)', () =>
   assert.match(sheet, /recordTapLedger failed \(continuing to close trip\)/);
 });
 
+test('TapToPay tears down reader before rediscover and after decline/fail', () => {
+  const sheet = readFileSync(join(root, 'components/TapToPaySheet.tsx'), 'utf8');
+  assert.match(sheet, /async function teardownTapReader/);
+  assert.match(sheet, /cancelCollectPaymentMethod/);
+  assert.match(sheet, /disconnectReader/);
+  assert.match(sheet, /Resetting reader/);
+  // teardown before discover, and on catch after fail (decline path)
+  const startIdx = sheet.indexOf('const start = useCallback');
+  const startFn = sheet.slice(startIdx, sheet.indexOf('}, [amountCents, bookingId'));
+  assert.match(startFn, /await teardownTapReader\(terminal\)/);
+  assert.ok(
+    (startFn.match(/await teardownTapReader\(terminal\)/g) || []).length >= 2,
+    'teardown must run before discover and after failure/success',
+  );
+  assert.match(sheet, /handleClose/);
+});
+
 test('eas.json does not enable simulated Tap to Pay', () => {
   const eas = readFileSync(join(root, 'eas.json'), 'utf8');
   assert.doesNotMatch(eas, /EXPO_PUBLIC_STRIPE_TERMINAL_SIMULATED["']?\s*:\s*["']1["']/);

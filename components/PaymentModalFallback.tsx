@@ -11,43 +11,39 @@ type Props = {
 
 /**
  * Fallback when PaymentModal fails to load / crashes.
- * Still must not silently abandon an incomplete job via Back.
+ * Must not dismiss paymentJob — that abandons an incomplete Active job.
  */
 export function PaymentModalFallback({ errorMessage, onRetry }: Props) {
-  const { dismissPayment, paymentJob } = useDriver();
+  const { paymentJob } = useDriver();
 
-  const requestLeavePayment = () => {
+  const stayOnPayment = () => {
     Alert.alert(
-      'Payment not complete',
-      'The payment screen hit an error, but this trip is still incomplete. Leave anyway?',
-      [
-        { text: 'Stay', style: 'cancel' },
-        { text: 'Leave incomplete', style: 'destructive', onPress: () => dismissPayment() },
-      ],
+      'Payment required',
+      'This trip is not finished. Tap Try again to reload the payment screen, or choose another payment method once it loads.',
+      [{ text: 'OK', style: 'cancel' }],
     );
   };
 
   useEffect(() => {
     if (!paymentJob) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      requestLeavePayment();
+      stayOnPayment();
       return true;
     });
     return () => sub.remove();
-  }, [paymentJob, dismissPayment]);
+  }, [paymentJob]);
 
   return (
     <Modal
       visible={!!paymentJob}
       animationType="slide"
       presentationStyle="fullScreen"
-      onRequestClose={requestLeavePayment}
+      onRequestClose={stayOnPayment}
     >
       <View style={styles.box}>
         <Text style={styles.title}>Payment screen error</Text>
         <Text style={styles.msg}>{errorMessage}</Text>
         <Button title="Try again" onPress={onRetry} />
-        <Button title="Leave incomplete" variant="secondary" onPress={requestLeavePayment} />
       </View>
     </Modal>
   );

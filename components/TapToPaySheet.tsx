@@ -42,6 +42,33 @@ function tryLoadStripeTerminal(): {
   }
 }
 
+/**
+ * Stripe Terminal requires disconnect before a new discoverReaders() when a
+ * prior attempt left the reader connected (e.g. card declined mid-collect).
+ * Best-effort — never throw into the payment UI.
+ */
+async function teardownTapReader(terminal: any): Promise<void> {
+  if (!terminal) return;
+  try {
+    if (typeof terminal.cancelCollectPaymentMethod === 'function') {
+      await terminal.cancelCollectPaymentMethod();
+    }
+  } catch {
+    /* ignore — may not be collecting */
+  }
+  try {
+    const connected = terminal.connectedReader;
+    if (connected && typeof terminal.disconnectReader === 'function') {
+      await terminal.disconnectReader();
+    } else if (typeof terminal.disconnectReader === 'function') {
+      // Still attempt disconnect — SDK may hold connection without exposing reader yet.
+      await terminal.disconnectReader();
+    }
+  } catch {
+    /* ignore — already disconnected */
+  }
+}
+
 function TapToPayBody({
   amountCents,
   bookingId,
@@ -54,6 +81,16 @@ function TapToPayBody({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [error, setError] = useState<string | null>(null);
+
+  const handleClose = useCallback(async () => {
+    setBusy(true);
+    try {
+      await teardownTapReader(terminal);
+    } finally {
+      setBusy(false);
+      onCancel();
+    }
+  }, [onCancel, terminal]);
 
   const start = useCallback(async () => {
     if (Platform.OS !== 'android') {
@@ -76,6 +113,10 @@ function TapToPayBody({
     setBusy(true);
     setError(null);
     try {
+      // Critical for decline→retry: prior connect must be cleared first.
+      setStatus('Resetting reader…');
+      await teardownTapReader(terminal);
+
       setStatus('Preparing payment…');
       const intent = await createTapPaymentIntent({
         amountCents,
@@ -164,10 +205,13 @@ function TapToPayBody({
       }
 
       setStatus('Paid');
+      // Disconnect before handing control back so a later trip can discover cleanly.
+      await teardownTapReader(terminal);
       onPaid({ paymentIntentId, amountCents: intent.amountCents });
     } catch (e: any) {
       setError(String(e?.message || e));
       setStatus('Failed');
+      await teardownTapReader(terminal);
     } finally {
       setBusy(false);
     }
@@ -177,7 +221,7 @@ function TapToPayBody({
     <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12 }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Tap to Pay</Text>
-        <Pressable onPress={onCancel} hitSlop={12}>
+        <Pressable onPress={() => void handleClose()} hitSlop={12} disabled={busy}>
           <Text style={styles.cancel}>Cancel</Text>
         </Pressable>
       </View>
@@ -193,7 +237,7 @@ function TapToPayBody({
         {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Start tap</Text>}
       </Pressable>
       {error ? (
-        <Pressable style={styles.secondaryBtn} onPress={onCancel} disabled={busy}>
+        <Pressable style={styles.secondaryBtn} onPress={() => void handleClose()} disabled={busy}>
           <Text style={styles.secondaryBtnText}>Use another payment method</Text>
         </Pressable>
       ) : null}

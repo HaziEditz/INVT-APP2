@@ -58,15 +58,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-/** Payment is mandatory — never leave silently with the job incomplete. */
-function confirmLeaveIncompletePayment(onConfirmLeave: () => void) {
+/** Payment is mandatory — back must not abandon an incomplete job. */
+function remindPaymentRequired() {
   Alert.alert(
-    'Payment not complete',
-    'This trip is not finished. Leave payment anyway? The job will stay incomplete until you collect payment.',
-    [
-      { text: 'Stay on payment', style: 'cancel' },
-      { text: 'Leave incomplete', style: 'destructive', onPress: onConfirmLeave },
-    ],
+    'Payment required',
+    'Finish collecting payment to complete this trip. You can change payment method on this screen, but you cannot leave until the job is paid.',
+    [{ text: 'OK', style: 'cancel' }],
   );
 }
 
@@ -172,7 +169,7 @@ function Dropdown<T extends string>({
 export function PaymentModal() {
   const insets = useSafeAreaInsets();
   const { driver } = useAuth();
-  const { paymentJob, finalizePayment, activeVehicle, selectedTariff, dismissPayment } = useDriver();
+  const { paymentJob, finalizePayment, activeVehicle, selectedTariff } = useDriver();
 
   const [paymentType, setPaymentType] = useState<DriverPaymentType>('Cash');
   /** main → tm details → tmConfirm (explicit confirm before submit). */
@@ -234,7 +231,7 @@ export function PaymentModal() {
   tmConfigRef.current = tmConfig;
 
   const requestLeavePayment = () => {
-    confirmLeaveIncompletePayment(() => dismissPayment());
+    remindPaymentRequired();
   };
 
   useEffect(() => {
@@ -250,10 +247,10 @@ export function PaymentModal() {
         return true;
       }
       requestLeavePayment();
-      return true; // consume — do not pop underlying navigation
+      return true; // consume — never pop away from incomplete payment
     });
     return () => sub.remove();
-  }, [dismissPayment, cardScanOpen, tapToPayOpen, paymentStep]);
+  }, [cardScanOpen, tapToPayOpen, paymentStep]);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((state) => {
@@ -1774,7 +1771,7 @@ export function PaymentModal() {
                 {paymentJob.pickup}
               </Text>
               <Pressable onPress={requestLeavePayment} style={styles.backLink}>
-                <Text style={styles.backLinkText}>← Back to trip</Text>
+                <Text style={styles.backLinkText}>Payment required to finish trip</Text>
               </Pressable>
 
               <View style={styles.card}>

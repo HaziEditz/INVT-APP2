@@ -1,6 +1,5 @@
 /**
- * Payment back must not silently abandon an incomplete job.
- * Source-level guardrails for PaymentModal + Fallback.
+ * Payment back must not abandon an incomplete job — no Leave incomplete exit.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -12,27 +11,26 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const modalSrc = readFileSync(join(root, 'components/PaymentModal.tsx'), 'utf8');
 const fallbackSrc = readFileSync(join(root, 'components/PaymentModalFallback.tsx'), 'utf8');
 
-test('PaymentModal Back to trip requires incomplete-payment confirmation', () => {
-  assert.match(modalSrc, /confirmLeaveIncompletePayment/);
-  assert.match(modalSrc, /Payment not complete/);
-  assert.match(modalSrc, /onPress=\{requestLeavePayment\}/);
-  assert.doesNotMatch(
-    modalSrc,
-    /<Pressable onPress=\{dismissPayment\} style=\{styles\.backLink\}>/,
-  );
+test('PaymentModal has no Leave incomplete / dismissPayment exit from UI', () => {
+  assert.match(modalSrc, /remindPaymentRequired/);
+  assert.match(modalSrc, /Payment required/);
+  assert.doesNotMatch(modalSrc, /Leave incomplete/);
+  assert.doesNotMatch(modalSrc, /confirmLeaveIncompletePayment/);
+  assert.doesNotMatch(modalSrc, /dismissPayment/);
+  assert.doesNotMatch(modalSrc, /← Back to trip/);
 });
 
-test('PaymentModal consumes Android hardware back (with nested-overlay carve-out)', () => {
+test('PaymentModal consumes Android hardware back without dismissing payment', () => {
   assert.match(modalSrc, /BackHandler\.addEventListener\('hardwareBackPress'/);
   assert.match(modalSrc, /onRequestClose=\{/);
   assert.match(modalSrc, /if \(cardScanOpen \|\| tapToPayOpen\) return false/);
   assert.match(modalSrc, /return true; \/\/ consume/);
 });
 
-test('PaymentModalFallback cannot leave incomplete payment without confirm', () => {
-  assert.match(fallbackSrc, /Payment not complete/);
-  assert.match(fallbackSrc, /Leave incomplete/);
+test('PaymentModalFallback only offers Try again — never dismissPayment', () => {
+  assert.match(fallbackSrc, /Try again/);
+  assert.doesNotMatch(fallbackSrc, /Leave incomplete/);
+  assert.doesNotMatch(fallbackSrc, /dismissPayment/);
   assert.match(fallbackSrc, /BackHandler\.addEventListener\('hardwareBackPress'/);
-  assert.match(fallbackSrc, /onRequestClose=\{requestLeavePayment\}/);
-  assert.doesNotMatch(fallbackSrc, /onPress=\{dismissPayment\}/);
+  assert.match(fallbackSrc, /onRequestClose=\{stayOnPayment\}/);
 });
