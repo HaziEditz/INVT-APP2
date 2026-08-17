@@ -40,6 +40,7 @@ import { shouldBumpNetworkResume } from '@/lib/networkResume';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   findNodeHandle,
   Keyboard,
   KeyboardAvoidingView,
@@ -56,6 +57,18 @@ import {
   type TextInputFocusEventData,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+/** Payment is mandatory — never leave silently with the job incomplete. */
+function confirmLeaveIncompletePayment(onConfirmLeave: () => void) {
+  Alert.alert(
+    'Payment not complete',
+    'This trip is not finished. Leave payment anyway? The job will stay incomplete until you collect payment.',
+    [
+      { text: 'Stay on payment', style: 'cancel' },
+      { text: 'Leave incomplete', style: 'destructive', onPress: onConfirmLeave },
+    ],
+  );
+}
 
 /** Deferred so Vision Camera / OCR / Terminal stay off PaymentModal's static import graph. */
 function loadCardScanModal(): ComponentType<{
@@ -219,6 +232,28 @@ export function PaymentModal() {
   const [keyboardInset, setKeyboardInset] = useState(0);
 
   tmConfigRef.current = tmConfig;
+
+  const requestLeavePayment = () => {
+    confirmLeaveIncompletePayment(() => dismissPayment());
+  };
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Nested overlays own the back button while open.
+      if (cardScanOpen || tapToPayOpen) return false;
+      if (paymentStep === 'tmConfirm') {
+        setPaymentStep('tm');
+        return true;
+      }
+      if (paymentStep === 'tm') {
+        setPaymentStep('main');
+        return true;
+      }
+      requestLeavePayment();
+      return true; // consume — do not pop underlying navigation
+    });
+    return () => sub.remove();
+  }, [dismissPayment, cardScanOpen, tapToPayOpen, paymentStep]);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((state) => {
@@ -1104,7 +1139,23 @@ export function PaymentModal() {
 
   return (
     <>
-    <Modal visible animationType="slide" presentationStyle="fullScreen">
+    <Modal
+      visible
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={() => {
+        if (cardScanOpen || tapToPayOpen) return;
+        if (paymentStep === 'tmConfirm') {
+          setPaymentStep('tm');
+          return;
+        }
+        if (paymentStep === 'tm') {
+          setPaymentStep('main');
+          return;
+        }
+        requestLeavePayment();
+      }}
+    >
       <KeyboardAvoidingView
         style={styles.screen}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -1722,7 +1773,7 @@ export function PaymentModal() {
               <Text style={styles.pickup} numberOfLines={2}>
                 {paymentJob.pickup}
               </Text>
-              <Pressable onPress={dismissPayment} style={styles.backLink}>
+              <Pressable onPress={requestLeavePayment} style={styles.backLink}>
                 <Text style={styles.backLinkText}>← Back to trip</Text>
               </Pressable>
 
