@@ -6,7 +6,7 @@ import {
   recordTapLedger,
   shouldSimulateTapToPay,
 } from '@/lib/platformPaymentApi';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useRef, useMemo, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -26,13 +26,20 @@ type Props = {
   onPaid: (info: { paymentIntentId: string; amountCents: number }) => void;
 };
 
+type DiscoverWaiter = {
+  resolve: (reader: any) => void;
+  reject: (error: Error) => void;
+};
+
 function tryLoadStripeTerminal(): {
   StripeTerminalProvider: React.ComponentType<{
     children: ReactNode;
     tokenProvider: () => Promise<string>;
     logLevel?: string;
   }>;
-  useStripeTerminal: () => any;
+  useStripeTerminal: (props?: {
+    onUpdateDiscoveredReaders?: (readers: any[]) => void;
+  }) => any;
 } | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -43,12 +50,12 @@ function tryLoadStripeTerminal(): {
 }
 
 /**
- * Stripe Terminal requires disconnect before a new discoverReaders() when a
- * prior attempt left the reader connected (e.g. card declined mid-collect).
- * Best-effort — never throw into the payment UI.
+ * Only tear down when a reader is actually connected.
+ * Calling disconnectReader on a cold start (no connection) can leave Terminal
+ * in a bad state for the first discoverReaders attempt.
  */
 async function teardownTapReader(terminal: any): Promise<void> {
-  if (!terminal) return;
+  if (!terminal?.connectedReader) return;
   try {
     if (typeof terminal.cancelCollectPaymentMethod === 'function') {
       await terminal.cancelCollectPaymentMethod();
@@ -57,16 +64,89 @@ async function teardownTapReader(terminal: any): Promise<void> {
     /* ignore — may not be collecting */
   }
   try {
-    const connected = terminal.connectedReader;
-    if (connected && typeof terminal.disconnectReader === 'function') {
-      await terminal.disconnectReader();
-    } else if (typeof terminal.disconnectReader === 'function') {
-      // Still attempt disconnect — SDK may hold connection without exposing reader yet.
+    if (typeof terminal.disconnectReader === 'function') {
       await terminal.disconnectReader();
     }
   } catch {
     /* ignore — already disconnected */
   }
+}
+
+/**
+ * Stripe documents that discoverReaders returns only { error? }; readers arrive
+ * via onUpdateDiscoveredReaders. Wait on that callback instead of reading the
+ * discoveredReaders hook value right after await (racy / stale).
+ */
+function discoverTapToPayReader(
+  terminal: any,
+  waiterRef: { current: DiscoverWaiter | null },
+  opts: { simulated: boolean; timeoutMs?: number },
+): Promise<any> {
+  const timeoutMs = opts.timeoutMs ?? 20_000;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    /** Set as soon as the callback delivers a reader — before cancelDiscovering settles. */
+    let gotReader = false;
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      waiterRef.current = null;
+      fn();
+    };
+
+    const timer = setTimeout(() => {
+      console.warn('[TapToPay] discover timed out waiting for onUpdateDiscoveredReaders');
+      void terminal.cancelDiscovering?.();
+      finish(() => reject(new Error('No Tap to Pay reader on this device')));
+    }, timeoutMs);
+
+    waiterRef.current = {
+      resolve: (reader) => {
+        if (settled || gotReader) return;
+        gotReader = true;
+        clearTimeout(timer);
+        waiterRef.current = null;
+        console.log('[TapToPay] reader from onUpdateDiscoveredReaders', {
+          deviceType: reader?.deviceType,
+          serialNumber: reader?.serialNumber,
+        });
+        void Promise.resolve(terminal.cancelDiscovering?.()).finally(() => {
+          finish(() => resolve(reader));
+        });
+      },
+      reject: (error) => finish(() => reject(error)),
+    };
+
+    console.log('[TapToPay] discoverReaders start', {
+      discoveryMethod: 'tapToPay',
+      simulated: opts.simulated,
+      hadConnectedReader: !!terminal.connectedReader,
+    });
+
+    void terminal
+      .discoverReaders({
+        discoveryMethod: 'tapToPay',
+        simulated: opts.simulated,
+      })
+      .then((disc: { error?: { message?: string } } | undefined) => {
+        // cancelDiscovering after a successful callback can settle this promise — ignore.
+        if (settled || gotReader) return;
+        if (disc?.error) {
+          finish(() => reject(new Error(disc.error.message || 'Discover failed')));
+          return;
+        }
+        // Discovery ended without delivering a reader via the callback.
+        finish(() => reject(new Error('No Tap to Pay reader on this device')));
+      })
+      .catch((e: unknown) => {
+        if (settled || gotReader) return;
+        finish(() =>
+          reject(e instanceof Error ? e : new Error(String(e ?? 'Discover failed'))),
+        );
+      });
+  });
 }
 
 function TapToPayBody({
@@ -77,7 +157,26 @@ function TapToPayBody({
 }: Omit<Props, 'visible'>) {
   const insets = useSafeAreaInsets();
   const { driver } = useAuth();
-  const terminal = tryLoadStripeTerminal()!.useStripeTerminal();
+  const discoverWaiterRef = useRef<DiscoverWaiter | null>(null);
+
+  const onUpdateDiscoveredReaders = useCallback((readers: any[]) => {
+    if (!readers?.length) {
+      console.log('[TapToPay] onUpdateDiscoveredReaders empty');
+      return;
+    }
+    const waiter = discoverWaiterRef.current;
+    if (!waiter) {
+      console.log('[TapToPay] onUpdateDiscoveredReaders with no waiter', {
+        count: readers.length,
+      });
+      return;
+    }
+    waiter.resolve(readers[0]);
+  }, []);
+
+  const terminal = tryLoadStripeTerminal()!.useStripeTerminal({
+    onUpdateDiscoveredReaders,
+  });
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [error, setError] = useState<string | null>(null);
@@ -113,9 +212,15 @@ function TapToPayBody({
     setBusy(true);
     setError(null);
     try {
-      // Critical for decline→retry: prior connect must be cleared first.
-      setStatus('Resetting reader…');
-      await teardownTapReader(terminal);
+      // Only reset when a prior attempt left a live connection (decline→retry).
+      // Never disconnect on cold-start first attempt.
+      if (terminal.connectedReader) {
+        setStatus('Resetting reader…');
+        console.log('[TapToPay] teardown before rediscover (connectedReader present)');
+        await teardownTapReader(terminal);
+      } else {
+        console.log('[TapToPay] skip teardown (no connectedReader)');
+      }
 
       setStatus('Preparing payment…');
       const intent = await createTapPaymentIntent({
@@ -132,14 +237,9 @@ function TapToPayBody({
       setStatus('Finding Tap to Pay on this device…');
       // Simulated only via explicit EXPO_PUBLIC_STRIPE_TERMINAL_SIMULATED=1 — never __DEV__.
       const simulated = shouldSimulateTapToPay();
-      const disc = await terminal.discoverReaders({
-        discoveryMethod: 'tapToPay',
+      const reader = await discoverTapToPayReader(terminal, discoverWaiterRef, {
         simulated,
       });
-      if (disc?.error) throw new Error(disc.error.message || 'Discover failed');
-
-      const reader = terminal.discoveredReaders?.[0];
-      if (!reader) throw new Error('No Tap to Pay reader on this device');
 
       setStatus('Connecting…');
       // beta.29+: discoveryMethod + locationId live on the same connectReader object

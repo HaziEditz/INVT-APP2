@@ -31,21 +31,37 @@ test('TapToPay uses server PI via retrievePaymentIntent (no dual create)', () =>
   assert.match(sheet, /recordTapLedger failed \(continuing to close trip\)/);
 });
 
-test('TapToPay tears down reader before rediscover and after decline/fail', () => {
+test('TapToPay tears down only when connectedReader is present', () => {
   const sheet = readFileSync(join(root, 'components/TapToPaySheet.tsx'), 'utf8');
   assert.match(sheet, /async function teardownTapReader/);
   assert.match(sheet, /cancelCollectPaymentMethod/);
   assert.match(sheet, /disconnectReader/);
-  assert.match(sheet, /Resetting reader/);
-  // teardown before discover, and on catch after fail (decline path)
+  // Guard: never disconnect on cold start
+  const teardownFn = sheet.slice(
+    sheet.indexOf('async function teardownTapReader'),
+    sheet.indexOf('function discoverTapToPayReader'),
+  );
+  assert.match(teardownFn, /if\s*\(\s*!terminal\?\.connectedReader\s*\)\s*return/);
+  assert.doesNotMatch(
+    teardownFn,
+    /else if \(typeof terminal\.disconnectReader/,
+    'must not disconnect when connectedReader is absent',
+  );
+
   const startIdx = sheet.indexOf('const start = useCallback');
   const startFn = sheet.slice(startIdx, sheet.indexOf('}, [amountCents, bookingId'));
-  assert.match(startFn, /await teardownTapReader\(terminal\)/);
-  assert.ok(
-    (startFn.match(/await teardownTapReader\(terminal\)/g) || []).length >= 2,
-    'teardown must run before discover and after failure/success',
-  );
+  assert.match(startFn, /if\s*\(\s*terminal\.connectedReader\s*\)/);
+  assert.match(startFn, /skip teardown \(no connectedReader\)/);
   assert.match(sheet, /handleClose/);
+});
+
+test('TapToPay acquires readers via onUpdateDiscoveredReaders (not post-await discoveredReaders)', () => {
+  const sheet = readFileSync(join(root, 'components/TapToPaySheet.tsx'), 'utf8');
+  assert.match(sheet, /onUpdateDiscoveredReaders/);
+  assert.match(sheet, /function discoverTapToPayReader/);
+  assert.match(sheet, /useStripeTerminal\(\s*\{\s*onUpdateDiscoveredReaders/);
+  assert.doesNotMatch(sheet, /terminal\.discoveredReaders\s*\?\.\s*\[\s*0\s*\]/);
+  assert.match(sheet, /discoverTapToPayReader\(terminal,\s*discoverWaiterRef/);
 });
 
 test('eas.json does not enable simulated Tap to Pay', () => {
