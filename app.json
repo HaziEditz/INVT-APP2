@@ -100,7 +100,8 @@
             "minSdkVersion": 26
           }
         }
-      ]
+      ],
+      "./plugins/withUseRawPropsJsiValue.js"
     ],
     "experiments": {
       "typedRoutes": true
