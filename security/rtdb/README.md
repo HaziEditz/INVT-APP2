@@ -77,5 +77,5 @@ If `test:rtdb-rules` fails with `Could not spawn java -version`, install a JDK a
 - Deploying rules to `bookawaka2026-564e1`
 - Changing live `INVT/database.rules.json`
 - Closing public `notification*` / `online` holes (Phase 1+)
-- Shipping SA transfer UI fix (required before Phase 2 live; helper is ready in `membershipHelpers.mjs`)
-- **End Shift dependency:** never use anonymous Auth for `shiftLogs` / `online/{cid}/{vid}` clears. `requireDriverAuthForRtdbWrite` journals instead. Phase 1+ rules will deny anonymous outright.
+- SA transfer now allocates next free destination Driver ID + nested leaf move (`commitDriverTransfer` in SA-Drivers.aspx + `buildDriverTransferUpdate`). Confirm live SA page contains `commitDriverTransfer` before Phase 2 rules deploy.
+- **End Shift dependency (Phase 1+ blocker):** never use anonymous Auth for `shiftLogs` / `online/{cid}/{vid}` clears. Driver app uses `requireDriverAuthForRtdbWrite` and journals on auth failure. Once ownership rules land, the old anonymous presence-clear fallback would fail outright.
