@@ -88,6 +88,10 @@ export function getDatabaseInstance(): Database {
 /**
  * RTDB writes require an authenticated Firebase user. Logs UID and falls back to
  * anonymous sign-in only when currentUser is missing.
+ *
+ * @deprecated Prefer requireDriverAuthForRtdbWrite for end-shift / ownership paths.
+ * Anonymous fallback will break under Phase 1+ RTDB rules (anonymous UID cannot own
+ * online/{cid}/{vehicleId} or shiftLogs/{cid}/{driverUid}).
  */
 export async function ensureAuthUserForRtdbWrite(context: string): Promise<User> {
   const authInstance = getAuthInstance();
@@ -106,6 +110,49 @@ export async function ensureAuthUserForRtdbWrite(context: string): Promise<User>
   user = cred.user;
   console.log(`[Firebase Auth] ${context} — anonymous uid: ${user.uid}`);
   return user;
+}
+
+export class DriverAuthRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DriverAuthRequiredError';
+  }
+}
+
+/**
+ * Require the real driver Auth session for ownership-scoped RTDB writes.
+ * Never signs in anonymously — callers must journal and retry after re-login.
+ */
+export async function requireDriverAuthForRtdbWrite(
+  expectedUid: string,
+  context: string,
+): Promise<User> {
+  const authInstance = getAuthInstance();
+  const user = authInstance.currentUser;
+  const want = String(expectedUid || '').trim();
+
+  if (user && !user.isAnonymous && (!want || user.uid === want)) {
+    console.log(`[Firebase Auth] ${context} — uid: ${user.uid} (driver)`);
+    return user;
+  }
+
+  if (!user) {
+    console.warn(
+      `[Firebase Auth] ${context} — currentUser is null (no anonymous fallback; journal for retry)`,
+    );
+  } else if (user.isAnonymous) {
+    console.warn(
+      `[Firebase Auth] ${context} — refusing anonymous uid=${user.uid} for driver write want=${want || '?'}`,
+    );
+  } else {
+    console.warn(
+      `[Firebase Auth] ${context} — uid mismatch have=${user.uid} want=${want || '?'}`,
+    );
+  }
+
+  throw new DriverAuthRequiredError(
+    `Driver auth required for ${context} (need ${want || 'driver uid'}, have ${user?.uid ?? 'null'})`,
+  );
 }
 
 export { auth, database };

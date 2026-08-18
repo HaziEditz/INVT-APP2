@@ -1,5 +1,5 @@
 import { onDisconnect, onValue, ref, remove, set, update, get } from 'firebase/database';
-import { getDatabaseInstance, ensureAuthUserForRtdbWrite } from '@/lib/firebase';
+import { getDatabaseInstance, ensureAuthUserForRtdbWrite, requireDriverAuthForRtdbWrite } from '@/lib/firebase';
 import { DriverProfile, PresenceDisplayStatus } from '@/types';
 import { getCurrentCoords, getLastKnownCoords } from '@/services/locationService';
 import {
@@ -591,10 +591,16 @@ export async function clearOnlinePresence(driver: DriverProfile, vehicleId: stri
   const presencePath = ref(getDatabaseInstance(), `${onlinePath}/current`);
 
   try {
-    await ensureAuthUserForRtdbWrite(`clearOnlinePresence → ${onlinePath}`);
+    // End-shift / ownership clears must use the real driver session.
+    // Anonymous fallback would break under Phase 1+ rules and already cannot
+    // satisfy shiftLogs auth.uid === $uid.
+    await requireDriverAuthForRtdbWrite(
+      String(driver.uid || ''),
+      `clearOnlinePresence → ${onlinePath}`,
+    );
   } catch (err) {
     console.warn('[Presence] clearOnlinePresence auth failed:', err);
-    return;
+    throw err;
   }
 
   try {

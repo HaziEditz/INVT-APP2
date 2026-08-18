@@ -132,6 +132,7 @@ describe('Phase 0 deny-matrix (Option B semantic simulator)', () => {
         fromCompanyId: f.CID_A,
         toCompanyId: f.CID_B,
         profile,
+        usedDestinationIds: [],
       }),
     );
     assert.equal(

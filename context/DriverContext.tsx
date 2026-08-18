@@ -3526,9 +3526,25 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     endShiftInProgressRef.current = true;
     setEndShiftInProgress(true);
     try {
+      // Capture identity + auth BEFORE any UI teardown / remotes.
+      // Sign-out must not run until remotes finish or are journaled.
       const vehicleId = await resolveVehicleIdLocalFirst();
       const driverSnapshot = driver;
       const reason = opts?.reason ?? 'manual';
+      const { getAuthInstance } = await import('@/lib/firebase');
+      const authUid = getAuthInstance().currentUser?.uid || null;
+      if (driverSnapshot?.uid && authUid && authUid !== driverSnapshot.uid) {
+        console.warn('[Driver] endShift auth uid mismatch', {
+          sessionUid: driverSnapshot.uid,
+          authUid,
+        });
+      }
+      if (driverSnapshot?.uid && !authUid) {
+        console.warn(
+          '[Driver] endShift starting with null currentUser — remotes will journal for retry after next login',
+        );
+      }
+
       let summary: EndShiftSummary | null = null;
       try {
         summary = await endShiftRemote(driverSnapshot, vehicleId || null, reason);
@@ -3550,7 +3566,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       endShiftLocal();
-      // firebaseSignOut can hang offline — never block return to login.
+      // Only sign out after remotes/journal completed above.
       await withTimeout(signOut(), 4_000, 'signOut').catch((err) => {
         console.warn('[Driver] signOut timed out/failed (continuing to login):', err);
       });

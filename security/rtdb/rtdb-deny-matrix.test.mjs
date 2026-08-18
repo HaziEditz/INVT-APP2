@@ -105,6 +105,7 @@ describe('Phase 0 membership helpers (pure)', () => {
       fromCompanyId: CID_A,
       toCompanyId: CID_B,
       profile: { id: 'D001', email: 'a@test.local' },
+      usedDestinationIds: ['D001', 'D002'],
     });
     assertTransferMovesNestedLeaf(updateMap, {
       uid: DRIVER_A,
@@ -112,7 +113,9 @@ describe('Phase 0 membership helpers (pure)', () => {
       toCompanyId: CID_B,
     });
     assert.equal(updateMap[`drivers/${CID_B}/${DRIVER_A}`].companyId, CID_B);
+    assert.equal(updateMap[`drivers/${CID_B}/${DRIVER_A}`].id, 'D003');
     assert.equal(updateMap[`drivers/${DRIVER_A}/companyId`], CID_B);
+    assert.equal(updateMap[`drivers/${DRIVER_A}/id`], 'D003');
   });
 
   it('broken flat-only transfer does not move nested leaf', () => {
@@ -206,6 +209,7 @@ describe('Phase 0 RTDB deny-matrix (shadow rules + emulator)', () => {
       fromCompanyId: CID_A,
       toCompanyId: CID_B,
       profile,
+      usedDestinationIds: ['D002'],
     });
 
     await testEnv.withSecurityRulesDisabled(async (ctx) => {

@@ -1,5 +1,5 @@
 import { get, orderByChild, limitToLast, query, ref, push, set } from 'firebase/database';
-import { getDatabaseInstance } from '@/lib/firebase';
+import { getDatabaseInstance, requireDriverAuthForRtdbWrite } from '@/lib/firebase';
 
 export type ShiftLogEntry = {
   shiftEndAt: number;
@@ -69,6 +69,9 @@ export async function writeShiftEndLog(
   payload: ShiftLogEntry,
 ): Promise<void> {
   if (!companyId || !uid) return;
+  // shiftLogs/{cid}/{uid} rules require auth.uid === $uid (+ flat drivers/{uid}).
+  // Never fall back to anonymous — that cannot satisfy auth.uid === driver uid.
+  await requireDriverAuthForRtdbWrite(uid, `writeShiftEndLog → shiftLogs/${companyId}/${uid}`);
   const database = getDatabaseInstance();
   const entryRef = push(ref(database, `shiftLogs/${companyId}/${uid}`));
   const vehicleId = String(payload.vehicleId || '').trim() || null;

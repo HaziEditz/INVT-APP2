@@ -8,6 +8,9 @@ import {
   buildDriverTransferUpdate,
   buildBrokenFlatOnlyTransferUpdate,
   assertTransferMovesNestedLeaf,
+  allocateNextDriverId,
+  collectUsedDriverIds,
+  normalizeDriverId,
 } from '../security/rtdb/membershipHelpers.mjs';
 
 describe('rtdb membership helpers (Option B)', () => {
@@ -19,17 +22,67 @@ describe('rtdb membership helpers (Option B)', () => {
     assert.equal(CID_B, '860870');
   });
 
-  it('correct transfer moves nested leaf immediately', () => {
+  it('allocateNextDriverId walks from D001 and skips used slots', () => {
+    assert.equal(allocateNextDriverId([]), 'D001');
+    assert.equal(allocateNextDriverId(['D001', 'D002']), 'D003');
+    assert.equal(allocateNextDriverId(new Set(['D001', 'D003'])), 'D002');
+    assert.equal(
+      allocateNextDriverId({
+        u1: { id: 'D001' },
+        u2: { driverId: 'D002' },
+      }),
+      'D003',
+    );
+    assert.equal(normalizeDriverId('d5'), 'D005');
+  });
+
+  it('transfer with no collision still assigns sequential dest id (not blind keep of old high id)', () => {
+    const uid = 'uid_transfer';
+    // Dest empty — next free is D001 even if transferor was D009 at old company.
+    const update = buildDriverTransferUpdate({
+      uid,
+      fromCompanyId: CID_A,
+      toCompanyId: CID_B,
+      profile: { id: 'D009', email: 't@test.local', name: 'Alex' },
+      usedDestinationIds: [],
+    });
+    assertTransferMovesNestedLeaf(update, { uid, fromCompanyId: CID_A, toCompanyId: CID_B });
+    const dest = update[`drivers/${CID_B}/${uid}`];
+    assert.equal(dest.companyId, CID_B);
+    assert.equal(dest.id, 'D001');
+    assert.equal(dest.driverId, 'D001');
+    assert.equal(update[`drivers/${uid}/id`], 'D001');
+    assert.equal(update[`drivers/${uid}/companyId`], CID_B);
+  });
+
+  it('transfer when old id is taken at dest gets next free (no collision)', () => {
     const uid = 'uid_transfer';
     const update = buildDriverTransferUpdate({
       uid,
       fromCompanyId: CID_A,
       toCompanyId: CID_B,
-      profile: { id: 'D009', email: 't@test.local' },
+      profile: { id: 'D001', email: 'mover@test.local' },
+      usedDestinationIds: collectUsedDriverIds({
+        other: { id: 'D001', email: 'incumbent@test.local' },
+        another: { id: 'D002' },
+      }),
     });
-    assertTransferMovesNestedLeaf(update, { uid, fromCompanyId: CID_A, toCompanyId: CID_B });
-    assert.equal(update[`drivers/${CID_B}/${uid}`].companyId, CID_B);
-    assert.equal(update[`drivers/${uid}/companyId`], CID_B);
+    const dest = update[`drivers/${CID_B}/${uid}`];
+    assert.equal(dest.id, 'D003');
+    assert.equal(dest.driverId, 'D003');
+    assert.equal(dest.email, 'mover@test.local');
+    assert.equal(update[`drivers/${CID_A}/${uid}`], null);
+  });
+
+  it('requires usedDestinationIds (no silent blind id copy)', () => {
+    assert.throws(() =>
+      buildDriverTransferUpdate({
+        uid: 'x',
+        fromCompanyId: CID_A,
+        toCompanyId: CID_B,
+        profile: { id: 'D001' },
+      }),
+    );
   });
 
   it('broken flat-only transfer leaves nested membership unchanged', () => {
@@ -45,6 +98,7 @@ describe('rtdb membership helpers (Option B)', () => {
         fromCompanyId: CID_A,
         toCompanyId: CID_A,
         profile: {},
+        usedDestinationIds: [],
       }),
     );
   });
