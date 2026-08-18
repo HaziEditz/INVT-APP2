@@ -34,6 +34,9 @@ module.exports = {
       appVersion: expo.version || '0.0.0',
       gitCommit,
       buildLabel: `v${expo.version || '0.0.0'} · ${gitCommit}`,
+      // Default matches eas.json; ensures eas update embeds a location even without shell env.
+      stripeTerminalLocationId:
+        process.env.EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID || 'tml_GnUMTgohbETmrc',
     },
   },
 };

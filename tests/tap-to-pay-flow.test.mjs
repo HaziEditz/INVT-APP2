@@ -68,3 +68,23 @@ test('eas.json does not enable simulated Tap to Pay', () => {
   const eas = readFileSync(join(root, 'eas.json'), 'utf8');
   assert.doesNotMatch(eas, /EXPO_PUBLIC_STRIPE_TERMINAL_SIMULATED["']?\s*:\s*["']1["']/);
 });
+
+test('eas.json preview/production bake Terminal location ID', () => {
+  const eas = JSON.parse(readFileSync(join(root, 'eas.json'), 'utf8'));
+  for (const profile of ['development', 'preview', 'production', 'preview-production']) {
+    assert.equal(
+      eas.build[profile].env.EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID,
+      'tml_GnUMTgohbETmrc',
+      `${profile} must set Terminal location`,
+    );
+  }
+});
+
+test('TapToPay keeps hardcoded location fallback for OTA (eas.json env not applied on update)', () => {
+  const sheet = readFileSync(join(root, 'components/TapToPaySheet.tsx'), 'utf8');
+  assert.match(sheet, /BOOKAWAKA_TERMINAL_LOCATION_ID\s*=\s*['"]tml_GnUMTgohbETmrc['"]/);
+  assert.match(sheet, /BOOKAWAKA_TERMINAL_LOCATION_ID/);
+  const cfg = readFileSync(join(root, 'app.config.js'), 'utf8');
+  assert.match(cfg, /stripeTerminalLocationId/);
+  assert.match(cfg, /tml_GnUMTgohbETmrc/);
+});

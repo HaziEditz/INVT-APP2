@@ -26,6 +26,9 @@ type Props = {
   onPaid: (info: { paymentIntentId: string; amountCents: number }) => void;
 };
 
+/** Same ID as eas.json EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID — required OTA fallback. */
+const BOOKAWAKA_TERMINAL_LOCATION_ID = 'tml_GnUMTgohbETmrc';
+
 type DiscoverWaiter = {
   resolve: (reader: any) => void;
   reject: (error: Error) => void;
@@ -244,15 +247,13 @@ function TapToPayBody({
       setStatus('Connecting…');
       // beta.29+: discoveryMethod + locationId live on the same connectReader object
       // (nested `params: { locationId }` left discoveryMethod null → "Unknown discovery method: null").
+      // EXPO_PUBLIC_* is inlined at Metro bundle time. eas.json sets it for EAS *builds*,
+      // but `eas update` OTAs do not load eas.json env — so keep a hard fallback matching
+      // eas.json preview/production (tml_GnUMTgohbETmrc) or OTA will ship an empty value.
       const locationId =
-        process.env.EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID ||
-        reader?.location?.id ||
-        undefined;
-      if (!locationId) {
-        throw new Error(
-          'Missing Stripe Terminal locationId (EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID).',
-        );
-      }
+        String(process.env.EXPO_PUBLIC_STRIPE_TERMINAL_LOCATION_ID || '').trim() ||
+        String(reader?.location?.id || '').trim() ||
+        BOOKAWAKA_TERMINAL_LOCATION_ID;
       const connected = await terminal.connectReader({
         discoveryMethod: 'tapToPay',
         reader,
