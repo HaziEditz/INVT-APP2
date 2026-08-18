@@ -2110,7 +2110,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       await restoreAvailableAfterJobClear();
     }
     if (hadJob && !opts?.silent) {
-      Alert.alert('Job already closed', detail);
+      Alert.alert(
+        'Trip no longer active',
+        detail || 'This job was already completed or cancelled. Your screen has been cleared.',
+      );
     }
   };
 
