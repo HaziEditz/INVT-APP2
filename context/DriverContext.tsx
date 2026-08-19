@@ -57,7 +57,11 @@ import {
 } from '@/lib/driverNotifications';
 import { playInAppNotificationSound, alertDriverToOffer } from '@/lib/notificationSound';
 import { subscribeChat } from '@/lib/chatService';
-import { subscribeDriverQueue, filterLiveDriverQueueOffers } from '@/lib/driverQueue';
+import {
+  subscribeDriverQueue,
+  filterLiveDriverQueueOffers,
+} from '@/lib/driverQueue';
+import { mergeOptimisticQueuedOffer } from '@/lib/driverQueuePolicy';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import {
   findStaleDirectOfferIds,
@@ -1366,7 +1370,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           if (live.length < mapped.length) {
             pruneDriverQueueOnDispatch().catch(() => undefined);
           }
-          setQueuedOffers(live);
+          // Hold fresh optimistic rows across subscribe/filter races (Seq3 hail+queue).
+          setQueuedOffers((prev) => {
+            const byId = new Map(live.map((o) => [o.id, o as QueuedOffer]));
+            const now = Date.now();
+            for (const o of prev) {
+              if (byId.has(o.id)) continue;
+              const age = now - (o.queuedAt || 0);
+              if (age > 120_000) continue;
+              const stillMapped = mapped.some((m) => o.id === m.id);
+              if (stillMapped || (mapped.length === 0 && age <= 60_000)) {
+                byId.set(o.id, o);
+              }
+            }
+            return Array.from(byId.values()).sort(
+              (a, b) => (a.queuedAt ?? 0) - (b.queuedAt ?? 0),
+            );
+          });
         })();
       });
     } catch (err) {
@@ -3783,7 +3803,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setJobOffer(null);
 
     if (queued) {
+      // Seq3: do not wait for driverQueue subscribe + allbookings re-confirm.
+      const merged = mergeOptimisticQueuedOffer(queuedOffersRef.current, {
+        ...offerSnapshot,
+        source: 'queue',
+      });
+      queuedOffersRef.current = merged;
+      setQueuedOffers(merged);
       setPreferredPanelTab('queue');
+      console.log('[Driver] optimistic queue after accept', offerSnapshot.id);
       Alert.alert('Job queued', 'This job is in your Queue until your current trip finishes.');
       return;
     }
@@ -3954,7 +3982,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
       if (result?.queued || result?.status === 'Queued') {
         removeBroadcastOffer(offer.id);
+        const merged = mergeOptimisticQueuedOffer(queuedOffersRef.current, {
+          ...offer,
+          source: 'queue',
+        });
+        queuedOffersRef.current = merged;
+        setQueuedOffers(merged);
         setPreferredPanelTab('queue');
+        console.log('[Driver] optimistic queue after pickOffer', offer.id);
         Alert.alert('Job queued', 'This job is in your Queue until your current trip finishes.');
         return;
       }
