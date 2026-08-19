@@ -62,6 +62,7 @@ import {
   filterLiveDriverQueueOffers,
 } from '@/lib/driverQueue';
 import { mergeOptimisticQueuedOffer } from '@/lib/driverQueuePolicy';
+import { shouldAutoAdoptPromotedQueueJob } from '@/lib/queuePromoteAdopt';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import {
   findStaleDirectOfferIds,
@@ -1977,6 +1978,61 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }, 600);
   };
 
+  /**
+   * After Queued→Assigned promote, bind the job as the local active trip immediately.
+   * Waiting for Accept leaves Assigned orphans when JobOfferModal is held hidden
+   * (Syncing / paymentJob) — see #81952/#81956 vs clean #81951.
+   */
+  const adoptPromotedQueueOfferAsActive = async (
+    offer: QueuedOffer,
+    opts?: { version?: number },
+  ) => {
+    if (!driver) return;
+    if (activeJobIdRef.current) {
+      console.warn(
+        '[Driver] skip queue adopt — already have active job',
+        activeJobIdRef.current,
+        'skipping',
+        offer.id,
+      );
+      return;
+    }
+    const job = defaultActiveJob(offer);
+    job.originalStatus = offer.originalStatus ?? 'pending';
+    if (opts?.version != null) job.updateSeq = opts.version;
+    const rawSeed = bookingRawSeedFromOffer(job);
+    if (rawSeed) bookingRawRef.current = rawSeed;
+    adoptDispatchTariffFromOffer(offer, tariffsListRef.current, (t) => {
+      selectedTariffRef.current = t;
+      setSelectedTariffState(t);
+    });
+    setJobOffer(null);
+    setActiveJob(job);
+    activeJobIdRef.current = job.id;
+    setQueuedOffers((prev) => prev.filter((o) => o.id !== offer.id));
+    setPreferredPanelTab('current');
+    await withTimeout(
+      storeData(STORAGE_KEYS.activeJob, job),
+      2_000,
+      'adoptQueue.storeActiveJob',
+    ).catch((err) => console.warn('[Driver] store activeJob after queue adopt failed:', err));
+    await withTimeout(
+      captureAcceptLocation(job.id),
+      3_000,
+      'adoptQueue.captureAcceptLocation',
+    ).catch(() => undefined);
+    const vehicleId = await withTimeout(resolveVehicleId(), 2_000, 'adoptQueue.resolveVehicleId').catch(
+      () => '',
+    );
+    if (vehicleId) {
+      writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+      setPresenceStatus('Busy');
+      readyForJobsRef.current = true;
+    }
+    await clearDriverNotification(driver.id);
+    console.log('[Driver] adopted promoted queue job as active', job.id);
+  };
+
   const showNextQueuedJobAsOffer = () => {
     if (!driver || !shiftActiveRef.current) return;
     if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
@@ -2000,19 +2056,49 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    console.log('[Driver] showNextQueuedJobAsOffer → modal', q.id);
-    // Promote Queued→Assigned as soon as the popup appears so dispatch leaves UA
-    // immediately (do not wait for Accept / Arrived).
+    console.log('[Driver] showNextQueuedJobAsOffer → promote+adopt', q.id);
+    // Promote Queued→Assigned so dispatch leaves UA, then adopt as activeJob immediately.
+    // Do not leave Assigned waiting on Accept — modal is often hidden by Syncing.
     void (async () => {
+      let promoteSucceeded = false;
+      let version: number | undefined;
       try {
-        await promoteQueuedJob(q.id, driver.id);
+        const result = (await promoteQueuedJob(q.id, driver.id)) as {
+          version?: number;
+          ok?: boolean;
+        };
+        promoteSucceeded = true;
+        version = result?.version;
         console.log('[Driver] queue promote on popup → Assigned', q.id);
       } catch (err) {
-        console.warn('[Driver] queue promote on popup failed (Accept may retry):', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/alreadyStatus|Assigned|invalid_transition/i.test(msg)) {
+          promoteSucceeded = true;
+          console.log('[Driver] queue promote already Assigned (idempotent)', q.id);
+        } else {
+          console.warn('[Driver] queue promote failed — leaving in queue for retry:', err);
+          return;
+        }
+      }
+      if (
+        !shouldAutoAdoptPromotedQueueJob({
+          promoteSucceeded,
+          alreadyHasActiveJob: !!activeJobIdRef.current,
+        })
+      ) {
+        return;
+      }
+      try {
+        await adoptPromotedQueueOfferAsActive(q, { version });
+        void playInAppNotificationSound('offer');
+      } catch (err) {
+        console.warn('[Driver] queue adopt after promote failed:', err);
+        Alert.alert(
+          'Could not start queued job',
+          'The next job was assigned on dispatch but could not open on this device. Ask dispatch to recall it, or force-close and reopen the app.',
+        );
       }
     })();
-    setJobOffer({ ...q, silent: false, fromQueue: true });
-    void alertDriverToOffer({ ...q, silent: false, fromQueue: true });
   };
 
   const driverHasConfirmedActiveTrip = () =>
