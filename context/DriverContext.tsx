@@ -108,6 +108,7 @@ import {
   repairOnlinePresence,
   getPresenceWriteDiagnostics,
   setPresenceOfferPending,
+  setPresenceOnTrip,
   startPresenceHeartbeat,
   startShiftOnline,
   stopPresenceHeartbeat,
@@ -1517,6 +1518,31 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useSafeEffect(() => {
     if (!shiftActive) return;
     const id = setInterval(() => {
+      // While hail / activeJob / payment holds the offer modal, keep exclusive
+      // offers in broadcast so Offers tab still has Accept after End Trip.
+      // Also refresh expiresAt — otherwise flushDeferred after End Trip purges
+      // them as already expired (#8206 empty Offers).
+      if (
+        hailActiveRef.current ||
+        activeJobIdRef.current ||
+        paymentJobRef.current
+      ) {
+        const holdUntil = Date.now() + 35_000;
+        let changed = false;
+        for (const [offerId, offer] of broadcastOffersRef.current) {
+          if (!offer.expiresAt || offer.expiresAt < holdUntil) {
+            broadcastOffersRef.current.set(offerId, {
+              ...offer,
+              expiresAt: holdUntil,
+            });
+            changed = true;
+          }
+        }
+        if (changed) {
+          setBroadcastOffers(Array.from(broadcastOffersRef.current.values()));
+        }
+        return;
+      }
       const now = Date.now();
       for (const [offerId, offer] of broadcastOffersRef.current) {
         if (offer.expiresAt && offer.expiresAt < now - 5000) {
@@ -3206,6 +3232,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     // No cleanup → false: dep churn (broadcast list refresh) must not briefly
     // clear offer-pending before the next effect body re-enables it.
   }, [shiftActive, jobOffer?.id, broadcastOfferKey], 'Driver-offer-presence-heartbeat');
+
+  // On-trip: 8s lastSeen so assign / mid-offer gates (45s / 10s) do not false
+  // "Network issue — driver unreachable" while Busy with a hail or booked trip.
+  useSafeEffect(() => {
+    const onTrip = !!(shiftActive && (hailActive || !!activeJob));
+    setPresenceOnTrip(onTrip);
+  }, [shiftActive, hailActive, activeJob?.id], 'Driver-on-trip-presence-heartbeat');
 
   useSafeEffect(() => {
     if (!driver?.companyId) return;
@@ -5244,6 +5277,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       if (!hailDeferredSync) {
         writeOnlinePresence(driver, vehicleId, 'Busy').catch(() => undefined);
+        // Keep BG GPS writing Busy (not stale Available) so lastSeen status
+        // matches Busy while the hail is live.
+        void syncBgLocationFirebaseStatus('Busy');
         void patchOnlineCurrentJobId(driver.companyId, vehicleId, jobId).catch((err) => {
           console.warn('[Driver] patchOnlineCurrentJobId after hail start failed:', err);
         });

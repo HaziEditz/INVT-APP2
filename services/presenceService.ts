@@ -12,6 +12,7 @@ import {
   PRESENCE_HEARTBEAT_MS,
   PRESENCE_LASTSEEN_REPAIR_MS,
   PRESENCE_OFFER_HEARTBEAT_MS,
+  PRESENCE_ON_TRIP_HEARTBEAT_MS,
 } from '@/lib/presenceHeartbeatPolicy';
 
 export type FirebaseDriverStatus = 'Available' | 'Away' | 'Offline' | 'Busy' | 'Assigned' | 'Picking' | 'Arrived' | 'Active';
@@ -30,8 +31,19 @@ let heartbeatCtx: {
 } | null = null;
 let offerPendingMode = false;
 let offerPendingSinceMs = 0;
+let onTripMode = false;
 let lastPresenceWriteAt = 0;
 let lastPresenceWriteError: string | null = null;
+
+function presenceHeartbeatIntervalMs(): number {
+  if (offerPendingMode) return PRESENCE_OFFER_HEARTBEAT_MS;
+  if (onTripMode) return PRESENCE_ON_TRIP_HEARTBEAT_MS;
+  return PRESENCE_HEARTBEAT_MS;
+}
+
+function needsFastLastSeenStamp(): boolean {
+  return offerPendingMode || onTripMode;
+}
 
 export function getPresenceWriteDiagnostics() {
   return {
@@ -40,7 +52,8 @@ export function getPresenceWriteDiagnostics() {
     heartbeatActive: heartbeatTimer != null,
     heartbeatStatus: heartbeatCtx?.status ?? null,
     offerPendingMode,
-    heartbeatIntervalMs: offerPendingMode ? PRESENCE_OFFER_HEARTBEAT_MS : PRESENCE_HEARTBEAT_MS,
+    onTripMode,
+    heartbeatIntervalMs: presenceHeartbeatIntervalMs(),
   };
 }
 
@@ -80,22 +93,20 @@ export function stopPresenceHeartbeat() {
   // re-ran (vehicle/driver dep churn) while a live offer was still on screen.
 }
 
-function presenceHeartbeatIntervalMs(): number {
-  return offerPendingMode ? PRESENCE_OFFER_HEARTBEAT_MS : PRESENCE_HEARTBEAT_MS;
-}
-
 function runPresenceHeartbeatTick() {
   const ctx = heartbeatCtx;
   if (!ctx) return;
-  if (offerPendingMode) {
-    // Always stamp — repair()'s 15s skip gate would defeat the 5s offer cadence.
+  if (needsFastLastSeenStamp()) {
+    // Always stamp — repair()'s 15s skip gate would defeat the 5s/8s cadence.
     const since = offerPendingSinceMs ? Date.now() - offerPendingSinceMs : null;
+    const reason = offerPendingMode ? 'offer-pending' : 'on-trip';
     console.log(
-      `[Presence] offer-pending stamp tick t+${since != null ? Math.round(since / 1000) + 's' : '?'} ` +
-        `vehicleId=${ctx.vehicleId} status=${ctx.status}`,
+      `[Presence] ${reason} stamp tick` +
+        (offerPendingMode && since != null ? ` t+${Math.round(since / 1000)}s` : '') +
+        ` vehicleId=${ctx.vehicleId} status=${ctx.status}`,
     );
     void stampPresenceLastSeen(ctx.driver, ctx.vehicleId, ctx.status).catch((err) => {
-      console.warn('[Presence] offer-pending lastSeen stamp failed:', err);
+      console.warn(`[Presence] ${reason} lastSeen stamp failed:`, err);
     });
     return;
   }
@@ -125,10 +136,10 @@ export function startPresenceHeartbeat(
     heartbeatTimer = null;
   }
   heartbeatCtx = { driver, vehicleId, status };
-  if (offerPendingMode) {
+  if (needsFastLastSeenStamp()) {
     console.log(
-      `[Presence] startPresenceHeartbeat while offer-pending — arming ${PRESENCE_OFFER_HEARTBEAT_MS}ms ` +
-        `vehicleId=${vehicleId}`,
+      `[Presence] startPresenceHeartbeat while ${offerPendingMode ? 'offer-pending' : 'on-trip'} — ` +
+        `arming ${presenceHeartbeatIntervalMs()}ms vehicleId=${vehicleId}`,
     );
   }
   armPresenceHeartbeatTimer();
@@ -136,7 +147,8 @@ export function startPresenceHeartbeat(
 
 /**
  * Fast lastSeen stamps while a live offer is on screen. Reverts to the normal
- * 20s repair heartbeat when the offer is accepted, declined, or cleared.
+ * 20s repair heartbeat when the offer is accepted, declined, or cleared
+ * (or to on-trip 8s if hail/activeJob still holds).
  */
 export function setPresenceOfferPending(pending: boolean) {
   const next = !!pending;
@@ -158,6 +170,34 @@ export function setPresenceOfferPending(pending: boolean) {
   if (!heartbeatCtx) {
     console.warn(
       '[Presence] offer-pending mode set but heartbeatCtx is null — stamps will NOT fire until startPresenceHeartbeat',
+    );
+    return;
+  }
+  armPresenceHeartbeatTimer();
+}
+
+/**
+ * Keep lastSeen under the dispatch mid-offer / assign gates (10s / 45s) while
+ * the driver is on a hail or active booked trip. BG GPS alone can leave status
+ * stale or skip writes when the device is "online" but presence drifts.
+ */
+export function setPresenceOnTrip(onTrip: boolean) {
+  const next = !!onTrip;
+  if (onTripMode === next) {
+    if (next && heartbeatCtx && !heartbeatTimer) {
+      console.warn('[Presence] on-trip ON but timer missing — re-arming');
+      armPresenceHeartbeatTimer();
+    }
+    return;
+  }
+  onTripMode = next;
+  console.log(
+    `[Presence] on-trip heartbeat ${next ? 'ON' : 'OFF'} (${presenceHeartbeatIntervalMs()}ms)` +
+      ` ctx=${heartbeatCtx ? `vehicleId=${heartbeatCtx.vehicleId}` : 'null'}`,
+  );
+  if (!heartbeatCtx) {
+    console.warn(
+      '[Presence] on-trip mode set but heartbeatCtx is null — stamps will NOT fire until startPresenceHeartbeat',
     );
     return;
   }
