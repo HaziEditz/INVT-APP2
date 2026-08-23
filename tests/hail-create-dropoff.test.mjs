@@ -18,7 +18,7 @@ test('createHailJobOnDispatch does not use pickup as dropoff fallback', () => {
   );
   assert.match(
     src,
-    /dropoff:\s*params\.dropoff\?\.address\?\.trim\(\)/,
+    /const dropoff = params\.dropoff\?\.address\?\.trim\(\)/,
     'empty hail dropoff when destination unknown',
   );
   assert.match(src, /address:\s*''/);
