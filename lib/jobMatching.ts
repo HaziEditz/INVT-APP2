@@ -35,12 +35,14 @@ export function jobMatchesDriverVehicle(offer: JobOffer, vehicle: Vehicle | unde
   if (jobType === 'Food' && !vehicle.hasFoodService) return false;
   if (jobType === 'Freight' && !vehicle.hasFreightService) return false;
 
-  const reqCat = normalizeCategory(offer.vehicleTypeRequired);
   const body = norm(vehicle.bodyType || vehicle.displayType || '');
   const drvCat = normalizeCategory(vehicle.bodyType || vehicle.displayType) ||
     (body.includes('van') || body.includes('minibus') ? 'van' : body.includes('wav') ? 'wav' : 'car');
   const reqPax = Math.max(1, offer.passengers ?? 1);
   const cap = vehicle.seatCapacity || 4;
+  // Mirror server _driverEligibleForJob: 5+ passengers require a van.
+  let reqCat = normalizeCategory(offer.vehicleTypeRequired);
+  if (reqPax >= 5) reqCat = 'van';
 
   if (reqCat === 'wav') return vehicle.isWav && cap >= reqPax;
 

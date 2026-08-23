@@ -580,16 +580,17 @@ type AwayIntent = 'none' | 'manual' | 'missed';
 const EMPTY_STEP_TIMES: JobStepTimes = {};
 const TRIP_BLOCK_MSG = 'Complete your current job first';
 
-/** Hide Offers-tab pool listings for dispatch jobs from accept until On Board (hail exempt). */
+/**
+ * Offers-tab pool lock. Option 1: always unlocked — Pending pool stays browsable
+ * while Busy/hail/enroute so drivers can voluntarily queue-while-busy.
+ * (Exclusive Offered popups remain suppressed separately while on a trip.)
+ */
 function isDispatchEnrouteOffersLocked(
-  activeJob: ActiveJob | null,
-  hailActive: boolean,
-  meterRunning: boolean,
+  _activeJob: ActiveJob | null,
+  _hailActive: boolean,
+  _meterRunning: boolean,
 ): boolean {
-  if (!activeJob || hailActive || activeJob.source === 'hail') return false;
-  if (activeJob.stage === 'onboard' || activeJob.stage === 'complete') return false;
-  if (meterRunning) return false;
-  return true;
+  return false;
 }
 
 function defaultActiveJob(offer: JobOffer): ActiveJob {
