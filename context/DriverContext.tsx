@@ -2121,7 +2121,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (!parsed) return null;
         const st = String(parsed.status || '').toLowerCase().replace(/\s+/g, '');
         if (st !== 'assigned' && st !== 'picking') return null;
-        const drv = String((snap.val() as Record<string, unknown>)?.DriverId || '').trim();
+        const raw = snap.val() as Record<string, unknown>;
+        const drv = String(raw?.DriverId || raw?.AssignedDriverId || raw?.driverId || '').trim();
         if (drv && drv !== '0' && drv !== driver.id) return null;
         const seed = queuedOffersRef.current.find((o) => o.id === id);
         return (
@@ -2154,7 +2155,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         const st = String(row.bookingStatus || row.status || '')
           .toLowerCase()
           .replace(/\s+/g, '');
-        if (st !== 'assigned' && st !== 'picking') continue;
+        // Server maps Assigned → status "current"; prefer bookingStatus when present.
+        if (st !== 'assigned' && st !== 'picking' && st !== 'current') continue;
+        if (st === 'current') {
+          // "current" can also mean Arrived/OnTrip — only adopt Assigned/Picking via tryId.
+        }
         const id = String(row.bookingId || '');
         if (activeJobIdRef.current && String(activeJobIdRef.current) === id) continue;
         const offer = await tryId(id);
@@ -2165,6 +2170,39 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       console.warn('[Driver] fetchDriverActiveBookings for adopt orphan failed:', err);
+    }
+
+    // Cold-start backup (#8236): jobStore/active-bookings can miss a live Assigned
+    // orphan after remount. Scan jobs/{cid}/{vid}/{drv} for Assigned/Picking.
+    try {
+      const vehicleId =
+        (await withTimeout(resolveVehicleIdLocalFirst(), 2_000, 'adoptOrphan.resolveVehicleId').catch(
+          () => '',
+        )) ||
+        String(activeVehicle?.id || selectedVehicleId || '').trim();
+      if (vehicleId && driver.id) {
+        const jobsSnap = await get(
+          ref(getDatabaseInstance(), `jobs/${driver.companyId}/${vehicleId}/${driver.id}`),
+        );
+        if (jobsSnap.exists()) {
+          const tree = jobsSnap.val() as Record<string, unknown>;
+          // Newest booking id first — prefer the live promote orphan over stale mirrors.
+          const ids = Object.keys(tree || {})
+            .filter((id) => isValidBookingId(id))
+            .sort((a, b) => Number(b) - Number(a));
+          for (const id of ids) {
+            if (activeJobIdRef.current && String(activeJobIdRef.current) === id) continue;
+            const offer = await tryId(id);
+            if (offer) {
+              console.log('[Driver] Firebase jobs scan found Assigned orphan', id);
+              queuePromoteCandidateIdRef.current = id;
+              return offer;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Driver] Firebase jobs scan for adopt orphan failed:', err);
     }
     return null;
   };
