@@ -14,9 +14,14 @@ test('jobMatchesDriverVehicle forces van for 5+ passengers (server parity)', () 
   assert.match(src, /if\s*\(\s*reqPax\s*>=\s*5\s*\)\s*reqCat\s*=\s*['"]van['"]/);
 });
 
-test('Offers pool lock disabled for Option 1 (browsable while busy)', () => {
+test('Offers pool lock restored: dispatch jobs locked until On Board (hail exempt)', () => {
   const ctx = readFileSync(join(root, 'context/DriverContext.tsx'), 'utf8');
   assert.match(
+    ctx,
+    /function isDispatchEnrouteOffersLocked\([\s\S]*?activeJob\.stage === 'onboard'/,
+  );
+  assert.match(ctx, /if \(!activeJob \|\| hailActive \|\| activeJob\.source === 'hail'\) return false/);
+  assert.doesNotMatch(
     ctx,
     /function isDispatchEnrouteOffersLocked[\s\S]*?\{\s*return false;\s*\}/,
   );

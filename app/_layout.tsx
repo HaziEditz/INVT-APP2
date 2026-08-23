@@ -8,6 +8,7 @@ import { JobOfferModal } from '@/components/JobOfferModal';
 import { LazyPaymentModalHost } from '@/components/LazyPaymentModalHost';
 import { EndShiftFlow } from '@/components/EndShiftFlow';
 import { DriverInAppBanner } from '@/components/DriverInAppBanner';
+import { QueuePromoteFlash } from '@/components/QueuePromoteFlash';
 import { SosNotificationBootstrap } from '@/components/SosNotificationBootstrap';
 import { SosIncidentRelease } from '@/components/SosIncidentRelease';
 import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
@@ -64,6 +65,9 @@ export default function RootLayout() {
         </ErrorBoundary>
         <ErrorBoundary name="JobOfferModal">
           <JobOfferModal />
+        </ErrorBoundary>
+        <ErrorBoundary name="QueuePromoteFlash">
+          <QueuePromoteFlash />
         </ErrorBoundary>
         {/* Lazy: OCR/camera/Terminal must not block AuthProvider mount */}
         <LazyPaymentModalHost />

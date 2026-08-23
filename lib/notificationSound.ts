@@ -63,22 +63,29 @@ export async function unloadOfferAlertSound(): Promise<void> {
   toneSound = null;
 }
 
-async function playToneBurst(): Promise<void> {
-  await preloadOfferAlertSound();
-  if (!toneSound) {
-    const created = await Audio.Sound.createAsync(require('@/assets/sounds/alert.wav'), {
-      shouldPlay: true,
-      volume: 1.0,
-    });
-    toneSound = created.sound;
-    return;
-  }
-  try {
-    await toneSound.setPositionAsync(0);
-    await toneSound.playAsync();
-  } catch {
-    await unloadOfferAlertSound();
-    await playToneBurst();
+async function playToneBurst(opts?: { longerBeep?: boolean }): Promise<void> {
+  const bursts = opts?.longerBeep ? 3 : 1;
+  for (let i = 0; i < bursts; i++) {
+    await preloadOfferAlertSound();
+    if (!toneSound) {
+      const created = await Audio.Sound.createAsync(require('@/assets/sounds/alert.wav'), {
+        shouldPlay: true,
+        volume: 1.0,
+      });
+      toneSound = created.sound;
+    } else {
+      try {
+        await toneSound.setPositionAsync(0);
+        await toneSound.playAsync();
+      } catch {
+        await unloadOfferAlertSound();
+        await playToneBurst({ longerBeep: false });
+        return;
+      }
+    }
+    if (i < bursts - 1) {
+      await new Promise((r) => setTimeout(r, 420));
+    }
   }
 }
 
@@ -146,12 +153,15 @@ export async function alertDriverToOffer(offer: JobOffer): Promise<void> {
 }
 
 /** Play a short alert sound when an in-app notification popup appears. */
-export async function playInAppNotificationSound(kind: InAppSoundKind = 'general'): Promise<void> {
+export async function playInAppNotificationSound(
+  kind: InAppSoundKind = 'general',
+  opts?: { longerBeep?: boolean },
+): Promise<void> {
   const title = ALERT_TITLES[kind];
   await playHaptic(kind);
 
   const tasks: Promise<unknown>[] = [
-    playToneBurst().catch(() =>
+    playToneBurst({ longerBeep: !!opts?.longerBeep }).catch(() =>
       playNotificationChannelSound(kind, title, ' ').catch(() => undefined),
     ),
   ];

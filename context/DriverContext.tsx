@@ -282,6 +282,8 @@ interface DriverContextValue {
   pendingOffers: JobOffer[];
   /** Dispatch en-route: Offers tab hidden from accept until On Board (hail exempt). */
   offersLockedForEnrouteDispatch: boolean;
+  /** Brief flash after queue promote adopt (no modal). */
+  queuePromoteFlash: boolean;
   offersBadgeCount: number;
   preferredPanelTab: MainPanelTab | null;
   clearPreferredPanelTab: () => void;
@@ -581,16 +583,19 @@ const EMPTY_STEP_TIMES: JobStepTimes = {};
 const TRIP_BLOCK_MSG = 'Complete your current job first';
 
 /**
- * Offers-tab pool lock. Option 1: always unlocked — Pending pool stays browsable
- * while Busy/hail/enroute so drivers can voluntarily queue-while-busy.
- * (Exclusive Offered popups remain suppressed separately while on a trip.)
+ * Offers-tab pool lock for dispatch jobs: hidden from Accept through Arrived.
+ * Unlocks at Passenger On Board (stage onboard) or when the meter is running.
+ * Hail trips stay exempt so Option 1 queue-while-busy still works on street hail.
  */
 function isDispatchEnrouteOffersLocked(
-  _activeJob: ActiveJob | null,
-  _hailActive: boolean,
-  _meterRunning: boolean,
+  activeJob: ActiveJob | null,
+  hailActive: boolean,
+  meterRunning: boolean,
 ): boolean {
-  return false;
+  if (!activeJob || hailActive || activeJob.source === 'hail') return false;
+  if (activeJob.stage === 'onboard' || activeJob.stage === 'complete') return false;
+  if (meterRunning) return false;
+  return true;
 }
 
 function defaultActiveJob(offer: JobOffer): ActiveJob {
@@ -825,6 +830,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const bookingRawRef = useRef<Record<string, unknown> | null>(null);
   /** Suppress false "taken back" alerts when we initiated completion (allbookings node deleted). */
   const localCompletionRef = useRef(false);
+  /** Suppress "already completed" alerts for jobs we just finished (queue-promote race). */
+  const recentlyCompletedJobIdsRef = useRef<Map<string, number>>(new Map());
+  /** Brief full-screen flash after queue promote adopt (no modal). */
+  const [queuePromoteFlash, setQueuePromoteFlash] = useState(false);
+  const queuePromoteFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tripOnTheWay, setTripOnTheWay] = useState(false);
   const [nearPickup, setNearPickup] = useState(false);
   const tripOnTheWayRef = useRef(false);
@@ -2050,6 +2060,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
    * Waiting for Accept leaves Assigned orphans when JobOfferModal is held hidden
    * (Syncing / paymentJob) — see #81952/#81956 vs clean #81951.
    */
+  const signalQueuePromoteAttention = () => {
+    if (queuePromoteFlashTimerRef.current) {
+      clearTimeout(queuePromoteFlashTimerRef.current);
+      queuePromoteFlashTimerRef.current = null;
+    }
+    setQueuePromoteFlash(true);
+    queuePromoteFlashTimerRef.current = setTimeout(() => {
+      setQueuePromoteFlash(false);
+      queuePromoteFlashTimerRef.current = null;
+    }, 700);
+    void playInAppNotificationSound('offer', { longerBeep: true });
+  };
+
   const adoptPromotedQueueOfferAsActive = async (
     offer: QueuedOffer,
     opts?: { version?: number },
@@ -2079,6 +2102,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setQueuedOffers((prev) => prev.filter((o) => o.id !== offer.id));
     queuePromoteCandidateIdRef.current = null;
     setPreferredPanelTab('current');
+    signalQueuePromoteAttention();
     await withTimeout(
       storeData(STORAGE_KEYS.activeJob, job),
       2_000,
@@ -2263,7 +2287,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         if (decision.action === 'adopt_assigned' && orphanOffer) {
           try {
             await adoptPromotedQueueOfferAsActive(orphanOffer);
-            void playInAppNotificationSound('offer');
           } catch (err) {
             console.warn('[Driver] adopt assigned orphan after server promote failed:', err);
             queuePromoteRetryAttemptRef.current = attempt + 1;
@@ -2314,7 +2337,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           ) {
             try {
               await adoptPromotedQueueOfferAsActive(localQ, { version });
-              void playInAppNotificationSound('offer');
               return;
             } catch (err) {
               console.warn('[Driver] queue adopt after promote retry failed:', err);
@@ -2940,16 +2962,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         ) ||
         poolReturn
       ) {
+        const completedAtMs = recentlyCompletedJobIdsRef.current.get(String(activeJob.id));
+        const recentlyCompletedLocally =
+          completedAtMs != null && Date.now() - completedAtMs < 90_000;
         const expectedLocalComplete =
           localCompletionRef.current ||
+          recentlyCompletedLocally ||
           update.status === 'removed' ||
           String(update.raw.BookingStatus ?? update.raw.Status ?? '').toLowerCase().includes('complete');
         if (expectedLocalComplete) {
           localCompletionRef.current = false;
-          void clearStaleActiveJobLocal('Trip completed.', { silent: true });
+          // Only clear if this booking is still the active trip — after queue
+          // promote adopt, a late Completed event for the finished job must not
+          // wipe the newly adopted Assigned job (and must not Alert).
+          if (
+            !activeJobIdRef.current ||
+            String(activeJobIdRef.current) === String(activeJob.id)
+          ) {
+            void clearStaleActiveJobLocal('Trip completed.', { silent: true });
+          }
           return;
         }
         if (update.terminal && !update.status.includes('cancel') && update.status !== 'removed') {
+          if (
+            recentlyCompletedLocally ||
+            String(activeJobIdRef.current) !== String(activeJob.id)
+          ) {
+            return;
+          }
           void playInAppNotificationSound('general');
           void clearStaleActiveJobLocal(
             `Job #${activeJob.id} was already completed on dispatch. You can end shift or take new jobs.`,
@@ -4797,6 +4837,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const completedAt = Date.now();
     setCompletionError(null);
     localCompletionRef.current = true;
+    recentlyCompletedJobIdsRef.current.set(String(job.id), completedAt);
     setJobOffer(null);
     lastOfferSeenRef.current = null;
 
@@ -6002,6 +6043,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         visibleOffers,
         pendingOffers: visibleOffers,
         offersLockedForEnrouteDispatch,
+        queuePromoteFlash,
         offersBadgeCount,
         preferredPanelTab,
         clearPreferredPanelTab: () => setPreferredPanelTab(null),

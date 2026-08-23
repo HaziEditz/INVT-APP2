@@ -17,16 +17,26 @@ import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { MainPanelTab } from '@/types';
-import { useState, useRef } from 'react';
+import { useMemo, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
 export default function MainScreen() {
+  const { height: windowHeight } = useWindowDimensions();
+  const tripLayout = useMemo(() => {
+    // Keep job details readable after Accept across phone sizes: map capped,
+    // work panel gets a solid minimum (details + stage actions).
+    const mapMax = Math.round(Math.min(Math.max(windowHeight * 0.3, 180), 280));
+    const mapMin = Math.round(Math.min(Math.max(windowHeight * 0.2, 140), 200));
+    const workMin = Math.round(Math.max(windowHeight * 0.52, 340));
+    return { mapMax, mapMin, workMin };
+  }, [windowHeight]);
   const { firebaseUser, driver, profileLoading, refreshDriver } = useAuth();
   const {
     shiftActive,
@@ -136,7 +146,19 @@ export default function MainScreen() {
       <ConnectionStatusBanner />
 
       <View style={[styles.body, hasCurrent && styles.bodyTrip]}>
-        <View style={[styles.mapSection, hasCurrent && styles.mapSectionTrip]}>
+        <View
+          style={[
+            styles.mapSection,
+            hasCurrent && styles.mapSectionTrip,
+            hasCurrent && {
+              minHeight: tripLayout.mapMin,
+              maxHeight: tripLayout.mapMax,
+              flexGrow: 0,
+              flexShrink: 0,
+              flexBasis: tripLayout.mapMax,
+            },
+          ]}
+        >
           <ErrorBoundary name="MainMap" fallback={<MapErrorFallback />}>
             <JobMap
               compact={hasCurrent}
@@ -159,7 +181,13 @@ export default function MainScreen() {
           </Pressable>
         </View>
 
-        <View style={[styles.workSection, hasCurrent ? styles.workSectionTrip : styles.workSectionIdle]}>
+        <View
+          style={[
+            styles.workSection,
+            hasCurrent ? styles.workSectionTrip : styles.workSectionIdle,
+            hasCurrent && { minHeight: tripLayout.workMin, flex: 1 },
+          ]}
+        >
           {hasCurrent ? (
             <TripToolsBar
               meter={meterRunning && meter ? meter : null}
@@ -259,9 +287,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   mapSectionTrip: {
-    flex: 4,
-    minHeight: '28%',
-    maxHeight: '42%',
+    // Height applied dynamically from window size so details stay readable after Accept.
+    overflow: 'hidden',
   },
   expandBtn: {
     position: 'absolute',
@@ -292,10 +319,9 @@ const styles = StyleSheet.create({
     maxHeight: '52%',
   },
   workSectionTrip: {
-    flex: 6,
+    flex: 1,
     flexShrink: 1,
     minHeight: 0,
-    maxHeight: '100%',
   },
   /** Offers/Queue when idle — Current idle UI is IdleCurrentSection above, not here. */
   panelHostIdle: {

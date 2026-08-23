@@ -22,7 +22,10 @@ export function HomeMainTabs({
   onChange,
 }: Props) {
   const tabs: { id: MainPanelTab; label: string; badge?: number; disabled?: boolean }[] = [
-    { id: 'offers', label: 'Offers', badge: offersCount, disabled: offersLocked },
+    // Hide Offers entirely while en-route (Assigned→Arrived) — not just disabled.
+    ...(offersLocked
+      ? []
+      : [{ id: 'offers' as const, label: 'Offers', badge: offersCount }]),
     { id: 'current', label: 'Current', badge: workloadCount > 0 ? workloadCount : undefined },
     { id: 'queue', label: 'Queue', badge: queueCount },
   ];
