@@ -2093,6 +2093,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     );
     if (vehicleId) {
       writeOnlinePresence(driver, vehicleId, 'Assigned').catch(() => undefined);
+      void patchOnlineCurrentJobId(driver.companyId, vehicleId, job.id).catch((err) => {
+        console.warn('[Driver] patchOnlineCurrentJobId after queue adopt failed:', err);
+      });
       setPresenceStatus('Busy');
       readyForJobsRef.current = true;
     }
