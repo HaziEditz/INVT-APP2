@@ -63,6 +63,11 @@ import {
 } from '@/lib/driverQueue';
 import { mergeOptimisticQueuedOffer } from '@/lib/driverQueuePolicy';
 import { shouldAutoAdoptPromotedQueueJob } from '@/lib/queuePromoteAdopt';
+import {
+  decideQueuePromoteRetryTick,
+  nextQueuePromoteDelayMs,
+  QUEUE_PROMOTE_MAX_ATTEMPTS,
+} from '@/lib/queuePromoteRetry';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import {
   findStaleDirectOfferIds,
@@ -766,6 +771,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const broadcastOffersRef = useRef<Map<string, JobOffer>>(new Map());
   const suppressedOfferIdsRef = useRef<Set<string>>(new Set());
   const queuedOffersRef = useRef<QueuedOffer[]>([]);
+  const queuePromoteRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queuePromoteRetryAttemptRef = useRef(0);
+  const queuePromoteCandidateIdRef = useRef<string | null>(null);
+  const queuePromoteInFlightRef = useRef(false);
   const awayIntentRef = useRef<AwayIntent>('none');
   const [jobEditNotice, setJobEditNotice] = useState<string | null>(null);
   const [endShiftInProgress, setEndShiftInProgress] = useState(false);
@@ -1333,6 +1342,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!shiftActive || !driver?.companyId || !driver.id) {
       setQueuedOffers([]);
       prevQueuedOfferIdsRef.current = new Set();
+      if (queuePromoteRetryTimerRef.current) {
+        clearTimeout(queuePromoteRetryTimerRef.current);
+        queuePromoteRetryTimerRef.current = null;
+      }
+      queuePromoteRetryAttemptRef.current = 0;
+      queuePromoteCandidateIdRef.current = null;
       return;
     }
     const companyId = driver.companyId;
@@ -1352,6 +1367,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               }
               const parsed = parseBookingNode(snap.val());
               if (!parsed) return;
+              const st = String(parsed.status || '').toLowerCase().replace(/\s+/g, '');
+              // Server auto-promote removes driverQueue while status is Assigned —
+              // keep the candidate and arm retry so the device adopts without Accept.
+              if (
+                (st === 'assigned' || st === 'picking') &&
+                !activeJobIdRef.current &&
+                !hailActiveRef.current &&
+                !paymentJobRef.current
+              ) {
+                queuePromoteCandidateIdRef.current = id;
+                console.log('[Driver] queue node cleared after Assigned — arming adopt retry', id);
+                releaseQueuedOffersAfterTrip();
+                return;
+              }
               if (parsed.cancelled || (parsed.terminal && !parsed.status.includes('complete'))) {
                 Alert.alert('Queued job cancelled', 'A queued booking was cancelled or removed.');
               } else if (isReturnedToDispatchPool(parsed.status)) {
@@ -1998,10 +2027,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const releaseQueuedOffersAfterTrip = () => {
-    setTimeout(() => {
-      showNextQueuedJobAsOffer();
-    }, 600);
+  const stopQueuePromoteRetry = (reason?: string) => {
+    if (queuePromoteRetryTimerRef.current) {
+      clearTimeout(queuePromoteRetryTimerRef.current);
+      queuePromoteRetryTimerRef.current = null;
+    }
+    queuePromoteRetryAttemptRef.current = 0;
+    if (reason) {
+      console.log('[Driver] queue promote retry stopped:', reason);
+    }
   };
 
   /**
@@ -2036,6 +2070,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setActiveJob(job);
     activeJobIdRef.current = job.id;
     setQueuedOffers((prev) => prev.filter((o) => o.id !== offer.id));
+    queuePromoteCandidateIdRef.current = null;
     setPreferredPanelTab('current');
     await withTimeout(
       storeData(STORAGE_KEYS.activeJob, job),
@@ -2057,74 +2092,191 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     await clearDriverNotification(driver.id);
     console.log('[Driver] adopted promoted queue job as active', job.id);
+    stopQueuePromoteRetry('adopted');
   };
 
-  const showNextQueuedJobAsOffer = () => {
-    if (!driver || !shiftActiveRef.current) return;
-    if (hailActiveRef.current || activeJobIdRef.current || paymentJobRef.current) return;
-    // Same gates as deferred exclusive offers — do not surface queue jobs while
-    // Syncing / not ready (finalizePayment used to race release vs presence clear).
-    if (!readyForJobsRef.current) {
-      console.log('[Driver] showNextQueuedJobAsOffer deferred — not readyForJobs');
-      return;
+  const resolveAssignedOrphanForQueueRetry = async (
+    candidateId: string | null,
+  ): Promise<QueuedOffer | null> => {
+    if (!driver?.companyId || !candidateId || !isValidBookingId(candidateId)) return null;
+    if (activeJobIdRef.current || hailActiveRef.current || paymentJobRef.current) return null;
+    try {
+      const snap = await get(
+        ref(getDatabaseInstance(), `allbookings/${driver.companyId}/${candidateId}`),
+      );
+      if (!snap.exists()) return null;
+      const parsed = parseBookingNode(snap.val());
+      if (!parsed) return null;
+      const st = String(parsed.status || '').toLowerCase().replace(/\s+/g, '');
+      if (st !== 'assigned' && st !== 'picking') return null;
+      const drv = String((snap.val() as Record<string, unknown>)?.DriverId || '').trim();
+      if (drv && drv !== '0' && drv !== driver.id) return null;
+      const seed = queuedOffersRef.current.find((o) => o.id === candidateId);
+      return (
+        seed ||
+        ({
+          id: candidateId,
+          type: 'taxi',
+          pickup: parsed.pickup || '',
+          dropoff: parsed.dropoff || '',
+          source: 'queue',
+          queuedAt: Date.now(),
+          originalStatus: 'pending',
+        } as QueuedOffer)
+      );
+    } catch (err) {
+      console.warn('[Driver] resolveAssignedOrphanForQueueRetry failed:', err);
+      return null;
     }
-    if (pendingTripSyncBlocksOffersRef.current) {
-      console.log('[Driver] showNextQueuedJobAsOffer deferred — pending trip sync');
+  };
+
+  const runQueuePromoteRetryTick = () => {
+    if (queuePromoteInFlightRef.current) return;
+    if (!driver || !shiftActiveRef.current) {
+      stopQueuePromoteRetry('no_driver_or_shift');
       return;
     }
 
-    const q = queuedOffersRef.current[0];
-    if (!q) return;
-
-    if (!isValidBookingId(q.id)) {
-      console.warn('[Driver] dropping queued job with invalid booking id:', q.id);
-      setQueuedOffers((prev) => prev.filter((o) => o.id !== q.id));
-      return;
+    const attempt = queuePromoteRetryAttemptRef.current;
+    const localQ = queuedOffersRef.current[0] || null;
+    if (localQ?.id) {
+      queuePromoteCandidateIdRef.current = localQ.id;
     }
+    const candidateId = queuePromoteCandidateIdRef.current;
 
-    console.log('[Driver] showNextQueuedJobAsOffer → promote+adopt', q.id);
-    // Promote Queued→Assigned so dispatch leaves UA, then adopt as activeJob immediately.
-    // Do not leave Assigned waiting on Accept — modal is often hidden by Syncing.
     void (async () => {
-      let promoteSucceeded = false;
-      let version: number | undefined;
+      queuePromoteInFlightRef.current = true;
       try {
-        const result = (await promoteQueuedJob(q.id, driver.id)) as {
-          version?: number;
-          ok?: boolean;
-        };
-        promoteSucceeded = true;
-        version = result?.version;
-        console.log('[Driver] queue promote on popup → Assigned', q.id);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (/alreadyStatus|Assigned|invalid_transition/i.test(msg)) {
-          promoteSucceeded = true;
-          console.log('[Driver] queue promote already Assigned (idempotent)', q.id);
-        } else {
-          console.warn('[Driver] queue promote failed — leaving in queue for retry:', err);
+        const orphanOffer = await resolveAssignedOrphanForQueueRetry(candidateId);
+        const decision = decideQueuePromoteRetryTick({
+          attempt,
+          maxAttempts: QUEUE_PROMOTE_MAX_ATTEMPTS,
+          gate: {
+            shiftActive: shiftActiveRef.current,
+            hailActive: hailActiveRef.current,
+            hasActiveJob: !!activeJobIdRef.current,
+            hasPaymentJob: !!paymentJobRef.current,
+            readyForJobs: readyForJobsRef.current,
+            pendingTripSync: pendingTripSyncBlocksOffersRef.current,
+          },
+          localQueuedId: localQ?.id ?? null,
+          assignedOrphanId: orphanOffer?.id ?? null,
+        });
+        console.log(
+          `[Driver] queue promote retry tick attempt=${attempt} decision=${decision.action} (${decision.reason})` +
+            ` local=${localQ?.id ?? 'none'} candidate=${candidateId ?? 'none'}`,
+        );
+
+        if (decision.action === 'stop') {
+          stopQueuePromoteRetry(decision.reason);
           return;
         }
-      }
-      if (
-        !shouldAutoAdoptPromotedQueueJob({
-          promoteSucceeded,
-          alreadyHasActiveJob: !!activeJobIdRef.current,
-        })
-      ) {
-        return;
-      }
-      try {
-        await adoptPromotedQueueOfferAsActive(q, { version });
-        void playInAppNotificationSound('offer');
-      } catch (err) {
-        console.warn('[Driver] queue adopt after promote failed:', err);
-        Alert.alert(
-          'Could not start queued job',
-          'The next job was assigned on dispatch but could not open on this device. Ask dispatch to recall it, or force-close and reopen the app.',
-        );
+
+        if (decision.action === 'wait') {
+          queuePromoteRetryAttemptRef.current = attempt + 1;
+          queuePromoteRetryTimerRef.current = setTimeout(
+            runQueuePromoteRetryTick,
+            nextQueuePromoteDelayMs(attempt + 1),
+          );
+          return;
+        }
+
+        if (decision.action === 'adopt_assigned' && orphanOffer) {
+          try {
+            await adoptPromotedQueueOfferAsActive(orphanOffer);
+            void playInAppNotificationSound('offer');
+          } catch (err) {
+            console.warn('[Driver] adopt assigned orphan after server promote failed:', err);
+            queuePromoteRetryAttemptRef.current = attempt + 1;
+            queuePromoteRetryTimerRef.current = setTimeout(
+              runQueuePromoteRetryTick,
+              nextQueuePromoteDelayMs(attempt + 1),
+            );
+          }
+          return;
+        }
+
+        if (decision.action === 'promote' && localQ) {
+          let promoteSucceeded = false;
+          let version: number | undefined;
+          let recalledOrGone = false;
+          try {
+            const result = (await promoteQueuedJob(localQ.id, driver.id)) as {
+              version?: number;
+              ok?: boolean;
+            };
+            promoteSucceeded = true;
+            version = result?.version;
+            console.log('[Driver] queue promote retry → Assigned', localQ.id);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (/alreadyStatus|Assigned|invalid_transition/i.test(msg)) {
+              promoteSucceeded = true;
+              console.log('[Driver] queue promote retry already Assigned (idempotent)', localQ.id);
+            } else if (/not_found|recalled|Pending|Cancelled/i.test(msg)) {
+              recalledOrGone = true;
+              setQueuedOffers((prev) => prev.filter((o) => o.id !== localQ.id));
+              console.warn('[Driver] queue promote retry stopped — job gone:', msg);
+            } else {
+              console.warn('[Driver] queue promote retry failed — will retry:', err);
+            }
+          }
+
+          if (recalledOrGone) {
+            stopQueuePromoteRetry('recalled_or_gone');
+            return;
+          }
+
+          if (
+            shouldAutoAdoptPromotedQueueJob({
+              promoteSucceeded,
+              alreadyHasActiveJob: !!activeJobIdRef.current,
+            })
+          ) {
+            try {
+              await adoptPromotedQueueOfferAsActive(localQ, { version });
+              void playInAppNotificationSound('offer');
+              return;
+            } catch (err) {
+              console.warn('[Driver] queue adopt after promote retry failed:', err);
+            }
+          }
+
+          queuePromoteRetryAttemptRef.current = attempt + 1;
+          queuePromoteRetryTimerRef.current = setTimeout(
+            runQueuePromoteRetryTick,
+            nextQueuePromoteDelayMs(attempt + 1),
+          );
+        }
+      } finally {
+        queuePromoteInFlightRef.current = false;
       }
     })();
+  };
+
+  /** Start (or restart) retry loop — not a one-shot that silently no-ops. */
+  const releaseQueuedOffersAfterTrip = () => {
+    if (queuedOffersRef.current[0]?.id) {
+      queuePromoteCandidateIdRef.current = queuedOffersRef.current[0].id;
+    }
+    if (queuePromoteRetryTimerRef.current) {
+      clearTimeout(queuePromoteRetryTimerRef.current);
+      queuePromoteRetryTimerRef.current = null;
+    }
+    queuePromoteRetryAttemptRef.current = 0;
+    console.log(
+      '[Driver] queue promote retry armed',
+      queuePromoteCandidateIdRef.current || queuedOffersRef.current[0]?.id || 'none',
+    );
+    queuePromoteRetryTimerRef.current = setTimeout(
+      runQueuePromoteRetryTick,
+      nextQueuePromoteDelayMs(0),
+    );
+  };
+
+  /** Legacy single-shot entry — routes through retry loop. */
+  const showNextQueuedJobAsOffer = () => {
+    releaseQueuedOffersAfterTrip();
   };
 
   const driverHasConfirmedActiveTrip = () =>
