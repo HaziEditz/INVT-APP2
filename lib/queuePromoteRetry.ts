@@ -29,6 +29,20 @@ export function queuePromoteBlockedByTrip(gate: QueuePromoteRetryGate): boolean 
 }
 
 /**
+ * When driverQueue clears because server auto-promoted to Assigned, always
+ * remember the booking id — even if hail/payment is still active. Retry waits
+ * for gates; forgetting the id is what left Current blank (#8236).
+ */
+export function shouldRememberAssignedQueueCandidate(opts: {
+  allbookingsStatus: string;
+}): boolean {
+  const st = String(opts.allbookingsStatus || '')
+    .toLowerCase()
+    .replace(/\s+/g, '');
+  return st === 'assigned' || st === 'picking';
+}
+
+/**
  * Decide the next step for a queue-promote retry tick.
  * - wait: gates not clear yet (keep retrying)
  * - promote: local queued offer ready to POST promote-queued
@@ -42,6 +56,8 @@ export function decideQueuePromoteRetryTick(opts: {
   localQueuedId: string | null;
   /** Server-reported Assigned job for this driver with no local activeJob. */
   assignedOrphanId?: string | null;
+  /** Remembered id from queue-clear / complete.promotedQueuedBookingId. */
+  knownCandidateId?: string | null;
   lastPromoteSucceeded?: boolean;
   lastAdoptSucceeded?: boolean;
   recalledOrGone?: boolean;
@@ -81,6 +97,11 @@ export function decideQueuePromoteRetryTick(opts: {
   if (opts.lastPromoteSucceeded) {
     return { action: 'wait', reason: 'promote_ok_awaiting_adopt' };
   }
+  // Known candidate (queue cleared mid-trip / complete response) — keep polling
+  // for Assigned fanout until max attempts (do not stop at attempt 3).
+  if (opts.knownCandidateId) {
+    return { action: 'wait', reason: 'await_assigned_fanout_for_candidate' };
+  }
   // Empty queue early in the window — server may still be promoting / fanout lag.
   if (opts.attempt < 3) {
     return { action: 'wait', reason: 'await_queue_or_assigned_fanout' };
@@ -90,4 +111,15 @@ export function decideQueuePromoteRetryTick(opts: {
 
 export function nextQueuePromoteDelayMs(attempt: number): number {
   return attempt <= 0 ? QUEUE_PROMOTE_RETRY_INITIAL_MS : QUEUE_PROMOTE_RETRY_INTERVAL_MS;
+}
+
+/** Prefer complete API promotedQueuedBookingId when present. */
+export function pickPromotedQueuedBookingId(completeBody: Record<string, unknown> | null | undefined): string | null {
+  if (!completeBody || typeof completeBody !== 'object') return null;
+  const raw =
+    completeBody.promotedQueuedBookingId ??
+    completeBody.promotedQueuedJobId ??
+    completeBody.promotedBookingId;
+  const id = String(raw ?? '').trim();
+  return /^\d+$/.test(id) ? id : null;
 }

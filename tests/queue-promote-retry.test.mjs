@@ -6,10 +6,12 @@ import test from 'node:test';
 import {
   decideQueuePromoteRetryTick,
   nextQueuePromoteDelayMs,
+  pickPromotedQueuedBookingId,
   QUEUE_PROMOTE_MAX_ATTEMPTS,
   QUEUE_PROMOTE_RETRY_INITIAL_MS,
   QUEUE_PROMOTE_RETRY_INTERVAL_MS,
   queuePromoteBlockedByTrip,
+  shouldRememberAssignedQueueCandidate,
 } from '../lib/queuePromoteRetry.ts';
 
 const idleGate = {
@@ -37,6 +39,33 @@ test('retry waits while paymentJob/hail still active (does not silent no-op fore
   });
   assert.equal(d.action, 'wait');
   assert.equal(d.reason, 'trip_or_payment_active');
+});
+
+test('remember Assigned candidate even when trip still active (#8236)', () => {
+  assert.equal(
+    shouldRememberAssignedQueueCandidate({ allbookingsStatus: 'Assigned' }),
+    true,
+  );
+  assert.equal(
+    shouldRememberAssignedQueueCandidate({ allbookingsStatus: 'Queued' }),
+    false,
+  );
+});
+
+test('known candidate keeps waiting past early empty-queue stop', () => {
+  const d = decideQueuePromoteRetryTick({
+    attempt: 5,
+    gate: idleGate,
+    localQueuedId: null,
+    knownCandidateId: '8692608236',
+  });
+  assert.equal(d.action, 'wait');
+  assert.equal(d.reason, 'await_assigned_fanout_for_candidate');
+});
+
+test('pickPromotedQueuedBookingId from complete body', () => {
+  assert.equal(pickPromotedQueuedBookingId({ promotedQueuedBookingId: 8692608236 }), '8692608236');
+  assert.equal(pickPromotedQueuedBookingId({ ok: true }), null);
 });
 
 test('retry promotes when local queued and gates clear', () => {

@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, syncJobStageOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, fetchDriverActiveBookings, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, syncJobStageOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -66,7 +66,9 @@ import { shouldAutoAdoptPromotedQueueJob } from '@/lib/queuePromoteAdopt';
 import {
   decideQueuePromoteRetryTick,
   nextQueuePromoteDelayMs,
+  pickPromotedQueuedBookingId,
   QUEUE_PROMOTE_MAX_ATTEMPTS,
+  shouldRememberAssignedQueueCandidate,
 } from '@/lib/queuePromoteRetry';
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import {
@@ -1368,16 +1370,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               const parsed = parseBookingNode(snap.val());
               if (!parsed) return;
               const st = String(parsed.status || '').toLowerCase().replace(/\s+/g, '');
-              // Server auto-promote removes driverQueue while status is Assigned —
-              // keep the candidate and arm retry so the device adopts without Accept.
-              if (
-                (st === 'assigned' || st === 'picking') &&
-                !activeJobIdRef.current &&
-                !hailActiveRef.current &&
-                !paymentJobRef.current
-              ) {
+              // Server auto-promote removes driverQueue while status is Assigned.
+              // ALWAYS remember the id even if hail/payment still holds the UI —
+              // #8236 left Current blank because we only armed when gates were clear.
+              if (shouldRememberAssignedQueueCandidate({ allbookingsStatus: st })) {
                 queuePromoteCandidateIdRef.current = id;
-                console.log('[Driver] queue node cleared after Assigned — arming adopt retry', id);
+                console.log(
+                  '[Driver] queue node cleared after Assigned — remember candidate',
+                  id,
+                  {
+                    hailActive: hailActiveRef.current,
+                    activeJobId: activeJobIdRef.current,
+                    paymentJob: !!paymentJobRef.current,
+                  },
+                );
                 releaseQueuedOffersAfterTrip();
                 return;
               }
@@ -2098,36 +2104,66 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const resolveAssignedOrphanForQueueRetry = async (
     candidateId: string | null,
   ): Promise<QueuedOffer | null> => {
-    if (!driver?.companyId || !candidateId || !isValidBookingId(candidateId)) return null;
+    if (!driver?.companyId) return null;
     if (activeJobIdRef.current || hailActiveRef.current || paymentJobRef.current) return null;
-    try {
-      const snap = await get(
-        ref(getDatabaseInstance(), `allbookings/${driver.companyId}/${candidateId}`),
-      );
-      if (!snap.exists()) return null;
-      const parsed = parseBookingNode(snap.val());
-      if (!parsed) return null;
-      const st = String(parsed.status || '').toLowerCase().replace(/\s+/g, '');
-      if (st !== 'assigned' && st !== 'picking') return null;
-      const drv = String((snap.val() as Record<string, unknown>)?.DriverId || '').trim();
-      if (drv && drv !== '0' && drv !== driver.id) return null;
-      const seed = queuedOffersRef.current.find((o) => o.id === candidateId);
-      return (
-        seed ||
-        ({
-          id: candidateId,
-          type: 'taxi',
-          pickup: parsed.pickup || '',
-          dropoff: parsed.dropoff || '',
-          source: 'queue',
-          queuedAt: Date.now(),
-          originalStatus: 'pending',
-        } as QueuedOffer)
-      );
-    } catch (err) {
-      console.warn('[Driver] resolveAssignedOrphanForQueueRetry failed:', err);
-      return null;
+
+    const tryId = async (id: string): Promise<QueuedOffer | null> => {
+      if (!isValidBookingId(id)) return null;
+      try {
+        const snap = await get(
+          ref(getDatabaseInstance(), `allbookings/${driver.companyId}/${id}`),
+        );
+        if (!snap.exists()) return null;
+        const parsed = parseBookingNode(snap.val());
+        if (!parsed) return null;
+        const st = String(parsed.status || '').toLowerCase().replace(/\s+/g, '');
+        if (st !== 'assigned' && st !== 'picking') return null;
+        const drv = String((snap.val() as Record<string, unknown>)?.DriverId || '').trim();
+        if (drv && drv !== '0' && drv !== driver.id) return null;
+        const seed = queuedOffersRef.current.find((o) => o.id === id);
+        return (
+          seed ||
+          ({
+            id,
+            type: 'taxi',
+            pickup: parsed.pickup || '',
+            dropoff: parsed.dropoff || '',
+            source: 'queue',
+            queuedAt: Date.now(),
+            originalStatus: 'pending',
+          } as QueuedOffer)
+        );
+      } catch (err) {
+        console.warn('[Driver] resolveAssignedOrphan tryId failed:', id, err);
+        return null;
+      }
+    };
+
+    if (candidateId) {
+      const fromCandidate = await tryId(candidateId);
+      if (fromCandidate) return fromCandidate;
     }
+
+    // Fallback: server promoted while we lost the candidate id — ask dispatch.
+    try {
+      const rows = await fetchDriverActiveBookings(driver.id);
+      for (const row of rows) {
+        const st = String(row.bookingStatus || row.status || '')
+          .toLowerCase()
+          .replace(/\s+/g, '');
+        if (st !== 'assigned' && st !== 'picking') continue;
+        const id = String(row.bookingId || '');
+        if (activeJobIdRef.current && String(activeJobIdRef.current) === id) continue;
+        const offer = await tryId(id);
+        if (offer) {
+          queuePromoteCandidateIdRef.current = id;
+          return offer;
+        }
+      }
+    } catch (err) {
+      console.warn('[Driver] fetchDriverActiveBookings for adopt orphan failed:', err);
+    }
+    return null;
   };
 
   const runQueuePromoteRetryTick = () => {
@@ -2161,6 +2197,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           },
           localQueuedId: localQ?.id ?? null,
           assignedOrphanId: orphanOffer?.id ?? null,
+          knownCandidateId: candidateId,
         });
         console.log(
           `[Driver] queue promote retry tick attempt=${attempt} decision=${decision.action} (${decision.reason})` +
@@ -2278,6 +2315,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const showNextQueuedJobAsOffer = () => {
     releaseQueuedOffersAfterTrip();
   };
+
+  // Recover blank Current after server auto-promote (#8236): idle on-shift scan
+  // adopts Assigned orphan via active-bookings + candidate retry.
+  useSafeEffect(() => {
+    if (!shiftActive || !driver?.id || !readyForJobs) return;
+    if (hailActive || activeJob || paymentJob) return;
+    console.log('[Driver] idle on-shift — arm queue adopt/promote retry');
+    releaseQueuedOffersAfterTrip();
+  }, [shiftActive, readyForJobs, hailActive, activeJob?.id, paymentJob, driver?.id], 'Driver-adoptAssignedOrphanOnIdle');
 
   const driverHasConfirmedActiveTrip = () =>
     !!(activeJobIdRef.current || hailActiveRef.current || paymentJobRef.current);
@@ -4835,7 +4881,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     } else {
       const outcome = await runOnlineCompleteWithJournalFallback({
         completePayment: async () => {
-          await completeJobPayment(completePayload);
+          const completeResult = (await completeJobPayment(completePayload)) as Record<
+            string,
+            unknown
+          >;
+          const promotedId = pickPromotedQueuedBookingId(completeResult);
+          if (promotedId) {
+            queuePromoteCandidateIdRef.current = promotedId;
+            console.log(
+              '[Driver] complete returned promotedQueuedBookingId — arm adopt',
+              promotedId,
+            );
+          }
         },
         journalComplete: journalCompletedLocal,
         catchUpAndRetry: async () => {
@@ -4848,7 +4905,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             COMPLETE_ENRICH_TIMEOUT_MS,
             'catchUpJobStagesOnDispatch',
           );
-          await completeJobPayment(completePayload);
+          const completeResult = (await completeJobPayment(completePayload)) as Record<
+            string,
+            unknown
+          >;
+          const promotedId = pickPromotedQueuedBookingId(completeResult);
+          if (promotedId) {
+            queuePromoteCandidateIdRef.current = promotedId;
+            console.log(
+              '[Driver] complete(retry) returned promotedQueuedBookingId — arm adopt',
+              promotedId,
+            );
+          }
         },
       });
       if (outcome === 'journal_fallback') {
