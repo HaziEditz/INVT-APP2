@@ -64,28 +64,43 @@ export async function unloadOfferAlertSound(): Promise<void> {
 }
 
 async function playToneBurst(opts?: { longerBeep?: boolean }): Promise<void> {
-  const bursts = opts?.longerBeep ? 3 : 1;
-  for (let i = 0; i < bursts; i++) {
-    await preloadOfferAlertSound();
-    if (!toneSound) {
-      const created = await Audio.Sound.createAsync(require('@/assets/sounds/alert.wav'), {
-        shouldPlay: true,
-        volume: 1.0,
-      });
-      toneSound = created.sound;
-    } else {
+  await preloadOfferAlertSound();
+  if (!toneSound) {
+    const created = await Audio.Sound.createAsync(require('@/assets/sounds/alert.wav'), {
+      shouldPlay: true,
+      volume: 1.0,
+      isLooping: !!opts?.longerBeep,
+    });
+    toneSound = created.sound;
+    if (opts?.longerBeep) {
+      await new Promise((r) => setTimeout(r, 5000));
       try {
-        await toneSound.setPositionAsync(0);
-        await toneSound.playAsync();
+        await toneSound.stopAsync();
+        await toneSound.setIsLoopingAsync(false);
       } catch {
-        await unloadOfferAlertSound();
-        await playToneBurst({ longerBeep: false });
-        return;
+        /* ignore */
       }
     }
-    if (i < bursts - 1) {
-      await new Promise((r) => setTimeout(r, 420));
+    return;
+  }
+  try {
+    // Restarting playAsync every 420ms does not produce 3 audible beeps on device —
+    // playAsync resolves on start, so bursts overlap/cancel. Loop for ~5s instead.
+    if (opts?.longerBeep) {
+      await toneSound.setIsLoopingAsync(true);
+      await toneSound.setPositionAsync(0);
+      await toneSound.playAsync();
+      await new Promise((r) => setTimeout(r, 5000));
+      await toneSound.stopAsync();
+      await toneSound.setIsLoopingAsync(false);
+      return;
     }
+    await toneSound.setIsLoopingAsync(false);
+    await toneSound.setPositionAsync(0);
+    await toneSound.playAsync();
+  } catch {
+    await unloadOfferAlertSound();
+    await playToneBurst({ longerBeep: !!opts?.longerBeep });
   }
 }
 

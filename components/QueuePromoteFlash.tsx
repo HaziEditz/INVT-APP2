@@ -3,7 +3,7 @@ import { useDriver } from '@/context/DriverContext';
 import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 
-/** Non-modal attention cue when a queued job is auto-adopted after trip complete. */
+/** ~5s non-modal flash when a queued job is auto-adopted after trip complete. */
 export function QueuePromoteFlash() {
   const { queuePromoteFlash } = useDriver();
   const opacity = useRef(new Animated.Value(0)).current;
@@ -14,11 +14,13 @@ export function QueuePromoteFlash() {
       return;
     }
     opacity.setValue(0);
+    const pulse = Animated.sequence([
+      Animated.timing(opacity, { toValue: 0.55, duration: 120, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 0.18, duration: 280, useNativeDriver: true }),
+    ]);
     const anim = Animated.sequence([
-      Animated.timing(opacity, { toValue: 0.55, duration: 90, useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 0.15, duration: 160, useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 0.5, duration: 120, useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 0, duration: 280, useNativeDriver: true }),
+      Animated.loop(pulse, { iterations: 8 }),
+      Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
     ]);
     anim.start();
     return () => anim.stop();

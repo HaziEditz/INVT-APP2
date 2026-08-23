@@ -38,7 +38,7 @@ export interface Vehicle {
 
 export type MainPanelTab = 'offers' | 'current' | 'queue';
 
-export type PresenceDisplayStatus = 'Online' | 'Offline' | 'Away';
+export type PresenceDisplayStatus = 'Online' | 'Offline' | 'Away' | 'Busy';
 
 export interface JobNoteLine {
   label: string;

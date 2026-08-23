@@ -4,9 +4,9 @@
  * or the queued job is gone (recalled / already promoted elsewhere).
  */
 
-export const QUEUE_PROMOTE_RETRY_INITIAL_MS = 600;
-export const QUEUE_PROMOTE_RETRY_INTERVAL_MS = 2_000;
-export const QUEUE_PROMOTE_MAX_ATTEMPTS = 15;
+export const QUEUE_PROMOTE_RETRY_INITIAL_MS = 0;
+export const QUEUE_PROMOTE_RETRY_INTERVAL_MS = 500;
+export const QUEUE_PROMOTE_MAX_ATTEMPTS = 20;
 
 export type QueuePromoteRetryGate = {
   shiftActive: boolean;
@@ -78,21 +78,31 @@ export function decideQueuePromoteRetryTick(opts: {
   if (queuePromoteBlockedByTrip(opts.gate)) {
     return { action: 'wait', reason: 'trip_or_payment_active' };
   }
-  if (!opts.gate.readyForJobs) {
+  // Do not stall on readyForJobs when we already know a queued/promoted job —
+  // post-complete Busy presence used to force ready=false and show Away for ~10s.
+  const hasQueueWork = !!(
+    opts.localQueuedId ||
+    opts.assignedOrphanId ||
+    opts.knownCandidateId
+  );
+  if (!opts.gate.readyForJobs && !hasQueueWork) {
     return { action: 'wait', reason: 'not_ready_for_jobs' };
+  }
+  // Server already Assigned: adopt even while journal Syncing (no Available write needed).
+  if (opts.assignedOrphanId) {
+    return {
+      action: 'adopt_assigned',
+      reason: opts.gate.pendingTripSync
+        ? 'server_already_assigned_during_sync'
+        : 'server_already_assigned',
+      bookingId: opts.assignedOrphanId,
+    };
   }
   if (opts.gate.pendingTripSync) {
     return { action: 'wait', reason: 'pending_trip_sync' };
   }
   if (opts.localQueuedId) {
     return { action: 'promote', reason: 'local_queued' };
-  }
-  if (opts.assignedOrphanId) {
-    return {
-      action: 'adopt_assigned',
-      reason: 'server_already_assigned',
-      bookingId: opts.assignedOrphanId,
-    };
   }
   if (opts.lastPromoteSucceeded) {
     return { action: 'wait', reason: 'promote_ok_awaiting_adopt' };

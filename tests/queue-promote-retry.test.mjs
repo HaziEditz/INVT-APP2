@@ -128,9 +128,31 @@ test('early empty queue waits for fanout; later stops', () => {
   );
 });
 
-test('delay cadence: first 600ms then 2s', () => {
+test('delay cadence: immediate then 500ms', () => {
   assert.equal(nextQueuePromoteDelayMs(0), QUEUE_PROMOTE_RETRY_INITIAL_MS);
   assert.equal(nextQueuePromoteDelayMs(1), QUEUE_PROMOTE_RETRY_INTERVAL_MS);
-  assert.equal(QUEUE_PROMOTE_RETRY_INITIAL_MS, 600);
-  assert.equal(QUEUE_PROMOTE_RETRY_INTERVAL_MS, 2_000);
+  assert.equal(QUEUE_PROMOTE_RETRY_INITIAL_MS, 0);
+  assert.equal(QUEUE_PROMOTE_RETRY_INTERVAL_MS, 500);
+});
+
+test('known queue work does not stall on readyForJobs=false (Away delay bug)', () => {
+  const d = decideQueuePromoteRetryTick({
+    attempt: 0,
+    gate: { ...idleGate, readyForJobs: false },
+    localQueuedId: null,
+    knownCandidateId: '8692608236',
+    assignedOrphanId: '8692608236',
+  });
+  assert.equal(d.action, 'adopt_assigned');
+});
+
+test('adopt Assigned even while pendingTripSync', () => {
+  const d = decideQueuePromoteRetryTick({
+    attempt: 0,
+    gate: { ...idleGate, pendingTripSync: true },
+    localQueuedId: null,
+    assignedOrphanId: '8692608236',
+  });
+  assert.equal(d.action, 'adopt_assigned');
+  assert.equal(d.reason, 'server_already_assigned_during_sync');
 });

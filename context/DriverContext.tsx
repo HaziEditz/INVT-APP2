@@ -1751,9 +1751,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
           if (rawStatus === 'picking' || rawStatus === 'assigned' || rawStatus === 'busy') {
             if (awayIntentRef.current === 'none') {
-              setPresenceStatus('Online');
-              setReadyForJobs(false);
-              readyForJobsRef.current = false;
+              const promotingQueue =
+                !!queuePromoteCandidateIdRef.current || queuedOffersRef.current.length > 0;
+              const onTrip =
+                !!activeJobIdRef.current ||
+                !!paymentJobRef.current ||
+                hailActiveRef.current;
+              // Post-complete Busy with a queued promote must keep readyForJobs —
+              // clearing it made the status bar default to Away and stalled adopt ~10s.
+              if (promotingQueue && !onTrip) {
+                setPresenceStatus('Busy');
+                readyForJobsRef.current = true;
+                setReadyForJobs(true);
+              } else {
+                setPresenceStatus('Online');
+                readyForJobsRef.current = false;
+                setReadyForJobs(false);
+              }
             }
           }
         } catch (err) {
@@ -2069,7 +2083,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     queuePromoteFlashTimerRef.current = setTimeout(() => {
       setQueuePromoteFlash(false);
       queuePromoteFlashTimerRef.current = null;
-    }, 700);
+    }, 5200);
     void playInAppNotificationSound('offer', { longerBeep: true });
   };
 
@@ -2432,10 +2446,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
     // Queued job waiting to promote — stay Busy. Writing Available here races the
     // queue popup promote into DSC auto-recall / Cancelled / fake Completed.
-    if (queuedOffersRef.current.length > 0) {
+    // Also treat remembered promote candidate (server already cleared driverQueue).
+    if (queuedOffersRef.current.length > 0 || queuePromoteCandidateIdRef.current) {
       console.log(
         '[away-debug] syncPresenceAfterTripClear → Busy (queued job pending promote)',
-        { queued: queuedOffersRef.current.map((o) => o.id) },
+        {
+          queued: queuedOffersRef.current.map((o) => o.id),
+          candidate: queuePromoteCandidateIdRef.current,
+        },
       );
       if (awayIntentRef.current === 'missed') {
         awayIntentRef.current = 'none';
@@ -5124,7 +5142,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     persistClosedJobToFirebase();
 
-    void playInAppNotificationSound('general');
+    // Skip generic complete chime when a queued job will promote — that single beep
+    // is what Ad heard; the real cue is the ~5s loop on adopt.
+    if (!queuePromoteCandidateIdRef.current && queuedOffersRef.current.length === 0) {
+      void playInAppNotificationSound('general');
+    }
 
     const done: CompletedJob = { ...closed, completedAt };
     setCompletedJobs((prev) => [done, ...prev]);
@@ -5986,6 +6008,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const isAvailableForDisplay =
     presenceStatus === 'Online' && shiftActive && readyForJobs && !paymentJob;
   const isAwayForDisplay = presenceStatus === 'Away' && shiftActive;
+  // Busy (incl. post-complete queue promote) must not fall through to Away label.
+  const isBusyHoldForDisplay =
+    shiftActive &&
+    !paymentJob &&
+    !activeJob &&
+    !hailActive &&
+    (presenceStatus === 'Busy' ||
+      (presenceStatus === 'Online' && !readyForJobs && queuedOffers.length > 0));
 
   const tripDisplayPhase = useMemo(
     () =>
@@ -5999,6 +6029,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         tripOnTheWay,
         isAway: isAwayForDisplay,
         isAvailable: isAvailableForDisplay,
+        isBusyHold: isBusyHoldForDisplay,
       }),
     [
       shiftActive,
@@ -6010,6 +6041,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       tripOnTheWay,
       isAwayForDisplay,
       isAvailableForDisplay,
+      isBusyHoldForDisplay,
+      presenceStatus,
+      readyForJobs,
+      queuedOffers.length,
     ],
   );
 

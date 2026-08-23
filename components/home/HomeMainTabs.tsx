@@ -22,12 +22,13 @@ export function HomeMainTabs({
   onChange,
 }: Props) {
   const tabs: { id: MainPanelTab; label: string; badge?: number; disabled?: boolean }[] = [
-    // Hide Offers entirely while en-route (Assigned→Arrived) — not just disabled.
+    // Hide Offers + Queue while en-route (Assigned→Arrived) — same lock window.
+    // Hail stays unlocked via offersLocked=false from DriverContext.
     ...(offersLocked
       ? []
       : [{ id: 'offers' as const, label: 'Offers', badge: offersCount }]),
     { id: 'current', label: 'Current', badge: workloadCount > 0 ? workloadCount : undefined },
-    { id: 'queue', label: 'Queue', badge: queueCount },
+    ...(offersLocked ? [] : [{ id: 'queue' as const, label: 'Queue', badge: queueCount }]),
   ];
 
   return (

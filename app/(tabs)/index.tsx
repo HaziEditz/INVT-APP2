@@ -72,10 +72,13 @@ export default function MainScreen() {
   const workloadCount = (hasCurrent ? 1 : 0) + queuedOffers.length;
 
   useSafeEffect(() => {
-    if (offersLockedForEnrouteDispatch && mainTab === 'offers') {
+    if (
+      offersLockedForEnrouteDispatch &&
+      (mainTab === 'offers' || mainTab === 'queue')
+    ) {
       setMainTab('current');
     }
-  }, [offersLockedForEnrouteDispatch, mainTab], 'MainScreen-lockOffersTab');
+  }, [offersLockedForEnrouteDispatch, mainTab], 'MainScreen-lockOffersQueueTabs');
 
   useSafeEffect(() => {
     refreshDriver().catch((err) => console.error('[Main] refreshDriver failed:', err));

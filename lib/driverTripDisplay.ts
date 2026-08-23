@@ -10,7 +10,8 @@ export type DriverTripDisplayPhase =
   | 'onTheWay'
   | 'arrived'
   | 'onBoard'
-  | 'hail';
+  | 'hail'
+  | 'busy';
 
 /** Align with dispatch Assign (#4f6ef7), Offer/Offer-popup (green), Active (#ef4444). */
 export const TRIP_DISPLAY_COLORS: Record<DriverTripDisplayPhase, string> = {
@@ -23,6 +24,7 @@ export const TRIP_DISPLAY_COLORS: Record<DriverTripDisplayPhase, string> = {
   arrived: '#F59E0B',
   onBoard: '#EF4444',
   hail: '#EF4444',
+  busy: '#4F6EF7',
 };
 
 export const TRIP_DISPLAY_LABELS: Record<DriverTripDisplayPhase, string> = {
@@ -35,6 +37,7 @@ export const TRIP_DISPLAY_LABELS: Record<DriverTripDisplayPhase, string> = {
   arrived: 'Arrived',
   onBoard: 'On Board',
   hail: 'Hail',
+  busy: 'Busy',
 };
 
 const EARTH_RADIUS_M = 6_371_000;
@@ -59,6 +62,8 @@ export function resolveTripDisplayPhase(input: {
   tripOnTheWay: boolean;
   isAway: boolean;
   isAvailable: boolean;
+  /** Post-complete Busy / queue-promote hold — must not default to Away. */
+  isBusyHold?: boolean;
 }): DriverTripDisplayPhase {
   if (!input.shiftActive) return 'off';
   if (input.hasOfferPopup) return 'offer';
@@ -73,6 +78,7 @@ export function resolveTripDisplayPhase(input: {
   }
   if (input.isAway) return 'away';
   if (input.isAvailable) return 'available';
+  if (input.isBusyHold) return 'busy';
   return 'away';
 }
 
