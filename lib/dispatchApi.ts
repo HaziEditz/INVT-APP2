@@ -518,6 +518,40 @@ export async function searchBusinessAccounts(
   return Array.isArray(data.accounts) ? data.accounts : [];
 }
 
+export type DriverAccVerifyResult = {
+  valid: boolean;
+  message?: string;
+  companyId?: string;
+  clientId?: string | number;
+  claimantName?: string;
+  source?: string;
+};
+
+/** Company-scoped ACC claim check for hail / TM remainder (never trust client cid alone). */
+export async function verifyDriverAccClaim(
+  claim: string,
+): Promise<DriverAccVerifyResult> {
+  const data = await driverApiPost<{
+    ok?: boolean;
+    valid?: boolean;
+    message?: string;
+    companyId?: string;
+    clientId?: string | number;
+    claimantName?: string;
+    source?: string;
+  }>('/api/driver/verify-acc', {
+    claim: String(claim || '').trim(),
+  });
+  return {
+    valid: data.valid === true,
+    message: data.message ? String(data.message) : undefined,
+    companyId: data.companyId ? String(data.companyId) : undefined,
+    clientId: data.clientId,
+    claimantName: data.claimantName ? String(data.claimantName) : undefined,
+    source: data.source ? String(data.source) : undefined,
+  };
+}
+
 export async function completeJobPayment(payload: Record<string, unknown>) {
   const headers = await driverApiHeaders();
   const body = await withDriverIdentity(payload);

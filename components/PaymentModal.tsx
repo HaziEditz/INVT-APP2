@@ -7,7 +7,11 @@ import {
   rememberBusinessAccount,
   searchCachedAccounts,
 } from '@/lib/accountCache';
-import { searchBusinessAccounts, type DriverAccountSearchHit } from '@/lib/dispatchApi';
+import {
+  searchBusinessAccounts,
+  verifyDriverAccClaim,
+  type DriverAccountSearchHit,
+} from '@/lib/dispatchApi';
 import { normalizeDriverPaymentType } from '@/lib/driverPayment';
 import type { CardScanFields } from '@/lib/cardOcrParse';
 import {
@@ -312,6 +316,11 @@ export function PaymentModal() {
     });
   };
   const [accClaimNo, setAccClaimNo] = useState('');
+  const [accVerifyStatus, setAccVerifyStatus] = useState<
+    'idle' | 'checking' | 'valid' | 'invalid'
+  >('idle');
+  const [accVerifyMessage, setAccVerifyMessage] = useState('');
+  const accVerifySeq = useRef(0);
   const [accPoNo, setAccPoNo] = useState('');
   const [tmCardNumber, setTmCardNumber] = useState('');
   const [tmCardExpiry, setTmCardExpiry] = useState('');
@@ -476,6 +485,66 @@ export function PaymentModal() {
     tmPassengerPaymentType,
     networkResumeEpoch,
   ]);
+
+  const accUiActive =
+    paymentType === 'ACC' || (isTmPayment && tmPassengerPaymentType === 'ACC');
+
+  useEffect(() => {
+    if (!accUiActive) {
+      setAccVerifyStatus('idle');
+      setAccVerifyMessage('');
+      return;
+    }
+    const claim = accClaimNo.trim();
+    if (claim.length < 2) {
+      setAccVerifyStatus('idle');
+      setAccVerifyMessage('');
+      return;
+    }
+    const seq = ++accVerifySeq.current;
+    setAccVerifyStatus('checking');
+    setAccVerifyMessage('');
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const net = await NetInfo.fetch().catch(() => null);
+          if (net?.isConnected === false) {
+            if (seq !== accVerifySeq.current) return;
+            setAccVerifyStatus('idle');
+            setAccVerifyMessage(
+              'Offline — claim will be checked when you reconnect. You can still enter it.',
+            );
+            return;
+          }
+          const result = await verifyDriverAccClaim(claim);
+          if (seq !== accVerifySeq.current) return;
+          if (result.valid) {
+            setAccVerifyStatus('valid');
+            setAccVerifyMessage(
+              result.claimantName
+                ? `Verified: ${result.claimantName}`
+                : result.message || 'ACC claim verified.',
+            );
+          } else {
+            setAccVerifyStatus('invalid');
+            setAccVerifyMessage(
+              result.message ||
+                'ACC claim number not found for this company. Please check and try again.',
+            );
+          }
+        } catch (err) {
+          if (seq !== accVerifySeq.current) return;
+          setAccVerifyStatus('invalid');
+          setAccVerifyMessage(
+            err instanceof Error && err.message
+              ? err.message
+              : 'ACC verify failed. Check connection and try again.',
+          );
+        }
+      })();
+    }, 350);
+    return () => clearTimeout(t);
+  }, [accUiActive, accClaimNo, networkResumeEpoch, paymentJob?.id]);
 
   useEffect(() => {
     if (!isTmPayment || !driver?.companyId) {
@@ -655,6 +724,34 @@ export function PaymentModal() {
       }
       if (!accountAllowFreeText) {
         Alert.alert('Select account', 'Search and select a business account before confirming.');
+        return;
+      }
+    }
+    const needsAcc =
+      paymentType === 'ACC' || (isTmPayment && tmPassengerPaymentType === 'ACC');
+    if (needsAcc) {
+      const claim = accClaimNo.trim();
+      if (claim.length < 2) {
+        Alert.alert('ACC claim required', 'Enter a valid ACC claim number before confirming.');
+        return;
+      }
+      if (accVerifyStatus === 'checking') {
+        Alert.alert('Verifying ACC', 'Wait for the claim number to finish verifying.');
+        return;
+      }
+      if (accVerifyStatus === 'invalid') {
+        Alert.alert(
+          'ACC claim not found',
+          accVerifyMessage ||
+            'This ACC claim is not registered for your company. Check the number and try again.',
+        );
+        return;
+      }
+      if (accVerifyStatus !== 'valid') {
+        Alert.alert(
+          'Verify ACC claim',
+          'Enter a company ACC claim number and wait for verification before confirming.',
+        );
         return;
       }
     }
@@ -954,8 +1051,30 @@ export function PaymentModal() {
               placeholder="Claim number"
               placeholderTextColor={Colors.textMuted}
               value={accClaimNo}
-              onChangeText={setAccClaimNo}
+              onChangeText={(t) => {
+                setAccClaimNo(t);
+                setAccVerifyStatus('idle');
+                setAccVerifyMessage('');
+              }}
+              autoCapitalize="characters"
+              autoCorrect={false}
             />
+            {accVerifyStatus === 'checking' ? (
+              <ActivityIndicator color={Colors.accent} style={{ marginVertical: 6 }} />
+            ) : null}
+            {accVerifyMessage ? (
+              <Text
+                style={
+                  accVerifyStatus === 'valid'
+                    ? styles.accVerifyOk
+                    : accVerifyStatus === 'invalid'
+                      ? styles.accountSearchError
+                      : styles.hint
+                }
+              >
+                {accVerifyMessage}
+              </Text>
+            ) : null}
             <TextInput
               style={styles.field}
               placeholder="Purchase order number"
@@ -1487,8 +1606,30 @@ export function PaymentModal() {
                         placeholder="Claim number"
                         placeholderTextColor={Colors.textMuted}
                         value={accClaimNo}
-                        onChangeText={setAccClaimNo}
+                        onChangeText={(t) => {
+                          setAccClaimNo(t);
+                          setAccVerifyStatus('idle');
+                          setAccVerifyMessage('');
+                        }}
+                        autoCapitalize="characters"
+                        autoCorrect={false}
                       />
+                      {accVerifyStatus === 'checking' ? (
+                        <ActivityIndicator color={Colors.accent} style={{ marginVertical: 6 }} />
+                      ) : null}
+                      {accVerifyMessage ? (
+                        <Text
+                          style={
+                            accVerifyStatus === 'valid'
+                              ? styles.accVerifyOk
+                              : accVerifyStatus === 'invalid'
+                                ? styles.accountSearchError
+                                : styles.hint
+                          }
+                        >
+                          {accVerifyMessage}
+                        </Text>
+                      ) : null}
                       <TextInput
                         style={styles.field}
                         placeholder="Purchase order number"
@@ -2415,6 +2556,12 @@ const styles = StyleSheet.create({
   },
   accountSearchError: {
     color: Colors.warning,
+    fontSize: 13,
+    fontWeight: '600',
+    marginVertical: 4,
+  },
+  accVerifyOk: {
+    color: Colors.success,
     fontSize: 13,
     fontWeight: '600',
     marginVertical: 4,
