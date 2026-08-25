@@ -332,6 +332,11 @@ export function PaymentModal() {
   /** WAV only: null until driver taps Yes/No. Yes auto-adds first hoist from primary (silent). */
   const [hoistUsedAnswer, setHoistUsedAnswer] = useState<null | 'yes' | 'no'>(null);
 
+  const isAlreadyPaidCard = !!(
+    paymentJob &&
+    (paymentJob.isPrePaid ||
+      String(paymentJob.paymentStatus || '').toLowerCase() === 'paid')
+  );
   const isTmPayment = paymentType === 'TM';
   const isWav = !!activeVehicle?.isWav;
   const accountLockedFromDispatch = !!String(paymentJob?.accountId || '').trim();
@@ -384,6 +389,11 @@ export function PaymentModal() {
     setTmCardName('');
     if (paymentJob.isTotalMobility || seeded === 'TM') {
       setPaymentType('TM');
+    } else if (
+      paymentJob.isPrePaid ||
+      String(paymentJob.paymentStatus || '').toLowerCase() === 'paid'
+    ) {
+      setPaymentType('Card');
     }
     setHoistRows([]);
     setHoistUsedAnswer(null);
@@ -871,6 +881,20 @@ export function PaymentModal() {
           <Text style={styles.hint}>Collect cash from the passenger and confirm below.</Text>
         );
       case 'Card':
+        if (isAlreadyPaidCard) {
+          return (
+            <View style={styles.detailsBlock}>
+              <Text style={styles.hint}>
+                Already paid by card
+                {paymentJob?.id ? ` · ref #${paymentJob.id}` : ''}
+                {paymentJob?.paymentStatus
+                  ? ` · ${String(paymentJob.paymentStatus)}`
+                  : ''}
+                . Confirm below to complete — do not re-collect payment.
+              </Text>
+            </View>
+          );
+        }
         return (
           <View style={styles.detailsBlock}>
             <TextInput

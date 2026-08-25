@@ -197,8 +197,20 @@ export function CurrentTripPanel() {
         {activeJob.estimatedDistanceKm != null ? (
           <Text style={styles.metaLine}>Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km</Text>
         ) : null}
-        {activeJob.paymentType ? (
-          <Text style={styles.metaLine}>Payment: {activeJob.paymentType}</Text>
+        {activeJob.isTotalMobility ? (
+          <Text style={styles.metaLine}>
+            Total Mobility
+            {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ""}
+            {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ""}
+          </Text>
+        ) : activeJob.paymentType ? (
+          <Text style={styles.metaLine}>
+            Payment: {activeJob.paymentType}
+            {activeJob.isPrePaid ||
+            String(activeJob.paymentStatus || "").toLowerCase() === "paid"
+              ? " (paid)"
+              : ""}
+          </Text>
         ) : null}
 
         <JobDispatchMetaSection job={activeJob} compact />

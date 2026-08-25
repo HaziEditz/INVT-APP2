@@ -119,6 +119,8 @@ export async function writeClosedJob(
     routePolyline,
     route_polyline: routePolyline,
     source: job.source ?? '',
+    BookingSource: job.source ?? '',
+    bookingSource: job.source ?? '',
     notes: job.notes ?? '',
     completedAt: completedAtMs,
     closedAt: completedAtMs,

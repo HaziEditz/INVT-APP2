@@ -539,7 +539,15 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
         .toLowerCase() === 'paid'
     ),
     expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
-    source: val.source ? String(val.source) : undefined,
+    source: String(
+      val.BookingSource ??
+        val.bookingSource ??
+        val.Source ??
+        val.jobBookingSrc ??
+        val.CreatedBy ??
+        val.source ??
+        '',
+    ).trim() || undefined,
     notes: primaryNote ?? (val.notes ? String(val.notes) : undefined),
     allNotes: allNotes.length ? allNotes : undefined,
     dispatcherName: String(val.DispatcherName ?? val.dispatcherName ?? '').trim() || undefined,

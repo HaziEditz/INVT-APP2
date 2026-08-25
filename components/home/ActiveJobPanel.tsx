@@ -53,7 +53,20 @@ export function ActiveJobPanel() {
       {activeJob.passengerName ? (
         <Text style={styles.detail}>{activeJob.passengerName} · {activeJob.passengerPhone ?? '—'}</Text>
       ) : null}
-      {activeJob.paymentType ? <Text style={styles.detail}>Pay: {activeJob.paymentType}</Text> : null}
+      {activeJob.isTotalMobility ? (
+        <Text style={styles.detail}>
+          TM{activeJob.tmCardNumber ? ` · ${activeJob.tmCardNumber}` : ""}
+          {activeJob.paymentType ? ` · ${activeJob.paymentType}` : ""}
+        </Text>
+      ) : activeJob.paymentType ? (
+        <Text style={styles.detail}>
+          Pay: {activeJob.paymentType}
+          {activeJob.isPrePaid ||
+          String(activeJob.paymentStatus || "").toLowerCase() === "paid"
+            ? " (paid)"
+            : ""}
+        </Text>
+      ) : null}
       {runningMeter && meter ? (
         <Text style={styles.meter}>Meter ${meter.fare.toFixed(2)} · {meter.distanceKm.toFixed(1)} km</Text>
       ) : null}

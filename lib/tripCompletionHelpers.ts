@@ -54,7 +54,9 @@ export function computePaymentFareSummary(
   const breakdown = meter?.breakdown;
 
   const flagFall = Number(breakdown?.flagFall ?? tariff.flagFall ?? 0) || 0;
-  const distanceKm = Number(breakdown?.distanceKm ?? meter?.distanceKm ?? paymentJob.distanceKm ?? 0) || 0;
+  const meterKm = Number(breakdown?.distanceKm ?? meter?.distanceKm ?? paymentJob.distanceKm ?? 0) || 0;
+  const estKm = Number((paymentJob as { estimatedDistanceKm?: number }).estimatedDistanceKm ?? 0) || 0;
+  const distanceKm = meterKm > 0 ? meterKm : estKm;
   const waitingMin =
     Number(breakdown?.waitingMinutes ?? (meter?.waitingMs != null ? meter.waitingMs / 60000 : 0)) || 0;
   const ratePerKm = Number(tariff.ratePerKm ?? 0) || 0;
