@@ -75,7 +75,15 @@ export function OffersPanel() {
             <JobDispatchMetaSection job={o} compact />
             {o.vehicleTypeRequired ? <Text style={styles.meta}>Vehicle: {o.vehicleTypeRequired}</Text> : null}
             {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
-            {fare != null ? <Text style={styles.fare}>Est. fare ${fare.toFixed(2)}</Text> : null}
+            {fare != null ? (
+              o.isPrePaid || String(o.paymentStatus || '').toLowerCase() === 'paid' ? (
+                <Text style={styles.fare}>
+                  Paid{o.isFixedPrice || o.fixedFare != null ? ' + fixed fare' : ''} ${fare.toFixed(2)}
+                </Text>
+              ) : (
+                <Text style={styles.fare}>Est. fare ${fare.toFixed(2)}</Text>
+              )
+            ) : null}
             <Button
               title={acceptTitle}
               disabled={acceptDisabled}

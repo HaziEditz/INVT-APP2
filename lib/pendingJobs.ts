@@ -5,6 +5,7 @@ import { parseSchedulingMetaFromRecord } from '@/lib/jobDisplayMeta';
 import { isDispatchWindowOpen } from '@/lib/dispatchWindow';
 import { readDropoffAddress, readPickupAddress } from '@/lib/jobAddressFields';
 import { jobMatchesDriverVehicle, serviceTypeToJobType } from '@/lib/jobMatching';
+import { normalizeDriverPaymentType, readAccountFieldsFromRecord } from '@/lib/driverPayment';
 import { parseFiniteFare } from '@/lib/tariffs';
 import { JobOffer, Vehicle } from '@/types';
 
@@ -33,7 +34,18 @@ export function parseJobOfferRecord(
     return null;
   }
   const status = String(val.Status ?? val.status ?? 'Pending').toLowerCase();
-  if (opts?.requirePending !== false && status && status !== 'pending') return null;
+  // Option 1: pool browse includes Pending and Offered (exclusive offer stuck
+  // while busy must still appear in Offers tab).
+  if (
+    opts?.requirePending !== false &&
+    status &&
+    status !== 'pending' &&
+    status !== 'offered' &&
+    status !== 'offer' &&
+    status !== 'offering'
+  ) {
+    return null;
+  }
   if (opts?.requireDispatchWindow !== false && !isDispatchWindowOpen(val)) return null;
 
   const pickup = readPickupAddress(val);
@@ -46,6 +58,20 @@ export function parseJobOfferRecord(
   const allNotes = collectJobNotes(val);
   const primaryNote = allNotes.map((n) => n.text).join('\n\n') || undefined;
   const scheduling = parseSchedulingMetaFromRecord(val);
+  const rawPayment = val.PaymentMethod ?? val.paymentMethod ?? val.PaymentType ?? val.paymentType;
+  const paymentType =
+    normalizeDriverPaymentType(rawPayment != null ? String(rawPayment) : undefined) ??
+    undefined;
+  const accountFields = readAccountFieldsFromRecord(val);
+  const isTotalMobility = !!(
+    val.isTotalMobility ||
+    val.isTM ||
+    val.IsTM ||
+    val.tmUsed ||
+    paymentType === 'TM' ||
+    val.tmCardNumber ||
+    val.tmVoucherNo
+  );
 
   return {
     id: String(val.BookingId ?? val.bookingRef ?? val.bookingId ?? id),
@@ -61,6 +87,25 @@ export function parseJobOfferRecord(
     ).trim(),
     passengers: Number(val.Passengers ?? val.passengers ?? 1) || 1,
     serviceTypeRaw: serviceRaw,
+    paymentType,
+    ...accountFields,
+    isTotalMobility,
+    tmCardNumber:
+      String(val.tmCardNumber ?? val.tmVoucherNo ?? '').trim() || undefined,
+    paymentStatus:
+      String(val.paymentStatus ?? val.PaymentStatus ?? '')
+        .trim()
+        .toLowerCase() || undefined,
+    isPrePaid: !!(
+      val.isPrePaid ||
+      val.isPrepaid ||
+      String(val.paymentStatus ?? val.PaymentStatus ?? '')
+        .trim()
+        .toLowerCase() === 'paid'
+    ),
+    isFixedPrice:
+      String(val.TarriffId ?? val.TariffId ?? val.tariffId ?? '') === '-1' ||
+      val.isFixedPrice === true,
     expiresAt: Date.now() + 3600000,
     postedAt: (() => {
       const raw = val.createdAt ?? val.CreatedAt ?? val.OfferedAt ?? val.offeredAt;

@@ -126,13 +126,27 @@ export function JobOfferModal() {
             </View>
 
             {estFare != null ? (
-              <Text style={styles.fare}>Est. fare ${estFare.toFixed(2)}</Text>
+              jobOffer.isPrePaid ||
+              String(jobOffer.paymentStatus || '').toLowerCase() === 'paid' ? (
+                <Text style={styles.fare}>
+                  Paid{jobOffer.isFixedPrice || jobOffer.fixedFare != null ? ' + fixed fare' : ''} $
+                  {estFare.toFixed(2)}
+                </Text>
+              ) : (
+                <Text style={styles.fare}>Est. fare ${estFare.toFixed(2)}</Text>
+              )
             ) : null}
             {jobOffer.estimatedDistanceKm != null ? (
               <Text style={styles.meta}>Est. distance {jobOffer.estimatedDistanceKm.toFixed(1)} km</Text>
             ) : null}
             {jobOffer.paymentType ? (
-              <Text style={styles.meta}>Payment: {jobOffer.paymentType}</Text>
+              <Text style={styles.meta}>
+                Payment: {jobOffer.paymentType}
+                {jobOffer.isPrePaid ||
+                String(jobOffer.paymentStatus || '').toLowerCase() === 'paid'
+                  ? ' (paid)'
+                  : ''}
+              </Text>
             ) : null}
 
             <JobDispatchMetaSection job={jobOffer} compact />

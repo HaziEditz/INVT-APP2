@@ -375,9 +375,16 @@ export function PaymentModal() {
     setAccountAllowFreeText(false);
     setAccClaimNo('');
     setAccPoNo('');
-    setTmCardNumber('');
+    // Prefill TM from booking when website/dispatch already stamped the card.
+    const bookedTmCard = String(
+      (paymentJob as { tmCardNumber?: string }).tmCardNumber || '',
+    ).trim();
+    setTmCardNumber(bookedTmCard);
     setTmCardExpiry('');
     setTmCardName('');
+    if (paymentJob.isTotalMobility || seeded === 'TM') {
+      setPaymentType('TM');
+    }
     setHoistRows([]);
     setHoistUsedAnswer(null);
   }, [paymentJob?.id]);

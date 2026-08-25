@@ -39,6 +39,8 @@ export function readAccountFieldsFromRecord(val: Record<string, unknown>): {
       val.AccountId ??
       val.accountId ??
       val.account_id ??
+      val.accountNumber ??
+      val.AccountNumber ??
       '',
   ).trim();
   const accountName = String(

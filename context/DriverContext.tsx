@@ -513,7 +513,31 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     })(),
     ...readAccountFieldsFromRecord(val),
     isAcc: !!val.isAcc,
-    isTotalMobility: !!val.isTotalMobility,
+    isTotalMobility: !!(
+      val.isTotalMobility ||
+      val.isTM ||
+      val.IsTM ||
+      val.tmUsed ||
+      normalizeDriverPaymentType(
+        String(val.paymentType ?? val.PaymentType ?? rawPayment ?? ''),
+      ) === 'TM' ||
+      val.tmCardNumber ||
+      val.tmVoucherNo
+    ),
+    tmCardNumber:
+      String(val.tmCardNumber ?? val.tmVoucherNo ?? '').trim() || undefined,
+    paymentStatus:
+      String(val.paymentStatus ?? val.PaymentStatus ?? '')
+        .trim()
+        .toLowerCase() || undefined,
+    isPrePaid: !!(
+      val.isPrePaid ||
+      val.isPrepaid ||
+      val.IsPrePaid ||
+      String(val.paymentStatus ?? val.PaymentStatus ?? '')
+        .trim()
+        .toLowerCase() === 'paid'
+    ),
     expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
     source: val.source ? String(val.source) : undefined,
     notes: primaryNote ?? (val.notes ? String(val.notes) : undefined),
@@ -709,6 +733,30 @@ function buildNotificationFieldPatch(val: Record<string, unknown>): Partial<JobO
   const account = readAccountFieldsFromRecord(val);
   if (account.accountId) patch.accountId = account.accountId;
   if (account.accountName) patch.accountName = account.accountName;
+  const tmCard = String(val.tmCardNumber ?? val.tmVoucherNo ?? '').trim();
+  if (tmCard) patch.tmCardNumber = tmCard;
+  const paymentStatus = String(val.paymentStatus ?? val.PaymentStatus ?? '')
+    .trim()
+    .toLowerCase();
+  if (paymentStatus) patch.paymentStatus = paymentStatus;
+  if (
+    val.isTotalMobility ||
+    val.isTM ||
+    val.IsTM ||
+    val.tmUsed ||
+    patch.paymentType === 'TM' ||
+    tmCard
+  ) {
+    patch.isTotalMobility = true;
+  }
+  if (
+    val.isPrePaid ||
+    val.isPrepaid ||
+    val.IsPrePaid ||
+    paymentStatus === 'paid'
+  ) {
+    patch.isPrePaid = true;
+  }
   return patch;
 }
 

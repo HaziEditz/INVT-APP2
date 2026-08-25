@@ -68,6 +68,12 @@ export interface JobOffer {
   accountName?: string;
   isAcc?: boolean;
   isTotalMobility?: boolean;
+  /** Website/dispatch TM card number for completion prefill. */
+  tmCardNumber?: string;
+  /** card paymentStatus from website Stripe verify. */
+  paymentStatus?: string;
+  /** True when fare already collected (website card paid). */
+  isPrePaid?: boolean;
   expiresAt: number;
   source?: string;
   notes?: string;
