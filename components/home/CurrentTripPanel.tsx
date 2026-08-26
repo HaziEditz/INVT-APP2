@@ -8,13 +8,31 @@ import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
 import { formatFareAmount, parseFiniteFare } from '@/lib/tariffs';
 import { STAGE_LABELS, JobStage } from '@/types';
 import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const STAGES: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
 
 function fmtTime(ts?: number) {
   if (!ts) return '—';
   return new Date(ts).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function useCountdown(deadlineIso?: string) {
+  const [remainingMs, setRemainingMs] = useState(0);
+  useEffect(() => {
+    if (!deadlineIso) {
+      setRemainingMs(0);
+      return;
+    }
+    const tick = () => {
+      const d = Date.parse(deadlineIso);
+      setRemainingMs(Number.isFinite(d) ? Math.max(0, d - Date.now()) : 0);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [deadlineIso]);
+  return remainingMs;
 }
 
 export function CurrentTripPanel() {
@@ -26,6 +44,9 @@ export function CurrentTripPanel() {
     advanceStage,
     cancelActiveJob,
     noShowActiveJob,
+    verifyPickupForActiveJob,
+    recallWrongPassenger,
+    forkWalkUpHailFromWrongPassenger,
     recallJob,
     endTrip,
     completionBusy,
@@ -38,6 +59,29 @@ export function CurrentTripPanel() {
   const meterRunning = !!meter?.running;
   const highlightArrived = activeJob?.stage === 'pickup' && nearPickup;
   const pulse = useRef(new Animated.Value(1)).current;
+  const [nameOk, setNameOk] = useState(false);
+  const [pinOk, setPinOk] = useState(false);
+  const deadlineIso = useMemo(() => {
+    if (!activeJob) return undefined;
+    if (activeJob.noShowDeadlineAt) return activeJob.noShowDeadlineAt;
+    const arrivedMs = activeJob.stepTimes?.arrivedAt;
+    if (!arrivedMs) return undefined;
+    const base = arrivedMs + 5 * 60 * 1000;
+    const ext = activeJob.imComingAt ? 5 * 60 * 1000 : 0;
+    return new Date(base + ext).toISOString();
+  }, [activeJob?.noShowDeadlineAt, activeJob?.imComingAt, activeJob?.stepTimes?.arrivedAt, activeJob?.id]);
+  const postArrivalForCountdown =
+    !!activeJob &&
+    (activeJob.stage === 'arrived' ||
+      (!!activeJob.stepTimes?.arrivedAt &&
+        activeJob.stage !== 'onboard' &&
+        activeJob.stage !== 'complete'));
+  const remainingMs = useCountdown(postArrivalForCountdown ? deadlineIso : undefined);
+
+  useEffect(() => {
+    setNameOk(false);
+    setPinOk(false);
+  }, [activeJob?.id, activeJob?.stage]);
 
   useEffect(() => {
     if (!highlightArrived) {
@@ -103,7 +147,6 @@ export function CurrentTripPanel() {
   }
 
   if (!activeJob) {
-    // Idle Current UI is IdleCurrentSection in index.tsx — not rendered here when !hasCurrent.
     return null;
   }
 
@@ -124,6 +167,14 @@ export function CurrentTripPanel() {
   const postArrival =
     activeJob.stage === 'arrived' ||
     (!!st.arrivedAt && activeJob.stage !== 'onboard' && activeJob.stage !== 'complete');
+  const needsPickupVerify =
+    !isHailTrip &&
+    postArrival &&
+    (!!activeJob.pickupPin ||
+      /passenger/i.test(String(activeJob.bookingSource || activeJob.source || '')));
+  const pickupVerified = !!activeJob.pickupVerifiedAt;
+  const canNoShow = postArrival && remainingMs <= 0;
+
   const navTarget =
     activeJob.stage === 'onboard' || activeJob.stage === 'complete'
       ? {
@@ -149,13 +200,39 @@ export function CurrentTripPanel() {
       confirmEndTrip(() => void advanceStage());
       return;
     }
+    if (nextStage === 'onboard' && needsPickupVerify && !pickupVerified) {
+      Alert.alert(
+        'Verify passenger first',
+        'Ask for their name and PIN, compare to your screen, then tap Confirm name & PIN.',
+      );
+      return;
+    }
     await advanceStage();
+  };
+
+  const onConfirmVerify = async () => {
+    if (!nameOk || !pinOk) {
+      Alert.alert(
+        'Both checks required',
+        'Passenger must state their name and PIN verbally. Tick both after you compare them to this screen.',
+      );
+      return;
+    }
+    const ok = await verifyPickupForActiveJob();
+    if (ok) {
+      Alert.alert('Verified', 'You can mark On Board now.');
+    }
   };
 
   const stageLabel = (s: JobStage) => {
     if (s === 'pickup') return tripOnTheWay ? 'On the way' : 'Accepted';
     return STAGE_LABELS[s];
   };
+
+  const remainLabel =
+    remainingMs > 0
+      ? `${Math.floor(remainingMs / 60000)}:${String(Math.floor((remainingMs % 60000) / 1000)).padStart(2, '0')}`
+      : 'Ready';
 
   return (
     <View style={styles.panelActive}>
@@ -197,19 +274,20 @@ export function CurrentTripPanel() {
         {activeJob.estimatedDistanceKm != null ? (
           <Text style={styles.metaLine}>Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km</Text>
         ) : null}
+
         {activeJob.isTotalMobility ? (
           <Text style={styles.metaLine}>
             Total Mobility
-            {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ""}
-            {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ""}
+            {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
+            {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
           </Text>
         ) : activeJob.paymentType ? (
           <Text style={styles.metaLine}>
             Payment: {activeJob.paymentType}
             {activeJob.isPrePaid ||
-            String(activeJob.paymentStatus || "").toLowerCase() === "paid"
-              ? " (paid)"
-              : ""}
+            String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
+              ? ' (paid)'
+              : ''}
           </Text>
         ) : null}
 
@@ -248,6 +326,50 @@ export function CurrentTripPanel() {
           <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
         ) : null}
 
+        {needsPickupVerify ? (
+          <View style={styles.verifyBox}>
+            <Text style={styles.verifyTitle}>Pickup check (verbal)</Text>
+            <Text style={styles.verifyHint}>
+              Ask the passenger to say their full name and PIN. Compare to this screen, then confirm.
+            </Text>
+            <Text style={styles.verifyName}>
+              Name on booking: {activeJob.passengerName || '—'}
+            </Text>
+            <Text style={styles.verifyPin}>PIN on booking: {activeJob.pickupPin || '—'}</Text>
+            {pickupVerified ? (
+              <Text style={styles.verified}>Verified — On Board unlocked</Text>
+            ) : (
+              <>
+                <Button
+                  title={nameOk ? '✓ Name matches (stated)' : 'Confirm: name matches'}
+                  variant={nameOk ? 'secondary' : 'primary'}
+                  compact
+                  onPress={() => setNameOk(true)}
+                />
+                <Button
+                  title={pinOk ? '✓ PIN matches (stated)' : 'Confirm: PIN matches'}
+                  variant={pinOk ? 'secondary' : 'primary'}
+                  compact
+                  onPress={() => setPinOk(true)}
+                />
+                <Button
+                  title={completionBusy ? 'Saving…' : 'Lock in name & PIN check'}
+                  disabled={completionBusy || !nameOk || !pinOk}
+                  compact
+                  onPress={() => void onConfirmVerify()}
+                />
+              </>
+            )}
+          </View>
+        ) : null}
+
+        {postArrival && !isHailTrip ? (
+          <Text style={styles.metaLine}>
+            No-show countdown: {remainLabel}
+            {activeJob.imComingAt ? ' (passenger said I’m coming)' : ''}
+          </Text>
+        ) : null}
+
         <JobNotesSection job={activeJob} compact />
       </ScrollView>
 
@@ -263,9 +385,18 @@ export function CurrentTripPanel() {
         ) : (
           <Animated.View style={{ opacity: highlightArrived ? pulse : 1 }}>
             <Button
-              title={completionBusy ? 'Please wait…' : nextLabel}
+              title={
+                completionBusy
+                  ? 'Please wait…'
+                  : nextStage === 'onboard' && needsPickupVerify && !pickupVerified
+                    ? 'Verify passenger first'
+                    : nextLabel
+              }
               onPress={onAdvance}
-              disabled={completionBusy}
+              disabled={
+                completionBusy ||
+                (nextStage === 'onboard' && needsPickupVerify && !pickupVerified)
+              }
               compact
             />
           </Animated.View>
@@ -298,11 +429,56 @@ export function CurrentTripPanel() {
           {!showEndTrip && !isHailTrip && postArrival ? (
             <>
               <Button
-                title="No Show"
+                title="Wrong passenger"
                 variant="secondary"
                 compact
                 style={styles.secondaryBtn}
-                onPress={noShowActiveJob}
+                onPress={() => {
+                  Alert.alert(
+                    'Wrong / uninvited passenger?',
+                    'Return the booked job to the pool so the real passenger gets another driver.',
+                    [
+                      { text: 'Back', style: 'cancel' },
+                      { text: 'Return to pool', onPress: () => void recallWrongPassenger() },
+                    ],
+                  );
+                }}
+              />
+              <Button
+                title="Walk-up hail"
+                variant="secondary"
+                compact
+                style={styles.secondaryBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Start walk-up fare?',
+                    'Returns the booked job to the pool, then starts a new hail for the person in the cab.',
+                    [
+                      { text: 'Back', style: 'cancel' },
+                      {
+                        text: 'Start hail',
+                        onPress: () => void forkWalkUpHailFromWrongPassenger(),
+                      },
+                    ],
+                  );
+                }}
+              />
+              <Button
+                title={canNoShow ? 'No Show' : `No Show (${remainLabel})`}
+                variant="secondary"
+                compact
+                disabled={!canNoShow || completionBusy}
+                style={styles.secondaryBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Mark No Show?',
+                    'Closes this booking. Waiting time is charged at the waiting rate.',
+                    [
+                      { text: 'Back', style: 'cancel' },
+                      { text: 'No Show', style: 'destructive', onPress: () => void noShowActiveJob() },
+                    ],
+                  );
+                }}
               />
               <Button
                 title="Cancel"
@@ -347,73 +523,44 @@ const styles = StyleSheet.create({
   detailsScroll: {
     flex: 1,
     minHeight: 0,
-    backgroundColor: Colors.surface,
   },
   detailsContent: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 12,
-    gap: 4,
-  },
-  actionBar: {
-    flexShrink: 0,
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 10,
-    gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    backgroundColor: Colors.surface,
-  },
-  secondaryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    padding: 12,
+    paddingBottom: 8,
     gap: 8,
   },
-  secondaryBtn: {
-    flex: 1,
-    minWidth: 96,
-  },
-  title: { color: Colors.text, fontSize: 18, fontWeight: '800' },
-  hailTitle: { color: Colors.accent, fontSize: 16, fontWeight: '800', marginTop: 4 },
-  pickupFrom: { color: Colors.text, fontSize: 15, fontWeight: '600', marginTop: 8, lineHeight: 20 },
-  stageScroll: { marginBottom: 8, flexGrow: 0 },
-  stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 10 },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.border, marginRight: 5 },
-  dotOn: { backgroundColor: Colors.accent },
-  stageText: { color: Colors.textMuted, fontSize: 12 },
-  stageOn: { color: Colors.text, fontWeight: '700' },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  jobId: { color: Colors.textMuted, fontSize: 12, fontWeight: '700' },
-  fareEst: {
-    color: Colors.success,
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  metaLine: { color: Colors.textMuted, fontSize: 13, lineHeight: 18, marginBottom: 2 },
-  addrBlock: { marginTop: 6, marginBottom: 2 },
-  addrLabel: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  addr: { color: Colors.text, fontSize: 15, lineHeight: 21, fontWeight: '600' },
-  meta: { color: Colors.textMuted, fontSize: 12, marginTop: 2, marginBottom: 4 },
-  errorBox: {
-    backgroundColor: Colors.warning + '22',
+  stageScroll: { marginBottom: 4 },
+  stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 12, gap: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.border },
+  dotOn: { backgroundColor: Colors.primary },
+  stageText: { fontSize: 12, color: Colors.textMuted },
+  stageOn: { color: Colors.text, fontWeight: '600' },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  jobId: { fontSize: 14, fontWeight: '600', color: Colors.text },
+  hailTitle: { fontSize: 18, fontWeight: '700', color: Colors.text },
+  pickupFrom: { fontSize: 14, color: Colors.text },
+  fareEst: { fontSize: 16, fontWeight: '700', color: Colors.primary },
+  metaLine: { fontSize: 13, color: Colors.textMuted },
+  addrBlock: { gap: 2 },
+  addrLabel: { fontSize: 11, fontWeight: '600', color: Colors.textMuted, textTransform: 'uppercase' },
+  addr: { fontSize: 15, color: Colors.text },
+  verifyBox: {
+    borderWidth: 1,
+    borderColor: Colors.primary,
     borderRadius: 10,
     padding: 10,
-    borderWidth: 1,
-    borderColor: Colors.warning,
     gap: 8,
+    backgroundColor: Colors.surface,
   },
-  errorText: { color: Colors.warning, fontSize: 13, lineHeight: 18 },
+  verifyTitle: { fontSize: 15, fontWeight: '700', color: Colors.text },
+  verifyHint: { fontSize: 12, color: Colors.textMuted },
+  verifyName: { fontSize: 14, fontWeight: '600', color: Colors.text },
+  verifyPin: { fontSize: 20, fontWeight: '800', letterSpacing: 3, color: Colors.primary },
+  verified: { fontSize: 13, fontWeight: '600', color: Colors.success || '#16a34a' },
+  actionBar: { padding: 10, borderTopWidth: 1, borderTopColor: Colors.border, gap: 8 },
+  secondaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  secondaryBtn: { flexGrow: 1, minWidth: '40%' },
+  errorBox: { gap: 6 },
+  errorText: { fontSize: 12, color: Colors.danger || '#b91c1c' },
+  title: { fontSize: 18, fontWeight: '700', color: Colors.text },
 });

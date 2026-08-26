@@ -428,6 +428,8 @@ export async function createHailJobOnDispatch(params: {
   clientTripId: string;
   /** Vehicle type from the driver's selected vehicle (Closed Job / dispatch). */
   vehicleType?: string;
+  /** Booked job returned to pool before this walk-up hail. */
+  relatedBookingId?: string;
 }): Promise<{ jobId: string; bookingId: number; updateSeq: number; clientTripId: string; existing?: boolean }> {
   const pickupCoords =
     Number.isFinite(params.pickup.lat) &&
@@ -467,6 +469,11 @@ export async function createHailJobOnDispatch(params: {
   if (vehicleType) {
     body.vehicleType = vehicleType;
     body.VehicleType = vehicleType;
+  }
+  const related = String(params.relatedBookingId || '').trim();
+  if (related) {
+    body.relatedBookingId = related;
+    body.RelatedBookingId = related;
   }
 
   // Single timed attempt — DriverContext journals pending hail on transport timeout.
@@ -721,6 +728,39 @@ export async function reportNoShow(jobId: string, driverId: string, companyId: s
     noShow: true,
     terminalKind: 'No Show',
     reason: 'No Show',
+  });
+}
+
+/** Confirm verbal name + PIN match before On Board (PassengerApp jobs). */
+export async function verifyPickupOnDispatch(params: {
+  bookingId: string;
+  driverId: string;
+  companyId: string;
+  nameConfirmed: boolean;
+  pinConfirmed: boolean;
+}) {
+  return dispatchPost('/api/job/verify-pickup', {
+    bookingId: params.bookingId,
+    driverId: params.driverId,
+    companyId: params.companyId,
+    nameConfirmed: params.nameConfirmed,
+    pinConfirmed: params.pinConfirmed,
+  });
+}
+
+/** Return booked job to pool at Arrived (uninvited / wrong passenger). */
+export async function recallWrongPassengerOnDispatch(
+  jobId: string,
+  driverId: string,
+  companyId: string,
+) {
+  return dispatchPost('/api/cancel', {
+    bookingId: jobId,
+    driverId,
+    companyId,
+    cancelledBy: 'driver',
+    wrongPassenger: true,
+    reason: 'Wrong passenger / uninvited — returned to pool',
   });
 }
 

@@ -7,6 +7,7 @@ export const Colors = {
   textMuted: '#9CA3AF',
   accent: '#1a73e8',
   accentDark: '#1557b0',
+  primary: '#1a73e8',
   success: '#22C55E',
   warning: '#F59E0B',
   danger: '#EF4444',

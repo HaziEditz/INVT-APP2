@@ -17,7 +17,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, fetchDriverActiveBookings, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, reportNoShow, respondToDriverSos, syncJobStageOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, fetchDriverActiveBookings, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, recallWrongPassengerOnDispatch, reportNoShow, respondToDriverSos, syncJobStageOnDispatch, verifyPickupOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -342,8 +342,14 @@ interface DriverContextValue {
   cancelActiveJob: () => Promise<void>;
   noShowActiveJob: () => Promise<void>;
   recallJob: () => Promise<void>;
+  /** Verbal name + PIN confirmed — unlocks On Board for PassengerApp jobs. */
+  verifyPickupForActiveJob: () => Promise<boolean>;
+  /** Uninvited/wrong passenger at Arrived — return booking to pool. */
+  recallWrongPassenger: () => Promise<void>;
+  /** Return booked job to pool, then start a walk-up hail for the person in the cab. */
+  forkWalkUpHailFromWrongPassenger: () => Promise<void>;
   recallQueuedOffer: (offerId: string) => Promise<void>;
-  startHail: () => Promise<void>;
+  startHail: (opts?: { relatedBookingId?: string }) => Promise<void>;
   endHail: () => Promise<void>;
   /** Stop a running meter left open with no active job or hail (idle Current tab). */
   clearOrphanedIdleMeter: () => Promise<void>;
@@ -555,6 +561,11 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
         val.source ??
         '',
     ).trim() || undefined,
+    bookingSource: String(val.BookingSource ?? val.bookingSource ?? val.Source ?? '').trim() || undefined,
+    pickupPin: String(val.PickupPin ?? val.pickupPin ?? '').trim() || undefined,
+    pickupVerifiedAt: String(val.pickupVerifiedAt ?? val.PickupVerifiedAt ?? '').trim() || undefined,
+    noShowDeadlineAt: String(val.noShowDeadlineAt ?? '').trim() || undefined,
+    imComingAt: String(val.imComingAt ?? val.ImComingAt ?? '').trim() || undefined,
     notes: primaryNote ?? (val.notes ? String(val.notes) : undefined),
     allNotes: allNotes.length ? allNotes : undefined,
     dispatcherName: String(val.DispatcherName ?? val.dispatcherName ?? '').trim() || undefined,
@@ -4634,6 +4645,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       if (nextStage === 'arrived' || nextStage === 'onboard') {
+        if (nextStage === 'onboard') {
+          const needsVerify =
+            !!activeJob.pickupPin ||
+            /passenger/i.test(String(activeJob.bookingSource || activeJob.source || ''));
+          if (needsVerify && !activeJob.pickupVerifiedAt) {
+            Alert.alert(
+              'Verify passenger first',
+              'Ask for their name and PIN, compare to your screen, then tap Confirm name & PIN.',
+            );
+            setCompletionBusy(false);
+            return;
+          }
+        }
         const offline = !dispatchIsConnected(
           networkConnectedRef.current,
           rtdbConnectedRef.current,
@@ -5398,6 +5422,59 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     Alert.alert('No show', 'Job marked as no show. You are available for new jobs.');
   };
 
+  const verifyPickupForActiveJob = async (): Promise<boolean> => {
+    if (!activeJob || !driver) return false;
+    if (activeJob.pickupVerifiedAt) return true;
+    try {
+      const res = await verifyPickupOnDispatch({
+        bookingId: activeJob.id,
+        driverId: driver.id,
+        companyId: driver.companyId,
+        nameConfirmed: true,
+        pinConfirmed: true,
+      });
+      if (!res?.ok && res?.ok !== undefined) {
+        Alert.alert('Verification failed', String(res.error || 'Try again'));
+        return false;
+      }
+      const at = String(res.pickupVerifiedAt || new Date().toISOString());
+      setActiveJob((prev) => (prev ? { ...prev, pickupVerifiedAt: at } : prev));
+      return true;
+    } catch (err) {
+      Alert.alert('Verification failed', err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const recallWrongPassenger = async () => {
+    if (!activeJob || !driver) return;
+    const jobId = activeJob.id;
+    try {
+      await recallWrongPassengerOnDispatch(jobId, driver.id, driver.companyId);
+    } catch (err) {
+      Alert.alert('Recall failed', err instanceof Error ? err.message : String(err));
+      return;
+    }
+    await clearJobLocallyAfterTerminal();
+    Alert.alert(
+      'Returned to pool',
+      'The booked passenger will get another driver. You are available for new jobs.',
+    );
+  };
+
+  const forkWalkUpHailFromWrongPassenger = async () => {
+    if (!activeJob || !driver) return;
+    const relatedId = activeJob.id;
+    try {
+      await recallWrongPassengerOnDispatch(relatedId, driver.id, driver.companyId);
+    } catch (err) {
+      Alert.alert('Could not free booking', err instanceof Error ? err.message : String(err));
+      return;
+    }
+    await clearJobLocallyAfterTerminal();
+    await startHail({ relatedBookingId: relatedId });
+  };
+
   const recallJob = async () => {
     if (!driver) return;
     const job = activeJob;
@@ -5508,7 +5585,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  const startHail = async () => {
+  const startHail = async (opts?: { relatedBookingId?: string }) => {
     if (!shiftActive) {
       Alert.alert('Start shift', 'Start your shift before hailing a passenger.');
       return;
@@ -5604,6 +5681,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                 activeVehicle?.displayType ||
                 activeVehicle?.bodyType ||
                 undefined,
+              relatedBookingId: opts?.relatedBookingId,
             }),
           createPendingJournal: createPendingHail,
         });
@@ -6182,6 +6260,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         clearCompletionError: () => setCompletionError(null),
         cancelActiveJob,
         noShowActiveJob,
+        verifyPickupForActiveJob,
+        recallWrongPassenger,
+        forkWalkUpHailFromWrongPassenger,
         recallJob,
         recallQueuedOffer,
         startHail,

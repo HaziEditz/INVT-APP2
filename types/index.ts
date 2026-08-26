@@ -108,6 +108,12 @@ export interface JobOffer {
   dispatchBeforeMinutes?: number;
   notifyDispatchAt?: string;
   bookingType?: string;
+  /** PassengerApp 4-digit pickup PIN (shown for verbal check). */
+  pickupPin?: string;
+  pickupVerifiedAt?: string;
+  noShowDeadlineAt?: string;
+  imComingAt?: string;
+  bookingSource?: string;
 }
 
 export interface QueuedOffer extends JobOffer {
