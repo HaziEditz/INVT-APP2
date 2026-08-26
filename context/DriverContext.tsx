@@ -462,7 +462,14 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     parseFiniteFare(val.jobFare) ??
     parseFiniteFare(val.fixedFare) ??
     parseFiniteFare(rawFare);
-  const fixedPrice = isFixedPriceBooking(val);
+  const paymentStatusEarly = String(val.paymentStatus ?? val.PaymentStatus ?? '')
+    .trim()
+    .toLowerCase();
+  // Already-paid card (passenger app) must be fixed even if TarriffType was omitted.
+  const fixedPrice =
+    isFixedPriceBooking(val) ||
+    !!(val.isPrePaid || val.isPrepaid || val.IsPrePaid) ||
+    paymentStatusEarly === 'paid';
   const rawPayment = val.payment ?? val.jobpayment ?? val.paymentType ?? val.PaymentType ?? val.paymentMethod;
   const rawId = val.id ?? val.jobId ?? val.joboffer ?? val.bookingid ?? val.bookingId ?? val.BookingId ?? '';
   const idStr = normalizeBookingId(rawId);

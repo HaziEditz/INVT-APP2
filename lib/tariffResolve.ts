@@ -30,13 +30,31 @@ export function isFixedPriceBooking(
   return type === 'fixed' || name === 'fixed';
 }
 
-/** Whether the GPS meter should run (false for fixed-price jobs). */
+function isAlreadyPaidBooking(
+  raw: Record<string, unknown> | null | undefined,
+  job?: { isPrePaid?: boolean; paymentStatus?: string } | null,
+): boolean {
+  if (job?.isPrePaid) return true;
+  if (String(job?.paymentStatus || '').trim().toLowerCase() === 'paid') return true;
+  if (!raw || typeof raw !== 'object') return false;
+  if (raw.isPrePaid || raw.isPrepaid || raw.IsPrePaid) return true;
+  const ps = String(raw.paymentStatus ?? raw.PaymentStatus ?? '')
+    .trim()
+    .toLowerCase();
+  return ps === 'paid';
+}
+
+/** Whether the GPS meter should run (false for fixed-price / already-paid card jobs). */
 export function shouldStartMeterForBooking(
   raw: Record<string, unknown> | null | undefined,
-  job?: { isFixedPrice?: boolean } | null,
+  job?: { isFixedPrice?: boolean; isPrePaid?: boolean; paymentStatus?: string } | null,
 ): boolean {
   if (job?.isFixedPrice) return false;
-  return !isFixedPriceBooking(raw);
+  if (isFixedPriceBooking(raw)) return false;
+  // Card / prepaid: passenger already paid — never run live meter (website stamps Fixed;
+  // passenger-app jobs historically only set paymentStatus=paid).
+  if (isAlreadyPaidBooking(raw, job)) return false;
+  return true;
 }
 
 /** Fixed fare amount from booking record, if present. */
