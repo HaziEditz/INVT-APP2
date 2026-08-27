@@ -494,8 +494,8 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
         : undefined,
     passengerPhone: val.passengerPhone
       ? String(val.passengerPhone)
-      : val.phone || val.JobphoneNo
-        ? String(val.phone ?? val.JobphoneNo)
+      : val.PhoneNo || val.phone || val.JobphoneNo
+        ? String(val.PhoneNo ?? val.phone ?? val.JobphoneNo)
         : undefined,
     passengerEmail: val.passengerEmail ? String(val.passengerEmail) : undefined,
     fixedFare: offerFare,

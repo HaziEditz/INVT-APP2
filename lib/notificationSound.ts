@@ -143,7 +143,17 @@ async function playHaptic(kind: InAppSoundKind): Promise<void> {
 }
 
 /** Job offer — local wav + OS notification (notification carries sound when backgrounded/locked). */
+let lastOfferAlertAt = 0;
+let lastOfferAlertId = '';
+
 export async function alertDriverToOffer(offer: JobOffer): Promise<void> {
+  const now = Date.now();
+  if (offer.id && offer.id === lastOfferAlertId && now - lastOfferAlertAt < 4000) {
+    return;
+  }
+  lastOfferAlertId = String(offer.id || '');
+  lastOfferAlertAt = now;
+
   const title = 'New job offer';
   const body = `#${offer.id} · ${offer.pickup || 'Tap to respond'} · 30s`;
   const inBackground = AppState.currentState !== 'active';

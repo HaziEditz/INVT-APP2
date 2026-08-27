@@ -5,6 +5,7 @@ import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
+import { alertDriverToOffer } from '@/lib/notificationSound';
 import { useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -25,6 +26,7 @@ export function JobOfferModal() {
   const timedOutRef = useRef(false);
   /** Offer clock ran out while Syncing/trip hold — purge without miss→Away. */
   const expiredWhileHeldRef = useRef(false);
+  const soundedOfferIdRef = useRef<string | null>(null);
 
   useSafeEffect(() => {
     if (!jobOffer) {
@@ -76,18 +78,28 @@ export function JobOfferModal() {
     return () => clearInterval(id);
   }, [jobOffer, declineOffer, hailActive, activeJob, paymentJob, pendingTripSync, syncingBanner], 'JobOfferModal-timer');
 
-  // Hide while offline (accept is a live claim) but keep the timer effect above so a
-  // missed exclusive offer still times out → Away even during a brief disconnect.
-  // Also hide while syncing/pending trip work so a deferred expired offer cannot flash.
-  if (
+  const modalHeldHidden =
     !jobOffer ||
     hailActive ||
     !!activeJob ||
     !!paymentJob ||
     isOffline ||
     pendingTripSync ||
-    !!syncingBanner
-  ) {
+    !!syncingBanner;
+
+  // Harden offer beep: play when the exclusive popup actually becomes visible,
+  // even if an earlier deferred path skipped alertDriverToOffer.
+  useSafeEffect(() => {
+    if (modalHeldHidden || !jobOffer?.id) return;
+    if (soundedOfferIdRef.current === jobOffer.id) return;
+    soundedOfferIdRef.current = jobOffer.id;
+    void alertDriverToOffer({ ...jobOffer, silent: false });
+  }, [modalHeldHidden, jobOffer?.id], 'JobOfferModal-sound');
+
+  // Hide while offline (accept is a live claim) but keep the timer effect above so a
+  // missed exclusive offer still times out → Away even during a brief disconnect.
+  // Also hide while syncing/pending trip work so a deferred expired offer cannot flash.
+  if (modalHeldHidden) {
     return null;
   }
 

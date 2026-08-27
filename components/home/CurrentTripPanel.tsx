@@ -7,7 +7,7 @@ import { useDriver } from '@/context/DriverContext';
 import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
 import { formatFareAmount, parseFiniteFare } from '@/lib/tariffs';
 import { STAGE_LABELS, JobStage } from '@/types';
-import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const STAGES: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
@@ -203,7 +203,7 @@ export function CurrentTripPanel() {
     if (nextStage === 'onboard' && needsPickupVerify && !pickupVerified) {
       Alert.alert(
         'Verify passenger first',
-        'Ask for their name and PIN, compare to your screen, then tap Confirm name & PIN.',
+        'Confirm PIN match, then name match, then lock — the verify box is above the action buttons.',
       );
       return;
     }
@@ -214,7 +214,7 @@ export function CurrentTripPanel() {
     if (!nameOk || !pinOk) {
       Alert.alert(
         'Both checks required',
-        'Passenger must state their name and PIN verbally. Tick both after you compare them to this screen.',
+        'Confirm PIN match first, then name match. Both must be ticked before locking.',
       );
       return;
     }
@@ -222,6 +222,16 @@ export function CurrentTripPanel() {
     if (ok) {
       Alert.alert('Verified', 'You can mark On Board now.');
     }
+  };
+
+  const callPassenger = () => {
+    const phone = String(activeJob.passengerPhone || '').trim();
+    if (!phone) {
+      Alert.alert('No phone number', 'This booking has no passenger phone on file.');
+      return;
+    }
+    const digits = phone.replace(/[^\d+]/g, '');
+    void Linking.openURL(`tel:${digits}`);
   };
 
   const stageLabel = (s: JobStage) => {
@@ -234,6 +244,11 @@ export function CurrentTripPanel() {
       ? `${Math.floor(remainingMs / 60000)}:${String(Math.floor((remainingMs % 60000) / 1000)).padStart(2, '0')}`
       : 'Ready';
 
+  const compactOnboard =
+    activeJob.stage === 'onboard' ||
+    (!!st.onboardAt && activeJob.stage !== 'complete');
+  const showVerifySticky = needsPickupVerify && !pickupVerified;
+
   return (
     <View style={styles.panelActive}>
       <ScrollView
@@ -242,19 +257,25 @@ export function CurrentTripPanel() {
         showsVerticalScrollIndicator
         nestedScrollEnabled
       >
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
-          {STAGES.map((s, i) => (
-            <View key={s} style={styles.stageChip}>
-              <View style={[styles.dot, i <= idx && styles.dotOn]} />
-              <Text style={[styles.stageText, i <= idx && styles.stageOn]}>{stageLabel(s)}</Text>
-            </View>
-          ))}
-        </ScrollView>
+        {!compactOnboard ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
+            {STAGES.map((s, i) => (
+              <View key={s} style={styles.stageChip}>
+                <View style={[styles.dot, i <= idx && styles.dotOn]} />
+                <Text style={[styles.stageText, i <= idx && styles.stageOn]}>{stageLabel(s)}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        ) : (
+          <Text style={styles.metaLine}>On board · Job #{activeJob.id}</Text>
+        )}
 
-        <View style={styles.summaryRow}>
-          <JobTypeBadge type={activeJob.type} />
-          <Text style={styles.jobId}>Job #{activeJob.id}</Text>
-        </View>
+        {!compactOnboard ? (
+          <View style={styles.summaryRow}>
+            <JobTypeBadge type={activeJob.type} />
+            <Text style={styles.jobId}>Job #{activeJob.id}</Text>
+          </View>
+        ) : null}
 
         {isHailTrip ? (
           <>
@@ -271,17 +292,17 @@ export function CurrentTripPanel() {
         {estFare != null ? (
           <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
         ) : null}
-        {activeJob.estimatedDistanceKm != null ? (
+        {!compactOnboard && activeJob.estimatedDistanceKm != null ? (
           <Text style={styles.metaLine}>Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km</Text>
         ) : null}
 
-        {activeJob.isTotalMobility ? (
+        {!compactOnboard && activeJob.isTotalMobility ? (
           <Text style={styles.metaLine}>
             Total Mobility
             {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
             {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
           </Text>
-        ) : activeJob.paymentType ? (
+        ) : !compactOnboard && activeJob.paymentType ? (
           <Text style={styles.metaLine}>
             Payment: {activeJob.paymentType}
             {activeJob.isPrePaid ||
@@ -291,76 +312,61 @@ export function CurrentTripPanel() {
           </Text>
         ) : null}
 
-        <JobDispatchMetaSection job={activeJob} compact />
+        {!compactOnboard ? <JobDispatchMetaSection job={activeJob} compact /> : null}
 
-        <View style={styles.addrBlock}>
-          <Text style={styles.addrLabel}>Pickup</Text>
-          <Text style={styles.addr} numberOfLines={3}>
-            {activeJob.pickup}
-          </Text>
-        </View>
-        {showDropoff ? (
+        {compactOnboard ? (
           <View style={styles.addrBlock}>
-            <Text style={styles.addrLabel}>Dropoff</Text>
-            <Text style={styles.addr} numberOfLines={3}>
-              {activeJob.dropoff}
+            <Text style={styles.addr} numberOfLines={2}>
+              {activeJob.pickup?.split(',')[0] || 'Pickup'} →{' '}
+              {showDropoff ? activeJob.dropoff?.split(',')[0] || 'Dropoff' : '—'}
             </Text>
           </View>
-        ) : null}
+        ) : (
+          <>
+            <View style={styles.addrBlock}>
+              <Text style={styles.addrLabel}>Pickup</Text>
+              <Text style={styles.addr} numberOfLines={3}>
+                {activeJob.pickup}
+              </Text>
+            </View>
+            {showDropoff ? (
+              <View style={styles.addrBlock}>
+                <Text style={styles.addrLabel}>Dropoff</Text>
+                <Text style={styles.addr} numberOfLines={3}>
+                  {activeJob.dropoff}
+                </Text>
+              </View>
+            ) : null}
+          </>
+        )}
 
         {activeJob.passengerName ? (
           <Text style={styles.metaLine} numberOfLines={2}>
             Passenger: {activeJob.passengerName}
-            {activeJob.passengerPhone ? ` · ${activeJob.passengerPhone}` : ''}
           </Text>
         ) : null}
-        {activeJob.passengerEmail ? (
+        {activeJob.passengerPhone ? (
+          <View style={styles.phoneRow}>
+            <Text style={styles.metaLine} numberOfLines={1}>
+              {activeJob.passengerPhone}
+            </Text>
+            <Button title="Call" variant="secondary" compact onPress={callPassenger} />
+          </View>
+        ) : null}
+        {!compactOnboard && activeJob.passengerEmail ? (
           <Text style={styles.metaLine} numberOfLines={1}>
             Email: {activeJob.passengerEmail}
           </Text>
         ) : null}
-        {activeJob.passengers != null ? (
+        {!compactOnboard && activeJob.passengers != null ? (
           <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
         ) : null}
-        {activeJob.dispatcherName ? (
+        {!compactOnboard && activeJob.dispatcherName ? (
           <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
         ) : null}
 
-        {needsPickupVerify ? (
-          <View style={styles.verifyBox}>
-            <Text style={styles.verifyTitle}>Pickup check (verbal)</Text>
-            <Text style={styles.verifyHint}>
-              Ask the passenger to say their full name and PIN. Compare to this screen, then confirm.
-            </Text>
-            <Text style={styles.verifyName}>
-              Name on booking: {activeJob.passengerName || '—'}
-            </Text>
-            <Text style={styles.verifyPin}>PIN on booking: {activeJob.pickupPin || '—'}</Text>
-            {pickupVerified ? (
-              <Text style={styles.verified}>Verified — On Board unlocked</Text>
-            ) : (
-              <>
-                <Button
-                  title={nameOk ? '✓ Name matches (stated)' : 'Confirm: name matches'}
-                  variant={nameOk ? 'secondary' : 'primary'}
-                  compact
-                  onPress={() => setNameOk(true)}
-                />
-                <Button
-                  title={pinOk ? '✓ PIN matches (stated)' : 'Confirm: PIN matches'}
-                  variant={pinOk ? 'secondary' : 'primary'}
-                  compact
-                  onPress={() => setPinOk(true)}
-                />
-                <Button
-                  title={completionBusy ? 'Saving…' : 'Lock in name & PIN check'}
-                  disabled={completionBusy || !nameOk || !pinOk}
-                  compact
-                  onPress={() => void onConfirmVerify()}
-                />
-              </>
-            )}
-          </View>
+        {needsPickupVerify && pickupVerified ? (
+          <Text style={styles.verified}>Verified — On Board unlocked</Text>
         ) : null}
 
         {postArrival && !isHailTrip ? (
@@ -370,8 +376,44 @@ export function CurrentTripPanel() {
           </Text>
         ) : null}
 
-        <JobNotesSection job={activeJob} compact />
+        {!compactOnboard ? <JobNotesSection job={activeJob} compact /> : null}
       </ScrollView>
+
+      {showVerifySticky ? (
+        <View style={styles.verifySticky}>
+          <Text style={styles.verifyTitle}>Pickup verification</Text>
+          <Text style={styles.verifyHint}>
+            Step 1: confirm PIN · Step 2: confirm name · then lock. Both must match the passenger verbally.
+          </Text>
+          <Text style={styles.verifyPin}>PIN: {activeJob.pickupPin || '—'}</Text>
+          <Text style={styles.verifyName}>Name: {activeJob.passengerName || '—'}</Text>
+          {!pinOk ? (
+            <Button
+              title="Step 1 — Confirm: PIN matches"
+              compact
+              onPress={() => setPinOk(true)}
+            />
+          ) : !nameOk ? (
+            <Button
+              title="Step 2 — Confirm: name matches"
+              compact
+              onPress={() => setNameOk(true)}
+            />
+          ) : (
+            <Button
+              title={completionBusy ? 'Saving…' : 'Lock in — unlock On Board'}
+              disabled={completionBusy}
+              compact
+              onPress={() => void onConfirmVerify()}
+            />
+          )}
+          {pinOk && nameOk ? null : (
+            <Text style={styles.verifyHint}>
+              {pinOk ? 'PIN confirmed · now confirm name' : 'Confirm PIN first'}
+            </Text>
+          )}
+        </View>
+      ) : null}
 
       <View style={styles.actionBar}>
         {showEndTrip ? (
@@ -551,6 +593,20 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 8,
     backgroundColor: Colors.surface,
+  },
+  verifySticky: {
+    borderTopWidth: 2,
+    borderTopColor: Colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+    backgroundColor: Colors.surface,
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   verifyTitle: { fontSize: 15, fontWeight: '700', color: Colors.text },
   verifyHint: { fontSize: 12, color: Colors.textMuted },
