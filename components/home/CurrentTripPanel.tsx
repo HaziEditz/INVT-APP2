@@ -258,11 +258,11 @@ export function CurrentTripPanel() {
     activeJob.stage === 'onboard' ||
     (!!st.onboardAt && activeJob.stage !== 'complete');
   const showVerifySticky = needsPickupVerify && !pickupVerified;
-  const showFullDetails = detailsExpanded || compactOnboard;
+  // Expanded full details use the overlay above; inline scroll stays compact so it isn't buried.
 
   return (
     <View style={styles.panelActive}>
-      <View style={styles.detailsHeader}>
+      <View style={[styles.detailsHeader, styles.detailsHeaderRaised]}>
         <Text style={styles.detailsHeaderTitle}>Trip details</Text>
         <Button
           title={detailsExpanded ? 'Minimize' : 'Expand'}
@@ -271,6 +271,89 @@ export function CurrentTripPanel() {
           onPress={() => setDetailsExpanded((v) => !v)}
         />
       </View>
+
+      {/* Expanded details as an overlay ON TOP of map-adjacent chrome / sticky actions */}
+      {detailsExpanded && !compactOnboard ? (
+        <View style={styles.detailsOverlay} pointerEvents="box-none">
+          <View style={styles.detailsOverlayCard}>
+            <View style={[styles.detailsHeader, styles.detailsHeaderRaised]}>
+              <Text style={styles.detailsHeaderTitle}>Full trip details</Text>
+              <Button
+                title="Minimize"
+                variant="secondary"
+                compact
+                onPress={() => setDetailsExpanded(false)}
+              />
+            </View>
+            <ScrollView
+              style={styles.detailsOverlayScroll}
+              contentContainerStyle={styles.detailsContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.summaryRow}>
+                <JobTypeBadge type={activeJob.type} />
+                <Text style={styles.jobId}>Job #{activeJob.id}</Text>
+              </View>
+              {estFare != null ? (
+                <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
+              ) : null}
+              {activeJob.estimatedDistanceKm != null ? (
+                <Text style={styles.metaLine}>
+                  Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km
+                </Text>
+              ) : null}
+              {activeJob.isTotalMobility ? (
+                <Text style={styles.metaLine}>
+                  Total Mobility
+                  {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
+                  {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
+                </Text>
+              ) : activeJob.paymentType ? (
+                <Text style={styles.metaLine}>
+                  Payment: {activeJob.paymentType}
+                  {activeJob.isPrePaid ||
+                  String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
+                    ? ' (paid)'
+                    : ''}
+                </Text>
+              ) : null}
+              <JobDispatchMetaSection job={activeJob} compact />
+              <View style={styles.addrBlock}>
+                <Text style={styles.addrLabel}>Pickup</Text>
+                <Text style={styles.addr}>{activeJob.pickup}</Text>
+              </View>
+              {showDropoff ? (
+                <View style={styles.addrBlock}>
+                  <Text style={styles.addrLabel}>Dropoff</Text>
+                  <Text style={styles.addr}>{activeJob.dropoff}</Text>
+                </View>
+              ) : null}
+              {activeJob.passengerName ? (
+                <Text style={styles.metaLine}>Passenger: {activeJob.passengerName}</Text>
+              ) : null}
+              {activeJob.passengerPhone ? (
+                <View style={styles.callBlock}>
+                  <Text style={styles.metaLine}>{activeJob.passengerPhone}</Text>
+                  <Button title="Call passenger" onPress={callPassenger} />
+                </View>
+              ) : null}
+              {activeJob.passengerEmail ? (
+                <Text style={styles.metaLine}>Email: {activeJob.passengerEmail}</Text>
+              ) : null}
+              {activeJob.passengers != null ? (
+                <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
+              ) : null}
+              {activeJob.dispatcherName ? (
+                <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
+              ) : null}
+              <JobNotesSection job={activeJob} compact />
+            </ScrollView>
+          </View>
+        </View>
+      ) : null}
+
       <ScrollView
         style={styles.detailsScroll}
         contentContainerStyle={styles.detailsContent}
@@ -313,74 +396,13 @@ export function CurrentTripPanel() {
           <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
         ) : null}
 
-        {showFullDetails ? (
-          <>
-            {!compactOnboard && activeJob.estimatedDistanceKm != null ? (
-              <Text style={styles.metaLine}>Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km</Text>
-            ) : null}
-
-            {!compactOnboard && activeJob.isTotalMobility ? (
-              <Text style={styles.metaLine}>
-                Total Mobility
-                {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
-                {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
-              </Text>
-            ) : !compactOnboard && activeJob.paymentType ? (
-              <Text style={styles.metaLine}>
-                Payment: {activeJob.paymentType}
-                {activeJob.isPrePaid ||
-                String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
-                  ? ' (paid)'
-                  : ''}
-              </Text>
-            ) : null}
-
-            {!compactOnboard ? <JobDispatchMetaSection job={activeJob} compact /> : null}
-
-            {compactOnboard ? (
-              <View style={styles.addrBlock}>
-                <Text style={styles.addr} numberOfLines={2}>
-                  {activeJob.pickup?.split(',')[0] || 'Pickup'} →{' '}
-                  {showDropoff ? activeJob.dropoff?.split(',')[0] || 'Dropoff' : '—'}
-                </Text>
-              </View>
-            ) : (
-              <>
-                <View style={styles.addrBlock}>
-                  <Text style={styles.addrLabel}>Pickup</Text>
-                  <Text style={styles.addr} numberOfLines={3}>
-                    {activeJob.pickup}
-                  </Text>
-                </View>
-                {showDropoff ? (
-                  <View style={styles.addrBlock}>
-                    <Text style={styles.addrLabel}>Dropoff</Text>
-                    <Text style={styles.addr} numberOfLines={3}>
-                      {activeJob.dropoff}
-                    </Text>
-                  </View>
-                ) : null}
-              </>
-            )}
-
-            {activeJob.passengerName ? (
-              <Text style={styles.metaLine} numberOfLines={2}>
-                Passenger: {activeJob.passengerName}
-              </Text>
-            ) : null}
-            {!compactOnboard && activeJob.passengerEmail ? (
-              <Text style={styles.metaLine} numberOfLines={1}>
-                Email: {activeJob.passengerEmail}
-              </Text>
-            ) : null}
-            {!compactOnboard && activeJob.passengers != null ? (
-              <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
-            ) : null}
-            {!compactOnboard && activeJob.dispatcherName ? (
-              <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
-            ) : null}
-            {!compactOnboard ? <JobNotesSection job={activeJob} compact /> : null}
-          </>
+        {compactOnboard ? (
+          <View style={styles.addrBlock}>
+            <Text style={styles.addr} numberOfLines={2}>
+              {activeJob.pickup?.split(',')[0] || 'Pickup'} →{' '}
+              {showDropoff ? activeJob.dropoff?.split(',')[0] || 'Dropoff' : '—'}
+            </Text>
+          </View>
         ) : (
           <View style={styles.addrBlock}>
             <Text style={styles.addr} numberOfLines={2}>
@@ -596,6 +618,30 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 4,
     gap: 8,
+  },
+  detailsHeaderRaised: {
+    zIndex: 60,
+    elevation: 8,
+    backgroundColor: Colors.surface,
+  },
+  detailsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 80,
+    elevation: 24,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    padding: 8,
+    justifyContent: 'flex-end',
+  },
+  detailsOverlayCard: {
+    maxHeight: '92%',
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  detailsOverlayScroll: {
+    maxHeight: 420,
   },
   detailsHeaderTitle: { fontSize: 13, fontWeight: '700', color: Colors.textMuted, textTransform: 'uppercase' },
   callBlock: {
