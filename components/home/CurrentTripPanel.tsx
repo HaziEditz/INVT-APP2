@@ -61,6 +61,7 @@ export function CurrentTripPanel() {
   const pulse = useRef(new Animated.Value(1)).current;
   const [nameOk, setNameOk] = useState(false);
   const [pinOk, setPinOk] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(true);
   const deadlineIso = useMemo(() => {
     if (!activeJob) return undefined;
     if (activeJob.noShowDeadlineAt) return activeJob.noShowDeadlineAt;
@@ -82,6 +83,20 @@ export function CurrentTripPanel() {
     setNameOk(false);
     setPinOk(false);
   }, [activeJob?.id, activeJob?.stage]);
+
+  const needsPickupVerifyEarly =
+    !!activeJob &&
+    !activeJob.pickupVerifiedAt &&
+    !!activeJob.pickupPin &&
+    (activeJob.stage === 'arrived' ||
+      (!!activeJob.stepTimes?.arrivedAt &&
+        activeJob.stage !== 'onboard' &&
+        activeJob.stage !== 'complete'));
+  const showVerifyStickyEarly = !!needsPickupVerifyEarly;
+
+  useEffect(() => {
+    if (showVerifyStickyEarly) setDetailsExpanded(false);
+  }, [showVerifyStickyEarly, activeJob?.id]);
 
   useEffect(() => {
     if (!highlightArrived) {
@@ -203,7 +218,7 @@ export function CurrentTripPanel() {
     if (nextStage === 'onboard' && needsPickupVerify && !pickupVerified) {
       Alert.alert(
         'Verify passenger first',
-        'Confirm PIN match, then name match, then lock — the verify box is above the action buttons.',
+        'Confirm PIN and name with the passenger using the verify box above the action buttons.',
       );
       return;
     }
@@ -211,13 +226,8 @@ export function CurrentTripPanel() {
   };
 
   const onConfirmVerify = async () => {
-    if (!nameOk || !pinOk) {
-      Alert.alert(
-        'Both checks required',
-        'Confirm PIN match first, then name match. Both must be ticked before locking.',
-      );
-      return;
-    }
+    setPinOk(true);
+    setNameOk(true);
     const ok = await verifyPickupForActiveJob();
     if (ok) {
       Alert.alert('Verified', 'You can mark On Board now.');
@@ -248,9 +258,19 @@ export function CurrentTripPanel() {
     activeJob.stage === 'onboard' ||
     (!!st.onboardAt && activeJob.stage !== 'complete');
   const showVerifySticky = needsPickupVerify && !pickupVerified;
+  const showFullDetails = detailsExpanded || compactOnboard;
 
   return (
     <View style={styles.panelActive}>
+      <View style={styles.detailsHeader}>
+        <Text style={styles.detailsHeaderTitle}>Trip details</Text>
+        <Button
+          title={detailsExpanded ? 'Minimize' : 'Expand'}
+          variant="secondary"
+          compact
+          onPress={() => setDetailsExpanded((v) => !v)}
+        />
+      </View>
       <ScrollView
         style={styles.detailsScroll}
         contentContainerStyle={styles.detailsContent}
@@ -292,77 +312,96 @@ export function CurrentTripPanel() {
         {estFare != null ? (
           <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
         ) : null}
-        {!compactOnboard && activeJob.estimatedDistanceKm != null ? (
-          <Text style={styles.metaLine}>Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km</Text>
-        ) : null}
 
-        {!compactOnboard && activeJob.isTotalMobility ? (
-          <Text style={styles.metaLine}>
-            Total Mobility
-            {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
-            {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
-          </Text>
-        ) : !compactOnboard && activeJob.paymentType ? (
-          <Text style={styles.metaLine}>
-            Payment: {activeJob.paymentType}
-            {activeJob.isPrePaid ||
-            String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
-              ? ' (paid)'
-              : ''}
-          </Text>
-        ) : null}
-
-        {!compactOnboard ? <JobDispatchMetaSection job={activeJob} compact /> : null}
-
-        {compactOnboard ? (
-          <View style={styles.addrBlock}>
-            <Text style={styles.addr} numberOfLines={2}>
-              {activeJob.pickup?.split(',')[0] || 'Pickup'} →{' '}
-              {showDropoff ? activeJob.dropoff?.split(',')[0] || 'Dropoff' : '—'}
-            </Text>
-          </View>
-        ) : (
+        {showFullDetails ? (
           <>
-            <View style={styles.addrBlock}>
-              <Text style={styles.addrLabel}>Pickup</Text>
-              <Text style={styles.addr} numberOfLines={3}>
-                {activeJob.pickup}
+            {!compactOnboard && activeJob.estimatedDistanceKm != null ? (
+              <Text style={styles.metaLine}>Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km</Text>
+            ) : null}
+
+            {!compactOnboard && activeJob.isTotalMobility ? (
+              <Text style={styles.metaLine}>
+                Total Mobility
+                {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
+                {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
               </Text>
-            </View>
-            {showDropoff ? (
+            ) : !compactOnboard && activeJob.paymentType ? (
+              <Text style={styles.metaLine}>
+                Payment: {activeJob.paymentType}
+                {activeJob.isPrePaid ||
+                String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
+                  ? ' (paid)'
+                  : ''}
+              </Text>
+            ) : null}
+
+            {!compactOnboard ? <JobDispatchMetaSection job={activeJob} compact /> : null}
+
+            {compactOnboard ? (
               <View style={styles.addrBlock}>
-                <Text style={styles.addrLabel}>Dropoff</Text>
-                <Text style={styles.addr} numberOfLines={3}>
-                  {activeJob.dropoff}
+                <Text style={styles.addr} numberOfLines={2}>
+                  {activeJob.pickup?.split(',')[0] || 'Pickup'} →{' '}
+                  {showDropoff ? activeJob.dropoff?.split(',')[0] || 'Dropoff' : '—'}
                 </Text>
               </View>
+            ) : (
+              <>
+                <View style={styles.addrBlock}>
+                  <Text style={styles.addrLabel}>Pickup</Text>
+                  <Text style={styles.addr} numberOfLines={3}>
+                    {activeJob.pickup}
+                  </Text>
+                </View>
+                {showDropoff ? (
+                  <View style={styles.addrBlock}>
+                    <Text style={styles.addrLabel}>Dropoff</Text>
+                    <Text style={styles.addr} numberOfLines={3}>
+                      {activeJob.dropoff}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
+
+            {activeJob.passengerName ? (
+              <Text style={styles.metaLine} numberOfLines={2}>
+                Passenger: {activeJob.passengerName}
+              </Text>
             ) : null}
+            {!compactOnboard && activeJob.passengerEmail ? (
+              <Text style={styles.metaLine} numberOfLines={1}>
+                Email: {activeJob.passengerEmail}
+              </Text>
+            ) : null}
+            {!compactOnboard && activeJob.passengers != null ? (
+              <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
+            ) : null}
+            {!compactOnboard && activeJob.dispatcherName ? (
+              <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
+            ) : null}
+            {!compactOnboard ? <JobNotesSection job={activeJob} compact /> : null}
           </>
+        ) : (
+          <View style={styles.addrBlock}>
+            <Text style={styles.addr} numberOfLines={2}>
+              {(activeJob.pickup || 'Pickup').split(',')[0]}
+              {showDropoff ? ` → ${(activeJob.dropoff || 'Dropoff').split(',')[0]}` : ''}
+            </Text>
+            {activeJob.passengerName ? (
+              <Text style={styles.metaLine} numberOfLines={1}>
+                {activeJob.passengerName}
+              </Text>
+            ) : null}
+          </View>
         )}
 
-        {activeJob.passengerName ? (
-          <Text style={styles.metaLine} numberOfLines={2}>
-            Passenger: {activeJob.passengerName}
-          </Text>
-        ) : null}
         {activeJob.passengerPhone ? (
-          <View style={styles.phoneRow}>
+          <View style={styles.callBlock}>
             <Text style={styles.metaLine} numberOfLines={1}>
               {activeJob.passengerPhone}
             </Text>
-            <Button title="Call" variant="secondary" compact onPress={callPassenger} />
+            <Button title="Call passenger" onPress={callPassenger} />
           </View>
-        ) : null}
-        {!compactOnboard && activeJob.passengerEmail ? (
-          <Text style={styles.metaLine} numberOfLines={1}>
-            Email: {activeJob.passengerEmail}
-          </Text>
-        ) : null}
-        {!compactOnboard && activeJob.passengers != null ? (
-          <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
-        ) : null}
-        {!compactOnboard && activeJob.dispatcherName ? (
-          <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
         ) : null}
 
         {needsPickupVerify && pickupVerified ? (
@@ -375,43 +414,21 @@ export function CurrentTripPanel() {
             {activeJob.imComingAt ? ' (passenger said I’m coming)' : ''}
           </Text>
         ) : null}
-
-        {!compactOnboard ? <JobNotesSection job={activeJob} compact /> : null}
       </ScrollView>
 
       {showVerifySticky ? (
         <View style={styles.verifySticky}>
           <Text style={styles.verifyTitle}>Pickup verification</Text>
           <Text style={styles.verifyHint}>
-            Step 1: confirm PIN · Step 2: confirm name · then lock. Both must match the passenger verbally.
+            Confirm the PIN and name with the passenger, then tap once to unlock On Board.
           </Text>
           <Text style={styles.verifyPin}>PIN: {activeJob.pickupPin || '—'}</Text>
           <Text style={styles.verifyName}>Name: {activeJob.passengerName || '—'}</Text>
-          {!pinOk ? (
-            <Button
-              title="Step 1 — Confirm: PIN matches"
-              compact
-              onPress={() => setPinOk(true)}
-            />
-          ) : !nameOk ? (
-            <Button
-              title="Step 2 — Confirm: name matches"
-              compact
-              onPress={() => setNameOk(true)}
-            />
-          ) : (
-            <Button
-              title={completionBusy ? 'Saving…' : 'Lock in — unlock On Board'}
-              disabled={completionBusy}
-              compact
-              onPress={() => void onConfirmVerify()}
-            />
-          )}
-          {pinOk && nameOk ? null : (
-            <Text style={styles.verifyHint}>
-              {pinOk ? 'PIN confirmed · now confirm name' : 'Confirm PIN first'}
-            </Text>
-          )}
+          <Button
+            title={completionBusy ? 'Saving…' : 'Confirm PIN & name — unlock On Board'}
+            disabled={completionBusy}
+            onPress={() => void onConfirmVerify()}
+          />
         </View>
       ) : null}
 
@@ -570,6 +587,20 @@ const styles = StyleSheet.create({
     padding: 12,
     paddingBottom: 8,
     gap: 8,
+  },
+  detailsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+    gap: 8,
+  },
+  detailsHeaderTitle: { fontSize: 13, fontWeight: '700', color: Colors.textMuted, textTransform: 'uppercase' },
+  callBlock: {
+    gap: 8,
+    marginTop: 4,
   },
   stageScroll: { marginBottom: 4 },
   stageChip: { flexDirection: 'row', alignItems: 'center', marginRight: 12, gap: 4 },

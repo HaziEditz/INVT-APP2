@@ -1938,7 +1938,7 @@ export function PaymentModal() {
               keyboardDismissMode="interactive"
               showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.pageTitle}>Collect Payment</Text>
+              <Text style={styles.pageTitle}>{isAlreadyPaidCard ? 'Payment Summary' : 'Collect Payment'}</Text>
               <Text style={styles.pickup} numberOfLines={2}>
                 {paymentJob.pickup}
               </Text>
