@@ -113,11 +113,26 @@ export function parseJobOfferRecord(
       const n = typeof raw === 'number' ? raw : Date.parse(String(raw));
       return Number.isFinite(n) ? n : Date.now();
     })(),
-    source: String(val.BookingSource ?? val.CreatedBy ?? val.source ?? 'dispatch'),
-    dispatcherName:
-      String(val.DispatcherName ?? val.dispatcherName ?? '').trim() || undefined,
+    source: String(
+      val.BookingSource ??
+        val.bookingSource ??
+        val.Source ??
+        val.jobBookingSrc ??
+        val.CreatedBy ??
+        val.source ??
+        '',
+    ).trim() || undefined,
+    bookingSource: String(
+      val.BookingSource ?? val.bookingSource ?? val.Source ?? val.jobBookingSrc ?? '',
+    ).trim() || undefined,
+    pickupPin: String(val.PickupPin ?? val.pickupPin ?? '').trim() || undefined,
+    pickupVerifiedAt: String(val.pickupVerifiedAt ?? val.PickupVerifiedAt ?? '').trim() || undefined,
+    noShowDeadlineAt: String(val.noShowDeadlineAt ?? '').trim() || undefined,
+    imComingAt: String(val.imComingAt ?? val.ImComingAt ?? '').trim() || undefined,
     notes: primaryNote,
     allNotes: allNotes.length ? allNotes : undefined,
+    dispatcherName:
+      String(val.DispatcherName ?? val.dispatcherName ?? '').trim() || undefined,
     pickupLat: pickLl.lat,
     pickupLng: pickLl.lng,
     dropoffLat: dropLl.lat,

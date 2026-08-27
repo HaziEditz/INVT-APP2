@@ -3164,6 +3164,45 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (isFixedPriceBooking(update.raw)) {
         patch.isFixedPrice = true;
       }
+      // §FIX source/PIN — keep passenger origin + pickup PIN on activeJob after Arrived
+      const pinFromRaw = String(update.raw.PickupPin ?? update.raw.pickupPin ?? '').trim();
+      if (pinFromRaw) patch.pickupPin = pinFromRaw;
+      const verifiedFromRaw = String(
+        update.raw.pickupVerifiedAt ?? update.raw.PickupVerifiedAt ?? '',
+      ).trim();
+      if (verifiedFromRaw) patch.pickupVerifiedAt = verifiedFromRaw;
+      const imComingFromRaw = String(update.raw.imComingAt ?? update.raw.ImComingAt ?? '').trim();
+      if (imComingFromRaw) patch.imComingAt = imComingFromRaw;
+      const noShowFromRaw = String(update.raw.noShowDeadlineAt ?? '').trim();
+      if (noShowFromRaw) patch.noShowDeadlineAt = noShowFromRaw;
+      const srcFromRaw = String(
+        update.raw.BookingSource ??
+          update.raw.bookingSource ??
+          update.raw.Source ??
+          update.raw.source ??
+          update.raw.CreatedBy ??
+          '',
+      ).trim();
+      if (srcFromRaw && !srcFromRaw.includes('/api/') && !/dispatch_complete/i.test(srcFromRaw)) {
+        const normalized =
+          /^APP$/i.test(srcFromRaw)
+            ? 'PassengerApp'
+            : srcFromRaw.toLowerCase() === 'passenger'
+              ? 'PassengerApp'
+              : srcFromRaw;
+        patch.bookingSource = normalized;
+        // Prefer passenger/app over stale desk defaults on activeJob.source
+        const prevSrc = String(activeJobRef.current?.source || '').trim();
+        const prevIsDesk =
+          !prevSrc ||
+          /^dispatch$/i.test(prevSrc) ||
+          /dispatch console/i.test(prevSrc) ||
+          prevSrc === 'queue';
+        if (prevIsDesk || /passenger/i.test(normalized)) {
+          patch.source = /passenger/i.test(normalized) ? 'passenger' : normalized;
+        }
+      }
+
       if (!patch.paymentType && prevRaw) {
         const payFromRaw = readPaymentFromRecord(update.raw);
         const prevPay = readPaymentFromRecord(prevRaw);
@@ -3215,7 +3254,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         storeData(STORAGE_KEYS.selectedTariffId, fromBooking.id).catch(() => undefined);
       }
 
-      if (changes.length === 0 && !syncedNotes.length && !dispatchTariffId && !dispatchTariffName && fareFromRaw == null && !patch.paymentType) return;
+      if (
+        changes.length === 0 &&
+        !syncedNotes.length &&
+        !dispatchTariffId &&
+        !dispatchTariffName &&
+        fareFromRaw == null &&
+        !patch.paymentType &&
+        !patch.pickupPin &&
+        !patch.bookingSource &&
+        !patch.pickupVerifiedAt &&
+        !patch.imComingAt &&
+        !patch.noShowDeadlineAt
+      ) {
+        return;
+      }
 
       if (Object.keys(patch).length > 0) {
         setActiveJob((prev) => {
