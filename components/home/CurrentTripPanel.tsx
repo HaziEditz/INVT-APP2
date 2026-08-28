@@ -74,6 +74,7 @@ export function CurrentTripPanel() {
   }, [activeJob?.noShowDeadlineAt, activeJob?.imComingAt, activeJob?.stepTimes?.arrivedAt, activeJob?.id]);
   const postArrivalForCountdown =
     !!activeJob &&
+    !activeJob.pickupVerifiedAt &&
     (activeJob.stage === 'arrived' ||
       (!!activeJob.stepTimes?.arrivedAt &&
         activeJob.stage !== 'onboard' &&
@@ -292,6 +293,9 @@ export function CurrentTripPanel() {
   // Wrong passenger / walk-up only in Arrived → PIN-verified window (not after verify / onboard).
   const showWrongPassengerActions =
     !showEndTrip && !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
+  // No-show risk ends once PIN verified (passenger is with the driver) — hide timer + No Show.
+  const showNoShowActions =
+    !showEndTrip && !isHailTrip && postArrival && !pickupVerified;
 
   return (
     <View style={styles.panelActive}>
@@ -521,7 +525,7 @@ export function CurrentTripPanel() {
               }}
             />
           ) : null}
-          {!showEndTrip && !isHailTrip && postArrival ? (
+          {!showEndTrip && !isHailTrip && postArrival && showNoShowActions ? (
             <>
               {showWrongPassengerActions ? (
                 <>
@@ -593,6 +597,19 @@ export function CurrentTripPanel() {
                 }}
               />
             </>
+          ) : !showEndTrip && !isHailTrip && postArrival && pickupVerified ? (
+            <Button
+              title="Cancel"
+              variant="danger"
+              compact
+              style={styles.secondaryBtn}
+              onPress={() => {
+                Alert.alert('Cancel job?', 'This permanently closes the job.', [
+                  { text: 'Back', style: 'cancel' },
+                  { text: 'Cancel job', style: 'destructive', onPress: cancelActiveJob },
+                ]);
+              }}
+            />
           ) : null}
         </View>
 
