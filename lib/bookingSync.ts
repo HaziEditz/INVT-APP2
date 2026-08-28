@@ -35,12 +35,12 @@ export function parseBookingNode(val: unknown): Partial<BookingUpdate> | null {
   const noShow = status.includes('no show') || status.includes('noshow');
   const terminal = cancelled || completed || noShow;
   return {
-    bookingId: String(b.BookingId ?? b.bookingId ?? b.id ?? ''),
+    bookingId: String(b.BookingId ?? b.bookingId ?? b.Id ?? b.id ?? ''),
     cancelled,
     terminal,
     status,
-    pickup: String(b.PickAddress ?? b.pickup ?? b.pickAddress ?? ''),
-    dropoff: String(b.DropAddress ?? b.dropoff ?? b.dropAddress ?? ''),
+    pickup: String(b.PickAddress ?? b.pickup ?? b.pickAddress ?? b.PickupAddress ?? ''),
+    dropoff: String(b.DropAddress ?? b.dropoff ?? b.dropAddress ?? b.DropoffAddress ?? ''),
     passengerName: String(b.PassengerName ?? b.Name ?? b.passengerName ?? '').trim() || undefined,
     passengerPhone: String(b.PhoneNo ?? b.passengerPhone ?? '').trim() || undefined,
     notes: b.notes ? String(b.notes) : b.Info ? String(b.Info) : undefined,
@@ -75,8 +75,9 @@ export function subscribeBooking(
       return;
     }
     const parsed = parseBookingNode(snap.val());
-    if (!parsed?.bookingId) return;
-    const update = { ...parsed, bookingId: parsed.bookingId || bookingId } as BookingUpdate;
+    if (!parsed) return;
+    // Path bookingId is authoritative — many allbookings rows omit Id/BookingId after cancel fanout.
+    const update = { ...parsed, bookingId: String(parsed.bookingId || bookingId) } as BookingUpdate;
     if (isReturnedToDispatchPool(update.status)) {
       onUpdate({
         ...update,
