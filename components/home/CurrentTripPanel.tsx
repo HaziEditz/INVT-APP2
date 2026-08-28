@@ -189,6 +189,15 @@ export function CurrentTripPanel() {
       /passenger/i.test(String(activeJob.bookingSource || activeJob.source || '')));
   const pickupVerified = !!activeJob.pickupVerifiedAt;
   const canNoShow = postArrival && remainingMs <= 0;
+  // Wrong passenger / walk-up hail only for already-paid-upfront jobs (Card/Account/TM).
+  // Cash uses the normal Recall action — these buttons must not appear there.
+  const payRaw = String(activeJob.paymentType || '').toLowerCase();
+  const isPrepaidUpfront = !!(
+    activeJob.isPrePaid ||
+    String(activeJob.paymentStatus || '').toLowerCase() === 'paid' ||
+    /card|stripe|account|tm/.test(payRaw) ||
+    !!activeJob.isTotalMobility
+  );
 
   const navTarget =
     activeJob.stage === 'onboard' || activeJob.stage === 'complete'
@@ -509,41 +518,45 @@ export function CurrentTripPanel() {
           ) : null}
           {!showEndTrip && !isHailTrip && postArrival ? (
             <>
-              <Button
-                title="Wrong passenger"
-                variant="secondary"
-                compact
-                style={styles.secondaryBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Wrong / uninvited passenger?',
-                    'Return the booked job to the pool so the real passenger gets another driver.',
-                    [
-                      { text: 'Back', style: 'cancel' },
-                      { text: 'Return to pool', onPress: () => void recallWrongPassenger() },
-                    ],
-                  );
-                }}
-              />
-              <Button
-                title="Walk-up hail"
-                variant="secondary"
-                compact
-                style={styles.secondaryBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Start walk-up fare?',
-                    'Returns the booked job to the pool, then starts a new hail for the person in the cab.',
-                    [
-                      { text: 'Back', style: 'cancel' },
-                      {
-                        text: 'Start hail',
-                        onPress: () => void forkWalkUpHailFromWrongPassenger(),
-                      },
-                    ],
-                  );
-                }}
-              />
+              {isPrepaidUpfront ? (
+                <>
+                  <Button
+                    title="Wrong passenger"
+                    variant="secondary"
+                    compact
+                    style={styles.secondaryBtn}
+                    onPress={() => {
+                      Alert.alert(
+                        'Wrong / uninvited passenger?',
+                        'Return the booked job to the pool so the real passenger gets another driver.',
+                        [
+                          { text: 'Back', style: 'cancel' },
+                          { text: 'Return to pool', onPress: () => void recallWrongPassenger() },
+                        ],
+                      );
+                    }}
+                  />
+                  <Button
+                    title="Walk-up hail"
+                    variant="secondary"
+                    compact
+                    style={styles.secondaryBtn}
+                    onPress={() => {
+                      Alert.alert(
+                        'Start walk-up fare?',
+                        'Returns the booked job to the pool, then starts a new hail for the person in the cab.',
+                        [
+                          { text: 'Back', style: 'cancel' },
+                          {
+                            text: 'Start hail',
+                            onPress: () => void forkWalkUpHailFromWrongPassenger(),
+                          },
+                        ],
+                      );
+                    }}
+                  />
+                </>
+              ) : null}
               <Button
                 title={canNoShow ? 'No Show' : `No Show (${remainLabel})`}
                 variant="secondary"
