@@ -61,7 +61,8 @@ export function CurrentTripPanel() {
   const pulse = useRef(new Animated.Value(1)).current;
   const [nameOk, setNameOk] = useState(false);
   const [pinOk, setPinOk] = useState(false);
-  const [detailsExpanded, setDetailsExpanded] = useState(true);
+  // Default minimized so Expand never buries the action bar under a full-screen overlay.
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const deadlineIso = useMemo(() => {
     if (!activeJob) return undefined;
     if (activeJob.noShowDeadlineAt) return activeJob.noShowDeadlineAt;
@@ -243,14 +244,35 @@ export function CurrentTripPanel() {
     }
   };
 
-  const callPassenger = () => {
+  /** Native dial/SMS only — does not navigate the app away from this trip screen. */
+  const openNativeContact = async (scheme: 'tel' | 'sms') => {
     const phone = String(activeJob.passengerPhone || '').trim();
     if (!phone) {
       Alert.alert('No phone number', 'This booking has no passenger phone on file.');
       return;
     }
     const digits = phone.replace(/[^\d+]/g, '');
-    void Linking.openURL(`tel:${digits}`);
+    if (!digits) {
+      Alert.alert('No phone number', 'This booking has no usable passenger phone on file.');
+      return;
+    }
+    const url = `${scheme}:${digits}`;
+    try {
+      // iOS canOpenURL needs Info.plist queries; Android often returns false for tel/sms.
+      // Prefer attempting the native handoff — app stays on this trip screen when returning.
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        scheme === 'tel' ? 'Cannot place call' : 'Cannot open messages',
+        'Try again from the phone dialer or messages app.',
+      );
+    }
+  };
+  const callPassenger = () => {
+    void openNativeContact('tel');
+  };
+  const textPassenger = () => {
+    void openNativeContact('sms');
   };
 
   const stageLabel = (s: JobStage) => {
@@ -267,7 +289,9 @@ export function CurrentTripPanel() {
     activeJob.stage === 'onboard' ||
     (!!st.onboardAt && activeJob.stage !== 'complete');
   const showVerifySticky = needsPickupVerify && !pickupVerified;
-  // Expanded full details use the overlay above; inline scroll stays compact so it isn't buried.
+  // Wrong passenger / walk-up only in Arrived → PIN-verified window (not after verify / onboard).
+  const showWrongPassengerActions =
+    !showEndTrip && !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
 
   return (
     <View style={styles.panelActive}>
@@ -281,93 +305,12 @@ export function CurrentTripPanel() {
         />
       </View>
 
-      {/* Expanded details as an overlay ON TOP of map-adjacent chrome / sticky actions */}
-      {detailsExpanded && !compactOnboard ? (
-        <View style={styles.detailsOverlay} pointerEvents="box-none">
-          <View style={styles.detailsOverlayCard}>
-            <View style={[styles.detailsHeader, styles.detailsHeaderRaised]}>
-              <Text style={styles.detailsHeaderTitle}>Full trip details</Text>
-              <Button
-                title="Minimize"
-                variant="secondary"
-                compact
-                onPress={() => setDetailsExpanded(false)}
-              />
-            </View>
-            <ScrollView
-              style={styles.detailsOverlayScroll}
-              contentContainerStyle={styles.detailsContent}
-              showsVerticalScrollIndicator
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled"
-            >
-              <View style={styles.summaryRow}>
-                <JobTypeBadge type={activeJob.type} />
-                <Text style={styles.jobId}>Job #{activeJob.id}</Text>
-              </View>
-              {estFare != null ? (
-                <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
-              ) : null}
-              {activeJob.estimatedDistanceKm != null ? (
-                <Text style={styles.metaLine}>
-                  Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km
-                </Text>
-              ) : null}
-              {activeJob.isTotalMobility ? (
-                <Text style={styles.metaLine}>
-                  Total Mobility
-                  {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
-                  {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
-                </Text>
-              ) : activeJob.paymentType ? (
-                <Text style={styles.metaLine}>
-                  Payment: {activeJob.paymentType}
-                  {activeJob.isPrePaid ||
-                  String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
-                    ? ' (paid)'
-                    : ''}
-                </Text>
-              ) : null}
-              <JobDispatchMetaSection job={activeJob} compact />
-              <View style={styles.addrBlock}>
-                <Text style={styles.addrLabel}>Pickup</Text>
-                <Text style={styles.addr}>{activeJob.pickup}</Text>
-              </View>
-              {showDropoff ? (
-                <View style={styles.addrBlock}>
-                  <Text style={styles.addrLabel}>Dropoff</Text>
-                  <Text style={styles.addr}>{activeJob.dropoff}</Text>
-                </View>
-              ) : null}
-              {activeJob.passengerName ? (
-                <Text style={styles.metaLine}>Passenger: {activeJob.passengerName}</Text>
-              ) : null}
-              {activeJob.passengerPhone ? (
-                <View style={styles.callBlock}>
-                  <Text style={styles.metaLine}>{activeJob.passengerPhone}</Text>
-                  <Button title="Call passenger" onPress={callPassenger} />
-                </View>
-              ) : null}
-              {activeJob.passengerEmail ? (
-                <Text style={styles.metaLine}>Email: {activeJob.passengerEmail}</Text>
-              ) : null}
-              {activeJob.passengers != null ? (
-                <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
-              ) : null}
-              {activeJob.dispatcherName ? (
-                <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
-              ) : null}
-              <JobNotesSection job={activeJob} compact />
-            </ScrollView>
-          </View>
-        </View>
-      ) : null}
-
       <ScrollView
         style={styles.detailsScroll}
         contentContainerStyle={styles.detailsContent}
         showsVerticalScrollIndicator
         nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
       >
         {!compactOnboard ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
@@ -428,10 +371,72 @@ export function CurrentTripPanel() {
 
         {activeJob.passengerPhone ? (
           <View style={styles.callBlock}>
-            <Text style={styles.metaLine} numberOfLines={1}>
+            <Text style={styles.metaLine} numberOfLines={1} selectable>
               {activeJob.passengerPhone}
             </Text>
-            <Button title="Call passenger" onPress={callPassenger} />
+            {preArrival ? (
+              <View style={styles.phoneRow}>
+                <Button
+                  title="Call"
+                  compact
+                  style={styles.secondaryBtn}
+                  onPress={callPassenger}
+                />
+                <Button
+                  title="Text"
+                  variant="secondary"
+                  compact
+                  style={styles.secondaryBtn}
+                  onPress={textPassenger}
+                />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {detailsExpanded ? (
+          <View style={styles.expandedInline}>
+            {activeJob.estimatedDistanceKm != null ? (
+              <Text style={styles.metaLine}>
+                Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km
+              </Text>
+            ) : null}
+            {activeJob.isTotalMobility ? (
+              <Text style={styles.metaLine}>
+                Total Mobility
+                {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
+                {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
+              </Text>
+            ) : activeJob.paymentType ? (
+              <Text style={styles.metaLine}>
+                Payment: {activeJob.paymentType}
+                {activeJob.isPrePaid ||
+                String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
+                  ? ' (paid)'
+                  : ''}
+              </Text>
+            ) : null}
+            <JobDispatchMetaSection job={activeJob} compact />
+            <View style={styles.addrBlock}>
+              <Text style={styles.addrLabel}>Pickup</Text>
+              <Text style={styles.addr}>{activeJob.pickup}</Text>
+            </View>
+            {showDropoff ? (
+              <View style={styles.addrBlock}>
+                <Text style={styles.addrLabel}>Dropoff</Text>
+                <Text style={styles.addr}>{activeJob.dropoff}</Text>
+              </View>
+            ) : null}
+            {activeJob.passengerEmail ? (
+              <Text style={styles.metaLine}>Email: {activeJob.passengerEmail}</Text>
+            ) : null}
+            {activeJob.passengers != null ? (
+              <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
+            ) : null}
+            {activeJob.dispatcherName ? (
+              <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
+            ) : null}
+            <JobNotesSection job={activeJob} compact />
           </View>
         ) : null}
 
@@ -439,7 +444,7 @@ export function CurrentTripPanel() {
           <Text style={styles.verified}>Verified — On Board unlocked</Text>
         ) : null}
 
-        {postArrival && !isHailTrip ? (
+        {postArrival && !isHailTrip && !pickupVerified ? (
           <Text style={styles.metaLine}>
             No-show countdown: {remainLabel}
             {activeJob.imComingAt ? ' (passenger said I’m coming)' : ''}
@@ -518,8 +523,9 @@ export function CurrentTripPanel() {
           ) : null}
           {!showEndTrip && !isHailTrip && postArrival ? (
             <>
-              {isPrepaidUpfront ? (
+              {showWrongPassengerActions ? (
                 <>
+                  <Text style={styles.waitChip}>Wait {remainLabel}</Text>
                   <Button
                     title="Wrong passenger"
                     variant="secondary"
@@ -637,26 +643,22 @@ const styles = StyleSheet.create({
     elevation: 8,
     backgroundColor: Colors.surface,
   },
-  detailsOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 80,
-    elevation: 24,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    padding: 8,
-    justifyContent: 'flex-end',
-  },
-  detailsOverlayCard: {
-    maxHeight: '92%',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
-  },
-  detailsOverlayScroll: {
-    maxHeight: 420,
-  },
   detailsHeaderTitle: { fontSize: 13, fontWeight: '700', color: Colors.textMuted, textTransform: 'uppercase' },
+  expandedInline: {
+    gap: 8,
+    paddingTop: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  waitChip: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
+    alignSelf: 'center',
+    paddingHorizontal: 8,
+    minWidth: '40%',
+    textAlign: 'center',
+  },
   callBlock: {
     gap: 8,
     marginTop: 4,
@@ -703,7 +705,7 @@ const styles = StyleSheet.create({
   verifyName: { fontSize: 14, fontWeight: '600', color: Colors.text },
   verifyPin: { fontSize: 20, fontWeight: '800', letterSpacing: 3, color: Colors.primary },
   verified: { fontSize: 13, fontWeight: '600', color: Colors.success || '#16a34a' },
-  actionBar: { padding: 10, borderTopWidth: 1, borderTopColor: Colors.border, gap: 8 },
+  actionBar: { padding: 10, borderTopWidth: 1, borderTopColor: Colors.border, gap: 8, zIndex: 40 },
   secondaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   secondaryBtn: { flexGrow: 1, minWidth: '40%' },
   errorBox: { gap: 6 },

@@ -24,7 +24,8 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "BookaWaka Driver tracks location in the background while you are online or on a job.",
         "NSLocationAlwaysUsageDescription": "BookaWaka Driver tracks location in the background while you are online or on a job.",
         "NSCameraUsageDescription": "BookaWaka Driver uses the camera to scan Total Mobility and payment cards.",
-        "UIBackgroundModes": ["location", "fetch", "remote-notification"]
+        "UIBackgroundModes": ["location", "fetch", "remote-notification"],
+        "LSApplicationQueriesSchemes": ["tel", "sms"]
       }
     },
     "android": {
