@@ -101,7 +101,7 @@ export function diffBookingChanges(
 
   const fields: { key: string; label: string; pick: (b: Record<string, unknown>) => string }[] = [
     { key: 'pickup', label: 'Pickup', pick: (b) => String(b.PickAddress ?? b.pickup ?? '') },
-    { key: 'dropoff', label: 'Dropoff', pick: (b) => String(b.DropAddress ?? b.dropoff ?? '') },
+    { key: 'dropoff', label: 'Dropoff', pick: (b) => String(b.DropAddress ?? b.dropoff ?? b.DropoffAddress ?? '') },
     { key: 'passengerName', label: 'Passenger', pick: (b) => String(b.PassengerName ?? b.Name ?? '') },
     { key: 'passengerPhone', label: 'Phone', pick: (b) => String(b.PhoneNo ?? '') },
   ];
