@@ -38,6 +38,7 @@ import {
   markTripJournalStagesSyncedForTrip,
 } from '@/services/tripJournalService';
 import { shouldBlockOffersForPendingTripSync } from '@/lib/tripJournalFlushPolicy';
+import { emptyActiveTripDiag, type ActiveTripDiag } from '@/lib/activeTripDiag';
 import {
   normalizeDriverPaymentType,
   readAccountFieldsFromRecord,
@@ -268,6 +269,8 @@ interface DriverContextValue {
   jobOffer: JobOffer | null;
   paymentJob: ActiveJob | null;
   activeJob: ActiveJob | null;
+  /** Inline Current-trip trace for Ad (records checked + decision). */
+  activeTripDiag: ActiveTripDiag;
   nextQueuedOffer: QueuedOffer | null;
   hailActive: boolean;
   hailPickupAddress: string | null;
@@ -818,6 +821,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [completionBusy, setCompletionBusy] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
+  const [activeTripDiag, setActiveTripDiag] = useState<ActiveTripDiag>(() => emptyActiveTripDiag());
   const [completedJobs, setCompletedJobs] = useState<CompletedJob[]>([]);
   const [jobHistory, setJobHistory] = useState<HistoryJob[]>([]);
   const [jobHistoryLoading, setJobHistoryLoading] = useState(false);
@@ -877,6 +881,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const hailActiveRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
   const activeJobRef = useRef<ActiveJob | null>(null);
+  const patchTripDiag = useCallback((partial: Partial<ActiveTripDiag>) => {
+    setActiveTripDiag((prev) => ({
+      ...prev,
+      ...partial,
+      at: new Date().toISOString(),
+      hasCurrentUi: !!(activeJobRef.current || hailActiveRef.current),
+      activeJobId: activeJobRef.current?.id ? String(activeJobRef.current.id) : '—',
+      activeJobStage: activeJobRef.current?.stage ? String(activeJobRef.current.stage) : '—',
+      hailActive: !!hailActiveRef.current,
+      pickupVerifiedAt: activeJobRef.current?.pickupVerifiedAt
+        ? String(activeJobRef.current.pickupVerifiedAt)
+        : '—',
+    }));
+  }, []);
   const presenceWriteStatusRef = useRef<FirebaseDriverStatus>('Available');
   const lastStagePresenceWriteRef = useRef<{ status: FirebaseDriverStatus; at: number } | null>(null);
   const prevQueuedOfferIdsRef = useRef<Set<string>>(new Set());
@@ -1098,10 +1116,29 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               stepTimes: j.stepTimes ?? EMPTY_STEP_TIMES,
               tariffChanges: j.tariffChanges ?? [],
             });
+            patchTripDiag({
+              phase: 'hydrate_storage',
+              storageJobId: String(j.id),
+              uiBranch: 'CurrentTripPanel (from AsyncStorage)',
+              decision: `restored activeJob ${j.id} stage=${j.stage} — will reconcile with allbookings`,
+            });
           } else {
             console.warn('[Driver] cleared stored active job with invalid booking id:', j.id);
             await storeData(STORAGE_KEYS.activeJob, null);
+            patchTripDiag({
+              phase: 'hydrate_storage',
+              storageJobId: String(j.id),
+              decision: `cleared invalid stored job id ${j.id}`,
+              uiBranch: 'IdleCurrentSection',
+            });
           }
+        } else {
+          patchTripDiag({
+            phase: 'hydrate_storage',
+            storageJobId: '(none)',
+            decision: 'no AsyncStorage activeJob on boot',
+            uiBranch: 'IdleCurrentSection',
+          });
         }
         // Do not restore shift as "online" on launch — driver must confirm vehicle
         // and startShift each session. Always clear vehicleSessionReady too; leaving
@@ -2587,11 +2624,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   /** Drop cached activeJob when dispatch confirms it is no longer live. */
   const clearStaleActiveJobLocal = async (detail: string, opts?: { silent?: boolean }) => {
+    const clearedId = activeJobRef.current?.id ? String(activeJobRef.current.id) : '—';
     const hadJob = !!activeJobRef.current?.id;
     await clearActiveJobInternal();
     setPaymentJob(null);
     clearPaymentJobRef();
     setCompletionError(null);
+    patchTripDiag({
+      phase: 'clearStale',
+      uiBranch: 'cleared → IdleCurrentSection',
+      decision: `CLEARED activeJob ${clearedId}: ${detail}`,
+      allbookingsStatus: '—',
+      serverRefresh: detail,
+    });
     if (shiftActiveRef.current) {
       await restoreAvailableAfterJobClear();
     }
@@ -3038,10 +3083,33 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
     bookingRawRef.current = null;
+    const cid = driver.companyId;
+    const jid = activeJob.id;
+    patchTripDiag({
+      phase: 'subscribeBooking',
+      companyId: cid,
+      driverId: String(driver.id || '—'),
+      allbookingsPath: `allbookings/${cid}/${jid}`,
+      decision: `listening allbookings/${cid}/${jid}`,
+      uiBranch: 'CurrentTripPanel',
+    });
     return subscribeBooking(driver.companyId, activeJob.id, (update) => {
       const prevStatus = bookingRawRef.current
         ? String(bookingRawRef.current.Status ?? bookingRawRef.current.status ?? bookingRawRef.current.BookingStatus ?? '')
         : '';
+      const liveStatus = String(
+        update.raw.Status ?? update.raw.status ?? update.raw.BookingStatus ?? update.status ?? '',
+      );
+      patchTripDiag({
+        phase: 'allbookings_snap',
+        companyId: cid,
+        allbookingsPath: `allbookings/${cid}/${jid}`,
+        allbookingsStatus: liveStatus || '(empty)',
+        decision: update.terminal || update.cancelled
+          ? `allbookings terminal/cancel Status=${liveStatus} → may clear trip`
+          : `allbookings Status=${liveStatus} (prev=${prevStatus || '—'}) → keep / patch ActiveJob`,
+        uiBranch: 'CurrentTripPanel',
+      });
       const poolReturn =
         isReturnedToDispatchPool(update.status) &&
         !(prevStatus && isReturnedToDispatchPool(prevStatus));
@@ -3419,6 +3487,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     // Phase 5c — provisional offline hail has no server row until journal flush.
     if (isProvisionalBookingId(job.id) || String(job.id).startsWith('local:')) {
       console.log(`[Driver] ${reason}: skip server refresh for provisional hail ${job.id}`);
+      patchTripDiag({
+        phase: 'server_refresh',
+        serverRefresh: `${reason}: skip provisional ${job.id}`,
+        decision: `skip refresh for provisional hail`,
+      });
       return;
     }
     const hailTrip = isHailTripJob(job, hailActiveRef.current);
@@ -3427,14 +3500,37 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (!server?.status) {
         if (hailTrip) {
           console.log(`[Driver] ${reason}: skipping stale clear for hail #${job.id} — server row not ready`);
+          patchTripDiag({
+            phase: 'server_refresh',
+            serverRefresh: `${reason}: hail server row missing — keep local`,
+            decision: `KEEP hail ${job.id} (server not ready)`,
+            uiBranch: 'CurrentTripPanel',
+          });
           return;
         }
         console.log(`[Driver] ${reason}: clearing stale local job #${job.id} — absent from server`);
+        patchTripDiag({
+          phase: 'server_refresh',
+          serverRefresh: `${reason}: absent from server`,
+          decision: `CLEAR ${job.id} — not on server active-bookings/allbookings`,
+          uiBranch: 'IdleCurrentSection',
+        });
         await clearStaleActiveJobLocal('This booking is no longer assigned to you.');
         return;
       }
 
       const ownership = localActiveJobLostOnServer(server.status, server.driverId, driver.id);
+      patchTripDiag({
+        phase: 'server_refresh',
+        companyId: driver.companyId,
+        allbookingsPath: `allbookings/${driver.companyId}/${job.id}`,
+        allbookingsStatus: String(server.status),
+        serverRefresh: `${reason}: status=${server.status} driverId=${server.driverId ?? '—'} lost=${ownership.lost}`,
+        decision: ownership.lost
+          ? `CLEAR ${job.id} — ${ownership.reason}`
+          : `KEEP ${job.id} — reconcile stage vs ${server.status}`,
+        uiBranch: ownership.lost ? 'IdleCurrentSection' : 'CurrentTripPanel',
+      });
       if (ownership.lost) {
         if (hailTrip && isReturnedToDispatchPool(server.status)) {
           console.log(`[Driver] ${reason}: hail #${job.id} returned on dispatch — clearing hail trip`);
@@ -3611,6 +3707,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         console.log(
           `[Driver] active-job Firebase signal (${reason}) for #${activeJob.id} — reconciling ownership (not clearing on presence alone)`,
         );
+        patchTripDiag({
+          phase: 'presence_signal',
+          jobsPath: `jobs/${driver.companyId}/${selectedVehicleId}/${driver.id}/${activeJob.id}`,
+          onlineCurrentJobId: `signal:${reason}`,
+          decision: `Firebase signal ${reason} → reconcile (not auto-clear)`,
+        });
         void (async () => {
           await refreshActiveJobRef.current?.(`presence-signal:${reason}`);
           if (activeJobIdRef.current && jobIdsMatch(activeJobIdRef.current, activeJob.id)) {
@@ -4373,6 +4475,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     });
     setActiveJob(job);
     activeJobIdRef.current = job.id;
+    patchTripDiag({
+      phase: 'acceptOffer',
+      companyId: String(driver.companyId || '—'),
+      driverId: String(driver.id || '—'),
+      storageJobId: String(job.id),
+      allbookingsPath: `allbookings/${driver.companyId}/${job.id}`,
+      allbookingsStatus: String(offerSnapshot.originalStatus ?? 'Assigned?'),
+      uiBranch: 'CurrentTripPanel (post-accept)',
+      decision: `ACCEPT OK → setActiveJob ${job.id} stage=pickup — listening allbookings`,
+    });
     await withTimeout(
       storeData(STORAGE_KEYS.activeJob, job),
       2_000,
@@ -6262,6 +6374,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         paymentJob,
         nextQueuedOffer,
         activeJob,
+        activeTripDiag,
         hailActive,
         hailPickupAddress,
         meter,

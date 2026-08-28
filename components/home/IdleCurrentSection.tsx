@@ -1,5 +1,7 @@
 import { Colors } from '@/constants/theme';
 import { IdleHailButton } from '@/components/home/IdleHailButton';
+import { ActiveTripTracePanel } from '@/components/home/ActiveTripTracePanel';
+import { useDriver } from '@/context/DriverContext';
 import { StyleSheet, Text, View } from 'react-native';
 
 /**
@@ -8,8 +10,10 @@ import { StyleSheet, Text, View } from 'react-native';
  * button is never lost inside a collapsing flex panel (see IDLE HAIL comments there).
  */
 export function IdleCurrentSection() {
+  const { activeTripDiag } = useDriver();
   return (
     <View style={styles.wrap}>
+      <ActiveTripTracePanel diag={activeTripDiag} />
       <View style={styles.message}>
         <Text style={styles.title}>No active trip.</Text>
         <Text style={styles.sub}>
