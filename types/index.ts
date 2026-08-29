@@ -84,6 +84,8 @@ export interface JobOffer {
   pickupLng?: number;
   dropoffLat?: number;
   dropoffLng?: number;
+  /** Intermediate stops (passenger add-stop / dispatch create). */
+  stops?: { address: string; lat?: number; lng?: number }[];
   silent?: boolean;
   vehicleTypeRequired?: string;
   passengers?: number;

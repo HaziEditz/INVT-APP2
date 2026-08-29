@@ -3,6 +3,7 @@ import { getDatabaseInstance } from '@/lib/firebase';
 import { JobOffer, JobStage } from '@/types';
 
 import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
+import { formatStopsSummary, parseJobStopsFromRecord } from '@/lib/jobStops';
 
 export type BookingUpdate = {
   bookingId: string;
@@ -12,6 +13,7 @@ export type BookingUpdate = {
   status: string;
   pickup: string;
   dropoff: string;
+  stops?: { address: string; lat?: number; lng?: number }[];
   passengerName?: string;
   passengerPhone?: string;
   notes?: string;
@@ -114,6 +116,15 @@ export function diffBookingChanges(
       if (meterStarted) blocked.push(f.label);
       else (allowed as Record<string, string>)[f.key] = newV;
     }
+  }
+
+  const oldStops = formatStopsSummary(prev ? parseJobStopsFromRecord(prev) : undefined);
+  const newStopsList = parseJobStopsFromRecord(next);
+  const newStops = formatStopsSummary(newStopsList);
+  if (oldStops !== newStops && newStops) {
+    changes.push(`Stops: ${newStops}`);
+    if (meterStarted) blocked.push('Stops');
+    else allowed.stops = newStopsList;
   }
 
   if (prev) {

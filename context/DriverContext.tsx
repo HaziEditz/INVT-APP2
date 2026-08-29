@@ -6,6 +6,7 @@ import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
 import { collectJobNotes } from '@/lib/jobNotes';
 import { parseSchedulingMetaFromRecord } from '@/lib/jobDisplayMeta';
+import { parseJobStopsFromRecord, formatStopsSummary } from '@/lib/jobStops';
 import { loadCompanyInfo } from '@/lib/company';
 import { EarningsBreakdown, sumBreakdown } from '@/lib/earnings';
 import { HistoryJob, loadDriverJobHistory } from '@/lib/jobHistory';
@@ -489,6 +490,7 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     type: (val.type as JobOffer['type']) ?? 'Taxi',
     pickup: readPickupAddress(val),
     dropoff: readDropoffAddress(val),
+    stops: parseJobStopsFromRecord(val),
     passengerName: val.passengerName
       ? String(val.passengerName)
       : val.name || val.jobname
@@ -739,6 +741,8 @@ function buildNotificationFieldPatch(val: Record<string, unknown>): Partial<JobO
   if (pickup) patch.pickup = String(pickup);
   const dropoff = val.dropoff ?? val.jobdropoff ?? val.DropAddress;
   if (dropoff) patch.dropoff = String(dropoff);
+  const stops = parseJobStopsFromRecord(val);
+  if (stops?.length) patch.stops = stops;
   const notes = val.notes ?? val.jobinfo ?? val.Notes;
   if (notes) patch.notes = String(notes);
   const name = val.jobname ?? val.Name ?? val.PassengerName ?? val.passengerName;
@@ -2839,6 +2843,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (val.dropoff || val.jobdropoff || val.DropAddress) {
         changes.push(`Dropoff: ${val.dropoff ?? val.jobdropoff ?? val.DropAddress}`);
       }
+      const stopSummary = formatStopsSummary(parseJobStopsFromRecord(val));
+      if (stopSummary) changes.push(`Stops: ${stopSummary}`);
       if (val.notes || val.jobinfo || val.Notes) changes.push(`Notes updated`);
       if (val.Pickingtime || val.pickupTime) changes.push(`Time updated`);
       const name = val.jobname ?? val.Name ?? val.PassengerName ?? val.passengerName;
@@ -3187,6 +3193,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const patch: Partial<ActiveJob> = {};
       if (allowed.pickup) patch.pickup = allowed.pickup;
       if (allowed.dropoff) patch.dropoff = allowed.dropoff;
+      if (allowed.stops) patch.stops = allowed.stops;
       if (allowed.passengerName) patch.passengerName = allowed.passengerName;
       if (allowed.passengerPhone) patch.passengerPhone = allowed.passengerPhone;
       if (allowed.notes) patch.notes = allowed.notes;
@@ -3376,6 +3383,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         const patch: Partial<JobOffer> = {};
         if (allowed.pickup) patch.pickup = allowed.pickup;
         if (allowed.dropoff) patch.dropoff = allowed.dropoff;
+      if (allowed.stops) patch.stops = allowed.stops;
         if (allowed.passengerName) patch.passengerName = allowed.passengerName;
         if (allowed.passengerPhone) patch.passengerPhone = allowed.passengerPhone;
         if (allowed.notes) patch.notes = allowed.notes;

@@ -355,14 +355,20 @@ export function CurrentTripPanel() {
         {compactOnboard ? (
           <View style={styles.addrBlock}>
             <Text style={styles.addr} numberOfLines={2}>
-              {activeJob.pickup?.split(',')[0] || 'Pickup'} →{' '}
-              {showDropoff ? activeJob.dropoff?.split(',')[0] || 'Dropoff' : '—'}
+              {activeJob.pickup?.split(',')[0] || 'Pickup'}
+              {(activeJob.stops?.length ?? 0) > 0
+                ? ` → ${activeJob.stops!.map((s) => s.address.split(',')[0]).join(' → ')}`
+                : ''}
+              {showDropoff ? ` → ${activeJob.dropoff?.split(',')[0] || 'Dropoff'}` : ' → —'}
             </Text>
           </View>
         ) : (
           <View style={styles.addrBlock}>
-            <Text style={styles.addr} numberOfLines={2}>
+            <Text style={styles.addr} numberOfLines={3}>
               {(activeJob.pickup || 'Pickup').split(',')[0]}
+              {(activeJob.stops?.length ?? 0) > 0
+                ? ` → ${activeJob.stops!.map((s) => s.address.split(',')[0]).join(' → ')}`
+                : ''}
               {showDropoff ? ` → ${(activeJob.dropoff || 'Dropoff').split(',')[0]}` : ''}
             </Text>
             {activeJob.passengerName ? (
@@ -425,6 +431,16 @@ export function CurrentTripPanel() {
               <Text style={styles.addrLabel}>Pickup</Text>
               <Text style={styles.addr}>{activeJob.pickup}</Text>
             </View>
+            {(activeJob.stops?.length ?? 0) > 0
+              ? activeJob.stops!.map((stop, i) => (
+                  <View key={`stop-${i}-${stop.address}`} style={styles.addrBlock}>
+                    <Text style={styles.addrLabel}>
+                      {(activeJob.stops?.length ?? 0) === 1 ? 'Stop' : `Stop ${i + 1}`}
+                    </Text>
+                    <Text style={styles.addr}>{stop.address}</Text>
+                  </View>
+                ))
+              : null}
             {showDropoff ? (
               <View style={styles.addrBlock}>
                 <Text style={styles.addrLabel}>Dropoff</Text>
