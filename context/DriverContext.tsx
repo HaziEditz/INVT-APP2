@@ -38,7 +38,8 @@ import {
   markTripJournalStagesSyncedForTrip,
 } from '@/services/tripJournalService';
 import { shouldBlockOffersForPendingTripSync } from '@/lib/tripJournalFlushPolicy';
-import { emptyActiveTripDiag, type ActiveTripDiag } from '@/lib/activeTripDiag';
+import { type ActiveTripDiag } from '@/lib/activeTripDiag';
+// TRACE panel removed — ActiveTripDiag kept only for no-op patchTripDiag call sites.
 import {
   normalizeDriverPaymentType,
   readAccountFieldsFromRecord,
@@ -269,8 +270,6 @@ interface DriverContextValue {
   jobOffer: JobOffer | null;
   paymentJob: ActiveJob | null;
   activeJob: ActiveJob | null;
-  /** Inline Current-trip trace for Ad (records checked + decision). */
-  activeTripDiag: ActiveTripDiag;
   nextQueuedOffer: QueuedOffer | null;
   hailActive: boolean;
   hailPickupAddress: string | null;
@@ -821,7 +820,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [completionBusy, setCompletionBusy] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
-  const [activeTripDiag, setActiveTripDiag] = useState<ActiveTripDiag>(() => emptyActiveTripDiag());
   const [completedJobs, setCompletedJobs] = useState<CompletedJob[]>([]);
   const [jobHistory, setJobHistory] = useState<HistoryJob[]>([]);
   const [jobHistoryLoading, setJobHistoryLoading] = useState(false);
@@ -881,19 +879,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const hailActiveRef = useRef(false);
   const activeJobIdRef = useRef<string | null>(null);
   const activeJobRef = useRef<ActiveJob | null>(null);
-  const patchTripDiag = useCallback((partial: Partial<ActiveTripDiag>) => {
-    setActiveTripDiag((prev) => ({
-      ...prev,
-      ...partial,
-      at: new Date().toISOString(),
-      hasCurrentUi: !!(activeJobRef.current || hailActiveRef.current),
-      activeJobId: activeJobRef.current?.id ? String(activeJobRef.current.id) : '—',
-      activeJobStage: activeJobRef.current?.stage ? String(activeJobRef.current.stage) : '—',
-      hailActive: !!hailActiveRef.current,
-      pickupVerifiedAt: activeJobRef.current?.pickupVerifiedAt
-        ? String(activeJobRef.current.pickupVerifiedAt)
-        : '—',
-    }));
+  const patchTripDiag = useCallback((_partial: Partial<ActiveTripDiag>) => {
+    // TRACE panel removed — keep call sites; no UI state updates.
   }, []);
   const presenceWriteStatusRef = useRef<FirebaseDriverStatus>('Available');
   const lastStagePresenceWriteRef = useRef<{ status: FirebaseDriverStatus; at: number } | null>(null);
@@ -6374,7 +6361,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         paymentJob,
         nextQueuedOffer,
         activeJob,
-        activeTripDiag,
         hailActive,
         hailPickupAddress,
         meter,

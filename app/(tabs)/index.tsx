@@ -8,7 +8,6 @@ import { OffersPanel } from '@/components/home/OffersPanel';
 import { QueuePanel } from '@/components/home/QueuePanel';
 import { TariffPicker } from '@/components/home/TariffPicker';
 import { TripToolsBar } from '@/components/home/TripToolsBar';
-import { ActiveTripTracePanel } from '@/components/home/ActiveTripTracePanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { MapErrorFallback } from '@/components/MapErrorFallback';
 import JobMap from '@/components/JobMap';
@@ -42,7 +41,6 @@ export default function MainScreen() {
   const {
     shiftActive,
     activeJob,
-    activeTripDiag,
     hailActive,
     meter,
     tariffs,
@@ -216,9 +214,6 @@ export default function MainScreen() {
               onSelect={setSelectedTariff}
             />
           )}
-
-          {/* Always on trip layout so Ad sees trace even when Current tab isn't selected */}
-          {hasCurrent ? <ActiveTripTracePanel diag={activeTripDiag} /> : null}
 
           <HomeMainTabs
             active={mainTab}
