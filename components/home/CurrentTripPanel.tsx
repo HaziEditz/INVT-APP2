@@ -184,22 +184,19 @@ export function CurrentTripPanel() {
   const postArrival =
     activeJob.stage === 'arrived' ||
     (!!st.arrivedAt && activeJob.stage !== 'onboard' && activeJob.stage !== 'complete');
-  const needsPickupVerify =
-    !isHailTrip &&
-    postArrival &&
-    (!!activeJob.pickupPin ||
-      /passenger/i.test(String(activeJob.bookingSource || activeJob.source || '')));
-  const pickupVerified = !!activeJob.pickupVerifiedAt;
-  const canNoShow = postArrival && remainingMs <= 0;
-  // Wrong passenger / walk-up hail only for already-paid-upfront jobs (Card/Account/TM).
-  // Cash uses the normal Recall action — these buttons must not appear there.
+  // Prepaid Arrived group (PIN / wrong-passenger / no-show / walk-up) — Card,
+  // Account, ACC, TM remainder — any source. Cash uses Recall only (no group).
   const payRaw = String(activeJob.paymentType || '').toLowerCase();
   const isPrepaidUpfront = !!(
     activeJob.isPrePaid ||
     String(activeJob.paymentStatus || '').toLowerCase() === 'paid' ||
-    /card|stripe|account|tm/.test(payRaw) ||
+    activeJob.isAcc ||
+    /card|stripe|account|acc\b|tm/.test(payRaw) ||
     !!activeJob.isTotalMobility
   );
+  const needsPickupVerify = !isHailTrip && postArrival && isPrepaidUpfront;
+  const pickupVerified = !!activeJob.pickupVerifiedAt;
+  const canNoShow = postArrival && remainingMs <= 0;
 
   const navTarget =
     activeJob.stage === 'onboard' || activeJob.stage === 'complete'
@@ -290,12 +287,11 @@ export function CurrentTripPanel() {
     activeJob.stage === 'onboard' ||
     (!!st.onboardAt && activeJob.stage !== 'complete');
   const showVerifySticky = needsPickupVerify && !pickupVerified;
-  // Wrong passenger / walk-up only in Arrived → PIN-verified window (not after verify / onboard).
+  // Prepaid Arrived group only — Cash must not see PIN / wrong / no-show / walk-up.
   const showWrongPassengerActions =
     !showEndTrip && !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
-  // No-show risk ends once PIN verified (passenger is with the driver) — hide timer + No Show.
   const showNoShowActions =
-    !showEndTrip && !isHailTrip && postArrival && !pickupVerified;
+    !showEndTrip && !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
 
   return (
     <View style={styles.panelActive}>
@@ -379,28 +375,30 @@ export function CurrentTripPanel() {
           </View>
         )}
 
-        {activeJob.passengerPhone ? (
+        {/* Call/Text: every job/source/payment while Assigned→Arrived (not onboard/complete). */}
+        {activeJob.passengerPhone &&
+        activeJob.stage !== 'complete' &&
+        activeJob.stage !== 'onboard' &&
+        !st.onboardAt ? (
           <View style={styles.callBlock}>
             <Text style={styles.metaLine} numberOfLines={1} selectable>
               {activeJob.passengerPhone}
             </Text>
-            {preArrival ? (
-              <View style={styles.phoneRow}>
-                <Button
-                  title="Call"
-                  compact
-                  style={styles.secondaryBtn}
-                  onPress={callPassenger}
-                />
-                <Button
-                  title="Text"
-                  variant="secondary"
-                  compact
-                  style={styles.secondaryBtn}
-                  onPress={textPassenger}
-                />
-              </View>
-            ) : null}
+            <View style={styles.phoneRow}>
+              <Button
+                title="Call"
+                compact
+                style={styles.secondaryBtn}
+                onPress={callPassenger}
+              />
+              <Button
+                title="Text"
+                variant="secondary"
+                compact
+                style={styles.secondaryBtn}
+                onPress={textPassenger}
+              />
+            </View>
           </View>
         ) : null}
 
@@ -464,7 +462,7 @@ export function CurrentTripPanel() {
           <Text style={styles.verified}>Verified — On Board unlocked</Text>
         ) : null}
 
-        {postArrival && !isHailTrip && !pickupVerified ? (
+        {showNoShowActions ? (
           <Text style={styles.metaLine}>
             No-show countdown: {remainLabel}
             {activeJob.imComingAt ? ' (passenger said I’m coming)' : ''}

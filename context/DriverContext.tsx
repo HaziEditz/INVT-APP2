@@ -2740,6 +2740,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (type === 'im_coming' || eventType === 'im_coming') {
+      await clearDriverNotification(driver.id, driver.companyId);
+      void playInAppNotificationSound('update');
+      const mins = Number(val.extensionMinutes) || 5;
+      const cost = Number(val.waitingCostEstimate);
+      const costLabel =
+        Number.isFinite(cost) && cost > 0 ? ` Est. waiting $${cost.toFixed(2)}.` : '';
+      Alert.alert(
+        "Passenger is coming",
+        `They need a bit more time — no-show wait extended by ${mins} minutes.${costLabel}`,
+      );
+      const imAt = String(val.imComingAt ?? '').trim();
+      const dl = String(val.noShowDeadlineAt ?? '').trim();
+      if (imAt || dl) {
+        setActiveJob((prev) => {
+          if (!prev || (jobId && !jobIdsMatch(prev.id, jobId))) return prev;
+          const merged = {
+            ...prev,
+            ...(imAt ? { imComingAt: imAt } : {}),
+            ...(dl ? { noShowDeadlineAt: dl } : {}),
+          };
+          storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
+          return merged;
+        });
+      }
+      return;
+    }
+
     if (type === 'kicked' || eventType === 'kicked') {
       if (adminForceEndInFlightRef.current) return;
       adminForceEndInFlightRef.current = true;
@@ -3333,12 +3361,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       if (Object.keys(patch).length > 0) {
+        const prevIm = String(activeJobRef.current?.imComingAt || '').trim();
         setActiveJob((prev) => {
           if (!prev) return prev;
           const merged = { ...prev, ...patch };
           storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
           return merged;
         });
+        // Backup Alert if RTDB fanout arrives without the notification/{driver} write.
+        if (patch.imComingAt && !prevIm) {
+          void playInAppNotificationSound('update');
+          Alert.alert(
+            "Passenger is coming",
+            'They asked for more time — no-show wait extended by 5 minutes. Waiting cost may apply at the company waiting rate.',
+          );
+        }
       }
 
       if (changes.length > 0 && blocked.length === 0) {
