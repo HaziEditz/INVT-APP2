@@ -128,6 +128,24 @@ export function withCompleteFareBreakdown(
         ...job,
         distanceKm: job.distanceKm || breakdown.distanceKm,
         fare: breakdown.total,
+        meterSnapshot: {
+          running: false,
+          paused: false,
+          mode: 'waiting' as const,
+          startedAt: job.startedAt || Date.now(),
+          finishedAt: Date.now(),
+          pausedMs: 0,
+          movingMs: 0,
+          waitingMs: breakdown.waitingMinutes * 60000,
+          distanceKm: breakdown.distanceKm,
+          tariffId: '-1',
+          tariffName: 'Fixed',
+          tariffChanges: job.tariffChanges || [],
+          breakdown,
+          fare: breakdown.total,
+          trackOnly: true,
+          lockedFare: breakdown.total,
+        },
       };
     }
     return {
@@ -136,13 +154,20 @@ export function withCompleteFareBreakdown(
       fare: breakdown.total,
       meterSnapshot: {
         ...meter,
-        breakdown,
+        breakdown: {
+          ...breakdown,
+          // Prefer live GPS distance over estimate when track-only ran.
+          distanceKm: meter.distanceKm > 0 ? meter.distanceKm : breakdown.distanceKm,
+          flagFall: breakdown.flagFall || meter.breakdown?.flagFall || 0,
+        },
         fare: breakdown.total,
         distanceKm: meter.distanceKm || breakdown.distanceKm,
         finishedAt: meter.finishedAt ?? Date.now(),
         running: false,
         tariffId: '-1',
         tariffName: 'Fixed',
+        trackOnly: true,
+        lockedFare: breakdown.total,
       },
     };
   }

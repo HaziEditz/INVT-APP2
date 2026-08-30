@@ -224,7 +224,7 @@ import {
   type EndShiftSummary,
 } from '@/services/nztaService';
 import { notifyBreakReminder } from '@/services/notificationService';
-import { createInitialMeter, watchMeter } from '@/services/meterEngine';
+import { createInitialMeter, createTrackOnlyMeter, watchMeter } from '@/services/meterEngine';
 import { disableWakeLock, enableWakeLock } from '@/services/wakeLock';
 import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED, parseFiniteFare } from '@/lib/tariffs';
 import {
@@ -4734,6 +4734,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const startMeterForJob = () => {
+    const tariffs = tariffsListRef.current;
+    const fromBooking = bookingRawRef.current
+      ? resolveTariffFromList(tariffs, readBookingTariffHints(bookingRawRef.current))
+      : null;
+    const tariff =
+      fromBooking ??
+      resolveTariffForDriver(tariffs, null, selectedTariffRef.current) ??
+      selectedTariffRef.current;
+
+    // Fixed / already-paid: still GPS-track distance + route for Closed Job
+    // (flag fall / km shown for reference). Charged fare stays locked.
     if (!shouldStartMeterForBooking(bookingRawRef.current, activeJobRef.current)) {
       const fixedFare = readFixedFareAmount(bookingRawRef.current, activeJobRef.current ?? undefined);
       if (fixedFare != null && activeJobRef.current) {
@@ -4750,16 +4761,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           return updated;
         });
       }
+      const refTariff = isTariffConfigured(tariff) ? tariff : selectedTariffRef.current;
+      const locked = fixedFare ?? activeJobRef.current?.fare ?? 0;
+      const m = createTrackOnlyMeter(refTariff, locked);
+      setMeter(m);
+      meterRef.current = m;
+      storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
+      startMeterWatch();
       return;
     }
-    const tariffs = tariffsListRef.current;
-    const fromBooking = bookingRawRef.current
-      ? resolveTariffFromList(tariffs, readBookingTariffHints(bookingRawRef.current))
-      : null;
-    const tariff =
-      fromBooking ??
-      resolveTariffForDriver(tariffs, null, selectedTariffRef.current) ??
-      selectedTariffRef.current;
+
     if (!isTariffConfigured(tariff)) {
       Alert.alert('No tariff', 'Select a tariff before starting the meter.');
       return;
@@ -4919,9 +4930,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         stepTimes.onboardAt = now;
         if (!shouldStartMeterForBooking(bookingRawRef.current, activeJob)) {
           onboardFixedFare = readFixedFareAmount(bookingRawRef.current, activeJob);
-        } else {
-          startMeterForJob();
         }
+        // Always start meter or GPS track-only (fixed/prepaid) for Closed Job route/distance.
+        startMeterForJob();
       }
 
       const updated: ActiveJob = {

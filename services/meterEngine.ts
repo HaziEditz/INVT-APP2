@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import { Tariff } from '@/types';
 import {
   createInitialMeter,
+  createTrackOnlyMeter,
   gpsAccuracyBlocksDistance,
   METER_TICK_MS,
   tickMeter,
@@ -11,6 +12,7 @@ import {
 
 export {
   createInitialMeter,
+  createTrackOnlyMeter,
   gpsAccuracyBlocksDistance,
   tickMeter,
   tickMeterWithGps,

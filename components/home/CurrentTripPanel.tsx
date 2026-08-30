@@ -287,11 +287,19 @@ export function CurrentTripPanel() {
     activeJob.stage === 'onboard' ||
     (!!st.onboardAt && activeJob.stage !== 'complete');
   const showVerifySticky = needsPickupVerify && !pickupVerified;
-  // Prepaid Arrived group only — Cash must not see PIN / wrong / no-show / walk-up.
-  const showWrongPassengerActions =
+  // Prepaid Arrived group (PIN + wrong/walk-up + no-show + call/text): all together
+  // from Arrived until PIN confirm; then the whole group disappears (passenger in cab).
+  // Cash: no prepaid group — Call/Text stays available Assigned→Arrived as before.
+  const showPrepaidArrivedGroup =
     !showEndTrip && !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
-  const showNoShowActions =
-    !showEndTrip && !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
+  const showWrongPassengerActions = showPrepaidArrivedGroup;
+  const showNoShowActions = showPrepaidArrivedGroup;
+  const showCallText =
+    !!activeJob.passengerPhone &&
+    activeJob.stage !== 'complete' &&
+    activeJob.stage !== 'onboard' &&
+    !st.onboardAt &&
+    !(isPrepaidUpfront && postArrival && pickupVerified);
 
   return (
     <View style={styles.panelActive}>
@@ -375,11 +383,10 @@ export function CurrentTripPanel() {
           </View>
         )}
 
-        {/* Call/Text: every job/source/payment while Assigned→Arrived (not onboard/complete). */}
-        {activeJob.passengerPhone &&
-        activeJob.stage !== 'complete' &&
-        activeJob.stage !== 'onboard' &&
-        !st.onboardAt ? (
+        {/* Call/Text (non-prepaid Arrived / pre-arrival): stay in details.
+            Prepaid Arrived: Call/Text lives in the Arrived action group below so it
+            appears with PIN/wrong/no-show — not buried under the verify sticky. */}
+        {showCallText && !showPrepaidArrivedGroup ? (
           <View style={styles.callBlock}>
             <Text style={styles.metaLine} numberOfLines={1} selectable>
               {activeJob.passengerPhone}
@@ -541,6 +548,23 @@ export function CurrentTripPanel() {
           ) : null}
           {!showEndTrip && !isHailTrip && postArrival && showNoShowActions ? (
             <>
+              {showCallText && activeJob.passengerPhone ? (
+                <>
+                  <Button
+                    title="Call"
+                    compact
+                    style={styles.secondaryBtn}
+                    onPress={callPassenger}
+                  />
+                  <Button
+                    title="Text"
+                    variant="secondary"
+                    compact
+                    style={styles.secondaryBtn}
+                    onPress={textPassenger}
+                  />
+                </>
+              ) : null}
               {showWrongPassengerActions ? (
                 <>
                   <Text style={styles.waitChip}>Wait {remainLabel}</Text>

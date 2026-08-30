@@ -56,8 +56,42 @@ export function createInitialMeter(tariff: Tariff): MeterState {
   };
 }
 
+/** GPS distance/route only — fare locked (fixed-price / already-paid card). */
+export function createTrackOnlyMeter(tariff: Tariff, lockedFare: number): MeterState {
+  const fare = Number.isFinite(lockedFare) && lockedFare >= 0 ? lockedFare : 0;
+  const ref = calcMeterBreakdown(tariff, 0, 0);
+  return {
+    running: true,
+    paused: false,
+    mode: 'waiting',
+    startedAt: Date.now(),
+    pausedMs: 0,
+    movingMs: 0,
+    waitingMs: 0,
+    distanceKm: 0,
+    tariffId: '-1',
+    tariffName: 'Fixed',
+    tariffChanges: [],
+    breakdown: { ...ref, total: fare },
+    fare,
+    routePoints: [],
+    trackOnly: true,
+    lockedFare: fare,
+  };
+}
+
 function applyTariffToMeter(meter: MeterState, tariff: Tariff): MeterState {
   const waitMin = meter.waitingMs / 60000;
+  if (meter.trackOnly) {
+    // Reference flag/distance/wait from company tariff; charged total stays locked.
+    const ref = calcMeterBreakdown(tariff, meter.distanceKm, waitMin);
+    const fare = meter.lockedFare ?? meter.fare;
+    return {
+      ...meter,
+      breakdown: { ...ref, total: fare },
+      fare,
+    };
+  }
   const breakdown = calcMeterBreakdown(tariff, meter.distanceKm, waitMin);
   return {
     ...meter,

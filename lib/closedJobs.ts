@@ -124,7 +124,7 @@ export async function writeClosedJob(
     notes: job.notes ?? '',
     completedAt: completedAtMs,
     closedAt: completedAtMs,
-    status: 'closed',
+    status: 'Completed',
     BookingStatus: 'Completed',
     ...(tmDetails
       ? buildTmPersistFields(tmDetails, {

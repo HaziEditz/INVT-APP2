@@ -193,7 +193,7 @@ export default function MainScreen() {
         >
           {hasCurrent ? (
             <TripToolsBar
-              meter={meterRunning && meter ? meter : null}
+              meter={meterRunning && meter && !meter.trackOnly ? meter : null}
               onPause={pauseMeter}
               tariffs={tariffs}
               selected={selectedTariff}
@@ -256,7 +256,7 @@ export default function MainScreen() {
         onClose={() => setMapExpanded(false)}
         activeJob={activeJob}
         meter={meter}
-        showMeter={meterRunning && mapExpanded}
+        showMeter={meterRunning && mapExpanded && !meter?.trackOnly}
         showRoute={mapShowsRoute}
         showsUserLocation={shiftActive && !paymentJob}
         zones={mapZones}
