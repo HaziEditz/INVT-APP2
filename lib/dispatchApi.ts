@@ -633,7 +633,12 @@ export async function syncJobStageOnDispatch(
   status: string,
   driverId: string,
   ifVersion?: number,
-): Promise<{ version?: number; idempotent?: boolean }> {
+): Promise<{
+  version?: number;
+  idempotent?: boolean;
+  pickupPin?: string;
+  booking?: Record<string, unknown>;
+}> {
   const bid = parseInt(String(bookingId), 10);
   if (!bid || !driverId) {
     throw new Error('syncJobStageOnDispatch: bookingId and driverId required');
@@ -660,9 +665,18 @@ export async function syncJobStageOnDispatch(
       if (res.ok && data.ok !== false) {
         const version =
           parseInt(String(data.version ?? data.currentVersion ?? data.currentSeq ?? ''), 10) || undefined;
+        const booking =
+          data.booking && typeof data.booking === 'object'
+            ? (data.booking as Record<string, unknown>)
+            : undefined;
+        const pickupPin = String(
+          booking?.pickupPin ?? booking?.PickupPin ?? data.pickupPin ?? data.PickupPin ?? '',
+        ).trim();
         return {
           version: version != null && !Number.isNaN(version) ? version : undefined,
           idempotent: data.idempotent === true,
+          pickupPin: pickupPin || undefined,
+          booking,
         };
       }
       throw new DispatchApiError(

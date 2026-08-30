@@ -4339,16 +4339,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     const vehicleId = await resolveVehicleId();
 
-    const { version } = await syncJobStageOnDispatch(
+    const { version, pickupPin } = await syncJobStageOnDispatch(
       jobRef.id,
       bookingStatus,
       driver.id,
       jobRef.updateSeq,
     );
-    if (version != null && activeJob?.id === jobRef.id) {
+    if ((version != null || pickupPin) && activeJob?.id === jobRef.id) {
       setActiveJob((prev) => {
         if (!prev || prev.id !== jobRef.id) return prev;
-        const merged = { ...prev, updateSeq: version };
+        const merged = {
+          ...prev,
+          ...(version != null ? { updateSeq: version } : {}),
+          ...(pickupPin && !prev.pickupPin ? { pickupPin } : {}),
+        };
         storeData(STORAGE_KEYS.activeJob, merged).catch(() => undefined);
         return merged;
       });
@@ -4854,7 +4858,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       if (nextStage === 'arrived' || nextStage === 'onboard') {
         if (nextStage === 'onboard') {
+          const payRaw = String(activeJob.paymentType || '').toLowerCase();
+          const prepaid = !!(
+            activeJob.isPrePaid ||
+            String(activeJob.paymentStatus || '').toLowerCase() === 'paid' ||
+            activeJob.isAcc ||
+            /card|stripe|account|acc\b|tm/.test(payRaw) ||
+            !!activeJob.isTotalMobility
+          );
           const needsVerify =
+            prepaid ||
             !!activeJob.pickupPin ||
             /passenger/i.test(String(activeJob.bookingSource || activeJob.source || ''));
           if (needsVerify && !activeJob.pickupVerifiedAt) {

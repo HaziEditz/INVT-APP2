@@ -86,10 +86,21 @@ export function CurrentTripPanel() {
     setPinOk(false);
   }, [activeJob?.id, activeJob?.stage]);
 
+  // Collapse details only for prepaid Arrived (same gate as the verify sticky).
+  // Do not require pickupPin — Website jobs often receive PIN a beat late.
+  const payRawEarly = String(activeJob?.paymentType || '').toLowerCase();
+  const isPrepaidEarly = !!(
+    activeJob &&
+    (activeJob.isPrePaid ||
+      String(activeJob.paymentStatus || '').toLowerCase() === 'paid' ||
+      activeJob.isAcc ||
+      /card|stripe|account|acc\b|tm/.test(payRawEarly) ||
+      !!activeJob.isTotalMobility)
+  );
   const needsPickupVerifyEarly =
     !!activeJob &&
+    isPrepaidEarly &&
     !activeJob.pickupVerifiedAt &&
-    !!activeJob.pickupPin &&
     (activeJob.stage === 'arrived' ||
       (!!activeJob.stepTimes?.arrivedAt &&
         activeJob.stage !== 'onboard' &&
@@ -172,9 +183,16 @@ export function CurrentTripPanel() {
   const nextStage = STAGES[Math.min(idx + 1, STAGES.length - 1)];
   const nextLabel = STAGE_LABELS[nextStage];
   const st = activeJob.stepTimes;
+  // Track-only GPS (fixed/prepaid) sets meter.running before On Board — that must
+  // NOT flip this to End Trip or the prepaid Arrived group (PIN/wrong/walk-up/
+  // call/no-show) is gated off while only the verify sticky remains visible.
+  const trackOnlyPreOnboard =
+    !!meter?.trackOnly &&
+    activeJob.stage !== 'onboard' &&
+    !st.onboardAt;
   const showEndTrip =
     isHailTrip ||
-    meterRunning ||
+    (!!meterRunning && !trackOnlyPreOnboard) ||
     activeJob.stage === 'onboard' ||
     !!st.onboardAt ||
     !!st.hailStartedAt;
@@ -286,16 +304,15 @@ export function CurrentTripPanel() {
   const compactOnboard =
     activeJob.stage === 'onboard' ||
     (!!st.onboardAt && activeJob.stage !== 'complete');
-  const showVerifySticky = needsPickupVerify && !pickupVerified;
-  // Prepaid Arrived group (PIN + wrong/walk-up + no-show + call/text): all together
-  // from Arrived until PIN confirm; then the whole group disappears (passenger in cab).
-  // Cash: no prepaid group — Call/Text stays available Assigned→Arrived as before.
+  // Prepaid Arrived group: ALL FIVE live in one scrollable sticky (not actionBar
+  // secondaryRow). Prior OTAs put Call/Wrong/Walk-up/No-show below the verify
+  // sticky outside any ScrollView — clipped off real-device trip panels so testers
+  // only ever saw "confirm PIN and name". Cash: no prepaid group.
   const showPrepaidArrivedGroup =
-    !showEndTrip && !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
+    !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
+  const showVerifySticky = showPrepaidArrivedGroup;
   const showWrongPassengerActions = showPrepaidArrivedGroup;
-  const showNoShowActions = showPrepaidArrivedGroup;
   const showCallText =
-    !!activeJob.passengerPhone &&
     activeJob.stage !== 'complete' &&
     activeJob.stage !== 'onboard' &&
     !st.onboardAt &&
@@ -468,29 +485,114 @@ export function CurrentTripPanel() {
         {needsPickupVerify && pickupVerified ? (
           <Text style={styles.verified}>Verified — On Board unlocked</Text>
         ) : null}
+      </ScrollView>
 
-        {showNoShowActions ? (
+      {showVerifySticky ? (
+        <ScrollView
+          style={styles.verifyStickyScroll}
+          contentContainerStyle={styles.verifySticky}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+        >
+          <Text style={styles.verifyTitle}>Pickup verification</Text>
+          <Text style={styles.verifyHint}>
+            Confirm PIN and name with the passenger. Call/text, wrong-passenger, walk-up
+            hail, and no-show stay here until you confirm — then this whole group hides.
+          </Text>
+          <Text style={styles.verifyPin}>
+            PIN:{' '}
+            {activeJob.pickupPin && String(activeJob.pickupPin).trim()
+              ? String(activeJob.pickupPin).trim()
+              : '…'}
+          </Text>
+          <Text style={styles.verifyName}>Name: {activeJob.passengerName || '—'}</Text>
+
+          {showCallText ? (
+            <View style={styles.phoneRow}>
+              <Button title="Call" compact style={styles.secondaryBtn} onPress={callPassenger} />
+              <Button
+                title="Text"
+                variant="secondary"
+                compact
+                style={styles.secondaryBtn}
+                onPress={textPassenger}
+              />
+            </View>
+          ) : null}
+
           <Text style={styles.metaLine}>
             No-show countdown: {remainLabel}
             {activeJob.imComingAt ? ' (passenger said I’m coming)' : ''}
           </Text>
-        ) : null}
-      </ScrollView>
 
-      {showVerifySticky ? (
-        <View style={styles.verifySticky}>
-          <Text style={styles.verifyTitle}>Pickup verification</Text>
-          <Text style={styles.verifyHint}>
-            Confirm the PIN and name with the passenger, then tap once to unlock On Board.
-          </Text>
-          <Text style={styles.verifyPin}>PIN: {activeJob.pickupPin || '—'}</Text>
-          <Text style={styles.verifyName}>Name: {activeJob.passengerName || '—'}</Text>
+          {showWrongPassengerActions ? (
+            <View style={styles.secondaryRow}>
+              <Button
+                title="Wrong passenger"
+                variant="secondary"
+                compact
+                style={styles.secondaryBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Wrong / uninvited passenger?',
+                    'Return the booked job to the pool so the real passenger gets another driver.',
+                    [
+                      { text: 'Back', style: 'cancel' },
+                      { text: 'Return to pool', onPress: () => void recallWrongPassenger() },
+                    ],
+                  );
+                }}
+              />
+              <Button
+                title="Walk-up hail"
+                variant="secondary"
+                compact
+                style={styles.secondaryBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Start walk-up fare?',
+                    'Returns the booked job to the pool, then starts a new hail for the person in the cab.',
+                    [
+                      { text: 'Back', style: 'cancel' },
+                      {
+                        text: 'Start hail',
+                        onPress: () => void forkWalkUpHailFromWrongPassenger(),
+                      },
+                    ],
+                  );
+                }}
+              />
+              <Button
+                title={canNoShow ? 'No Show' : `No Show (${remainLabel})`}
+                variant="secondary"
+                compact
+                disabled={!canNoShow || completionBusy}
+                style={styles.secondaryBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Mark No Show?',
+                    'Closes this booking. Waiting time is charged at the waiting rate.',
+                    [
+                      { text: 'Back', style: 'cancel' },
+                      {
+                        text: 'No Show',
+                        style: 'destructive',
+                        onPress: () => void noShowActiveJob(),
+                      },
+                    ],
+                  );
+                }}
+              />
+            </View>
+          ) : null}
+
           <Button
             title={completionBusy ? 'Saving…' : 'Confirm PIN & name — unlock On Board'}
-            disabled={completionBusy}
+            disabled={completionBusy || !(activeJob.pickupPin && String(activeJob.pickupPin).trim())}
             onPress={() => void onConfirmVerify()}
           />
-        </View>
+        </ScrollView>
       ) : null}
 
       <View style={styles.actionBar}>
@@ -546,96 +648,7 @@ export function CurrentTripPanel() {
               }}
             />
           ) : null}
-          {!showEndTrip && !isHailTrip && postArrival && showNoShowActions ? (
-            <>
-              {showCallText && activeJob.passengerPhone ? (
-                <>
-                  <Button
-                    title="Call"
-                    compact
-                    style={styles.secondaryBtn}
-                    onPress={callPassenger}
-                  />
-                  <Button
-                    title="Text"
-                    variant="secondary"
-                    compact
-                    style={styles.secondaryBtn}
-                    onPress={textPassenger}
-                  />
-                </>
-              ) : null}
-              {showWrongPassengerActions ? (
-                <>
-                  <Text style={styles.waitChip}>Wait {remainLabel}</Text>
-                  <Button
-                    title="Wrong passenger"
-                    variant="secondary"
-                    compact
-                    style={styles.secondaryBtn}
-                    onPress={() => {
-                      Alert.alert(
-                        'Wrong / uninvited passenger?',
-                        'Return the booked job to the pool so the real passenger gets another driver.',
-                        [
-                          { text: 'Back', style: 'cancel' },
-                          { text: 'Return to pool', onPress: () => void recallWrongPassenger() },
-                        ],
-                      );
-                    }}
-                  />
-                  <Button
-                    title="Walk-up hail"
-                    variant="secondary"
-                    compact
-                    style={styles.secondaryBtn}
-                    onPress={() => {
-                      Alert.alert(
-                        'Start walk-up fare?',
-                        'Returns the booked job to the pool, then starts a new hail for the person in the cab.',
-                        [
-                          { text: 'Back', style: 'cancel' },
-                          {
-                            text: 'Start hail',
-                            onPress: () => void forkWalkUpHailFromWrongPassenger(),
-                          },
-                        ],
-                      );
-                    }}
-                  />
-                </>
-              ) : null}
-              <Button
-                title={canNoShow ? 'No Show' : `No Show (${remainLabel})`}
-                variant="secondary"
-                compact
-                disabled={!canNoShow || completionBusy}
-                style={styles.secondaryBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Mark No Show?',
-                    'Closes this booking. Waiting time is charged at the waiting rate.',
-                    [
-                      { text: 'Back', style: 'cancel' },
-                      { text: 'No Show', style: 'destructive', onPress: () => void noShowActiveJob() },
-                    ],
-                  );
-                }}
-              />
-              <Button
-                title="Cancel"
-                variant="danger"
-                compact
-                style={styles.secondaryBtn}
-                onPress={() => {
-                  Alert.alert('Cancel job?', 'This permanently closes the job.', [
-                    { text: 'Back', style: 'cancel' },
-                    { text: 'Cancel job', style: 'destructive', onPress: cancelActiveJob },
-                  ]);
-                }}
-              />
-            </>
-          ) : !showEndTrip && !isHailTrip && postArrival && pickupVerified ? (
+          {!showEndTrip && !isHailTrip && postArrival ? (
             <Button
               title="Cancel"
               variant="danger"
@@ -741,13 +754,19 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: Colors.surface,
   },
-  verifySticky: {
+  /** Caps height so map+tabs leave room; group itself scrolls — never clips off-screen. */
+  verifyStickyScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+    maxHeight: '52%',
     borderTopWidth: 2,
     borderTopColor: Colors.primary,
+    backgroundColor: Colors.surface,
+  },
+  verifySticky: {
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
-    backgroundColor: Colors.surface,
   },
   phoneRow: {
     flexDirection: 'row',
