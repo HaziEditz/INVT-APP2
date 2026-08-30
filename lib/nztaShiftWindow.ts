@@ -10,6 +10,7 @@ const NZTA_REST_CONTINUE_HOURS = 10;
 const NZTA_BREAK_AFTER_HOURS = 7;
 /** After weekly 70h — continuous rest that unlocks / resets the weekly counter. */
 const NZTA_WEEKLY_LOCKOUT_HOURS = 24;
+const NZTA_WEEKLY_MAX_MINUTES = 70 * 60;
 
 const MS_HOUR = 3600000;
 const MS_MINUTE = 60000;
@@ -24,25 +25,97 @@ function clearExpiredLockoutPure(state: NztaHoursState, now: number): NztaHoursS
 }
 
 /**
- * After ≥24h continuous rest from lastShiftEndAt, clear weekly 70h minutes.
- * Lockout expiry alone is not enough — exceedsWeeklyHours would re-fire immediately.
+ * Phantom weekly70h end: auto sign-out / blocked start with no real work in the stint.
+ * These refresh lastShiftEndAt on every login attempt and permanently defeat a 24h rest check.
+ */
+export function isPhantomWeeklyLockoutEnd(entry: {
+  workedMinutes?: number | null;
+  shiftStartAt?: number | null;
+  sessionStartedAt?: number | null;
+  weeklyWorkedMinutes?: number | null;
+}): boolean {
+  const worked = Math.max(0, Number(entry.workedMinutes) || 0);
+  const weekly = Math.max(0, Number(entry.weeklyWorkedMinutes) || 0);
+  const hadStart = !!(entry.shiftStartAt || entry.sessionStartedAt);
+  return worked <= 0 && !hadStart && weekly >= NZTA_WEEKLY_MAX_MINUTES;
+}
+
+/**
+ * Clear weekly 70h after a completed 24h rest.
+ *
+ * IMPORTANT: do not trust a freshly stamped lastShiftEndAt from phantom weekly70h
+ * lockout writes (workedMinutes=0). Prefer lastGenuineShiftEndAt when provided;
+ * also clear when a weekly_rest lockout itself has expired.
  */
 export function applyCompletedWeeklyRest(
   state: NztaHoursState,
   now = Date.now(),
+  opts?: { lastGenuineShiftEndAt?: number | null },
 ): NztaHoursState {
+  const hadWeeklyLockout =
+    state.lockoutReason === 'weekly_rest' || state.pendingLimitSignOut === 'weekly70h';
+  const lockoutExpired =
+    state.lockoutUntil != null && state.lockoutUntil <= now;
+
   let next = clearExpiredLockoutPure(state, now);
-  const lastEnd = next.lastShiftEndAt;
-  if (lastEnd == null) return next;
-  const hoursSinceEnd = (now - lastEnd) / MS_HOUR;
-  if (hoursSinceEnd < NZTA_WEEKLY_LOCKOUT_HOURS) return next;
-  if (
-    next.weeklyWorkedMinutes <= 0 &&
-    next.lockoutReason !== 'weekly_rest' &&
-    next.pendingLimitSignOut !== 'weekly70h'
-  ) {
+
+  // Primary: the 24h weekly_rest lockout finished → counter must clear
+  // (even if phantom ends refreshed lastShiftEndAt during the lockout).
+  if (hadWeeklyLockout && lockoutExpired) {
+    return {
+      ...next,
+      weeklyWorkedMinutes: 0,
+      lockoutUntil: null,
+      lockoutReason: null,
+      pendingLimitSignOut: null,
+    };
+  }
+
+  if (next.weeklyWorkedMinutes < NZTA_WEEKLY_MAX_MINUTES && !hadWeeklyLockout) {
     return next;
   }
+
+  const genuineEnd =
+    opts?.lastGenuineShiftEndAt != null && Number.isFinite(opts.lastGenuineShiftEndAt)
+      ? opts.lastGenuineShiftEndAt
+      : null;
+  const localEnd = next.lastShiftEndAt;
+  const localIsPhantom =
+    localEnd != null &&
+    isPhantomWeeklyLockoutEnd({
+      workedMinutes: next.lastWorkedMinutes,
+      shiftStartAt: next.lastShiftStartAt,
+      sessionStartedAt: next.sessionStartedAt,
+      weeklyWorkedMinutes: next.weeklyWorkedMinutes,
+    });
+
+  // Rest anchor: genuine remote end, else non-phantom local end.
+  const restAnchor =
+    genuineEnd ??
+    (localEnd != null && !localIsPhantom ? localEnd : genuineEnd);
+
+  if (restAnchor == null) {
+    // At/over weekly limit with only phantom anchors and no active lockout —
+    // treat as rest completed (cannot prove a fresh genuine shift).
+    if (
+      next.weeklyWorkedMinutes >= NZTA_WEEKLY_MAX_MINUTES &&
+      (next.lockoutUntil == null || next.lockoutUntil <= now) &&
+      localIsPhantom
+    ) {
+      return {
+        ...next,
+        weeklyWorkedMinutes: 0,
+        lockoutUntil: null,
+        lockoutReason: null,
+        pendingLimitSignOut: null,
+      };
+    }
+    return next;
+  }
+
+  const hoursSinceEnd = (now - restAnchor) / MS_HOUR;
+  if (hoursSinceEnd < NZTA_WEEKLY_LOCKOUT_HOURS) return next;
+
   return {
     ...next,
     weeklyWorkedMinutes: 0,
@@ -160,8 +233,12 @@ export function isStaleShiftRestLockout(state: NztaHoursState, now = Date.now())
  * Drop continuation/lockout state that only exists because an ancient window was resumed.
  * Must NOT clear a fresh in-progress shiftStartedAt just because lastShiftStartAt is old.
  */
-export function healStaleNztaState(state: NztaHoursState, now = Date.now()): NztaHoursState {
-  let next = applyCompletedWeeklyRest(state, now);
+export function healStaleNztaState(
+  state: NztaHoursState,
+  now = Date.now(),
+  opts?: { lastGenuineShiftEndAt?: number | null },
+): NztaHoursState {
+  let next = applyCompletedWeeklyRest(state, now, opts);
 
   if (isStaleShiftRestLockout(next, now)) {
     console.log('[NZTA] clearing stale shift-rest lockout from expired window');

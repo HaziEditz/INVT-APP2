@@ -43,6 +43,8 @@ export type EndShiftRemoteFlowDeps = {
     sessionStartedAt?: number;
     workedMinutes: number;
     weeklyWorkedMinutes?: number;
+    /** Phantom weekly70h re-block — do not write/journal a shiftLogs end. */
+    skipShiftLogWrite?: boolean;
   }>;
   writeShiftEndLog: (args: {
     companyId: string;
@@ -105,6 +107,7 @@ export async function runEndShiftRemoteFlow(
   let sessionStartedAt: number | undefined;
   let workedMinutes = 0;
   let weeklyWorkedMinutes: number | undefined;
+  let skipShiftLogWrite = false;
 
   if (input.companyId && input.uid) {
     const local = await deps.persistLocalNztaEnd({
@@ -118,6 +121,7 @@ export async function runEndShiftRemoteFlow(
     sessionStartedAt = local.sessionStartedAt;
     workedMinutes = local.workedMinutes;
     weeklyWorkedMinutes = local.weeklyWorkedMinutes;
+    skipShiftLogWrite = !!local.skipShiftLogWrite;
   }
 
   const needsPresence = !!(input.vehicleId && input.companyId && input.uid);
@@ -136,7 +140,7 @@ export async function runEndShiftRemoteFlow(
         sessionStartedAt,
         workedMinutes,
         weeklyWorkedMinutes,
-        needsShiftLog: true,
+        needsShiftLog: !skipShiftLogWrite,
         needsPresenceClear: needsPresence,
       });
     }
@@ -152,8 +156,9 @@ export async function runEndShiftRemoteFlow(
   }
 
   // Online: attempt remotes with hard timeouts; journal anything that fails/hangs.
-  let shiftLogOk = false;
-  if (input.companyId && input.uid) {
+  // Skip phantom weekly70h ends — they reset the 24h rest clock in Firebase (D001).
+  let shiftLogOk = skipShiftLogWrite;
+  if (!skipShiftLogWrite && input.companyId && input.uid) {
     shiftLogOk = await attemptWithTimeout(
       deps.writeShiftEndLog({
         companyId: input.companyId,

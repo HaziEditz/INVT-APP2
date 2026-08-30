@@ -63,6 +63,51 @@ export async function loadLastShiftEnd(
   }
 }
 
+/**
+ * Last end-log that represents real work (not a phantom weekly70h lockout write).
+ * Phantom rows (workedMinutes=0, no start, weekly already ≥70h) must not anchor the 24h rest clock.
+ */
+export async function loadLastGenuineShiftEnd(
+  companyId: string,
+  uid: string,
+): Promise<ShiftLogEntry | null> {
+  if (!companyId || !uid) return null;
+  try {
+    const database = getDatabaseInstance();
+    // Pull a window — phantom lockout spam can bury the genuine end.
+    const q = query(
+      ref(database, `shiftLogs/${companyId}/${uid}`),
+      orderByChild('shiftEndAt'),
+      limitToLast(40),
+    );
+    const snap = await get(q);
+    if (!snap.exists()) return null;
+    let best: ShiftLogEntry | null = null;
+    snap.forEach((child) => {
+      const v = child.val() as Record<string, unknown>;
+      const entry: ShiftLogEntry = {
+        shiftEndAt: Number(v.shiftEndAt ?? v.endedAt ?? 0),
+        shiftStartAt: v.shiftStartAt != null ? Number(v.shiftStartAt) : undefined,
+        sessionStartedAt: v.sessionStartedAt != null ? Number(v.sessionStartedAt) : undefined,
+        workedMinutes: v.workedMinutes != null ? Number(v.workedMinutes) : undefined,
+        weeklyWorkedMinutes:
+          v.weeklyWorkedMinutes != null ? Number(v.weeklyWorkedMinutes) : undefined,
+      };
+      if (!entry.shiftEndAt) return;
+      const worked = Math.max(0, Number(entry.workedMinutes) || 0);
+      const weekly = Math.max(0, Number(entry.weeklyWorkedMinutes) || 0);
+      const hadStart = !!(entry.shiftStartAt || entry.sessionStartedAt);
+      const phantom = worked <= 0 && !hadStart && weekly >= 70 * 60;
+      if (phantom) return;
+      if (!best || entry.shiftEndAt > best.shiftEndAt) best = entry;
+    });
+    return best;
+  } catch (err) {
+    console.warn('[ShiftLogs] loadLastGenuineShiftEnd failed:', err);
+    return null;
+  }
+}
+
 export async function writeShiftEndLog(
   companyId: string,
   uid: string,

@@ -4137,6 +4137,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             sessionStartedAt: local.sessionStartedAt,
             workedMinutes: local.workedMinutes,
             weeklyWorkedMinutes: local.weeklyWorkedMinutes,
+            skipShiftLogWrite: local.skipShiftLogWrite,
           };
         },
         writeShiftEndLog: async (args) => {
