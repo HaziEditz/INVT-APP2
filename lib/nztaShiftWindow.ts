@@ -8,11 +8,49 @@ import type { NztaHoursState } from '../types/index.ts';
 const NZTA_MAX_SHIFT_HOURS = 14;
 const NZTA_REST_CONTINUE_HOURS = 10;
 const NZTA_BREAK_AFTER_HOURS = 7;
+/** After weekly 70h — continuous rest that unlocks / resets the weekly counter. */
+const NZTA_WEEKLY_LOCKOUT_HOURS = 24;
 
 const MS_HOUR = 3600000;
 const MS_MINUTE = 60000;
 /** Genuine 14h sign-out may trail window end by up to one compliance tick. */
 const STALE_LOCKOUT_WINDOW_SLACK_MS = 30 * MS_MINUTE;
+
+function clearExpiredLockoutPure(state: NztaHoursState, now: number): NztaHoursState {
+  if (state.lockoutUntil != null && state.lockoutUntil <= now) {
+    return { ...state, lockoutUntil: null, lockoutReason: null };
+  }
+  return state;
+}
+
+/**
+ * After ≥24h continuous rest from lastShiftEndAt, clear weekly 70h minutes.
+ * Lockout expiry alone is not enough — exceedsWeeklyHours would re-fire immediately.
+ */
+export function applyCompletedWeeklyRest(
+  state: NztaHoursState,
+  now = Date.now(),
+): NztaHoursState {
+  let next = clearExpiredLockoutPure(state, now);
+  const lastEnd = next.lastShiftEndAt;
+  if (lastEnd == null) return next;
+  const hoursSinceEnd = (now - lastEnd) / MS_HOUR;
+  if (hoursSinceEnd < NZTA_WEEKLY_LOCKOUT_HOURS) return next;
+  if (
+    next.weeklyWorkedMinutes <= 0 &&
+    next.lockoutReason !== 'weekly_rest' &&
+    next.pendingLimitSignOut !== 'weekly70h'
+  ) {
+    return next;
+  }
+  return {
+    ...next,
+    weeklyWorkedMinutes: 0,
+    lockoutUntil: null,
+    lockoutReason: null,
+    pendingLimitSignOut: null,
+  };
+}
 
 export function shiftWindowEndMs(shiftStartAt: number): number {
   return shiftStartAt + NZTA_MAX_SHIFT_HOURS * MS_HOUR;
@@ -123,7 +161,7 @@ export function isStaleShiftRestLockout(state: NztaHoursState, now = Date.now())
  * Must NOT clear a fresh in-progress shiftStartedAt just because lastShiftStartAt is old.
  */
 export function healStaleNztaState(state: NztaHoursState, now = Date.now()): NztaHoursState {
-  let next = clearExpiredLockout(state, now);
+  let next = applyCompletedWeeklyRest(state, now);
 
   if (isStaleShiftRestLockout(next, now)) {
     console.log('[NZTA] clearing stale shift-rest lockout from expired window');

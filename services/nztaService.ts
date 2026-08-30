@@ -11,6 +11,7 @@ import {
   isBreakDueByActiveWork,
   isShiftWindowExpired,
   isStaleShiftRestLockout,
+  applyCompletedWeeklyRest,
   resolveEndShiftHourTotals,
   resolveShiftStartAtForEndLog,
   sanitizeLastShiftStartAt,
@@ -28,6 +29,7 @@ export {
   isBreakDueByActiveWork,
   isShiftWindowExpired,
   isStaleShiftRestLockout,
+  applyCompletedWeeklyRest,
   resolveEndShiftHourTotals,
   resolveShiftStartAtForEndLog,
   sanitizeLastShiftStartAt,
@@ -109,7 +111,7 @@ export async function loadNztaHours(companyId: string, uid: string): Promise<Nzt
     saved = await maybeMigrateLegacyNztaHours(cid, id);
   }
   const merged = ensureWeekBucket({ ...DEFAULT, ...saved });
-  const healed = healStaleNztaState(merged);
+  const healed = healStaleNztaState(applyCompletedWeeklyRest(merged));
   if (JSON.stringify(healed) !== JSON.stringify(merged)) {
     await storeData(key, healed);
   }
@@ -145,8 +147,8 @@ export function ensureWeekBucket(state: NztaHoursState): NztaHoursState {
   };
 }
 
-function clearExpiredLockout(state: NztaHoursState): NztaHoursState {
-  if (state.lockoutUntil != null && state.lockoutUntil <= Date.now()) {
+function clearExpiredLockout(state: NztaHoursState, now = Date.now()): NztaHoursState {
+  if (state.lockoutUntil != null && state.lockoutUntil <= now) {
     return { ...state, lockoutUntil: null, lockoutReason: null };
   }
   return state;
@@ -179,7 +181,9 @@ export function getShiftLockout(state: NztaHoursState): {
 }
 
 export async function initializeNztaOnLogin(companyId: string, uid: string): Promise<NztaHoursState> {
-  let state = healStaleNztaState(ensureWeekBucket(await loadNztaHours(companyId, uid)));
+  let state = healStaleNztaState(
+    applyCompletedWeeklyRest(ensureWeekBucket(await loadNztaHours(companyId, uid))),
+  );
   const last = await loadLastShiftEnd(companyId, uid);
   const lastEnd = state.lastShiftEndAt ?? last?.shiftEndAt ?? null;
   // Never re-poison from an expired shiftStartAt on the latest Firebase end-log
@@ -188,9 +192,14 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
     state.lastShiftStartAt ?? last?.shiftStartAt ?? null,
   );
   const lastWorked = state.lastWorkedMinutes || last?.workedMinutes || state.workedMinutes || 0;
-  const lastWeekly = Math.max(state.weeklyWorkedMinutes, last?.weeklyWorkedMinutes ?? 0);
-
+  // Do NOT re-poison weekly minutes from Firebase after a completed 24h rest —
+  // remote end-logs still carry the pre-rest weekly total.
   const hoursSinceEnd = lastEnd ? (Date.now() - lastEnd) / MS_HOUR : Infinity;
+  const weeklyResetByRest = hoursSinceEnd >= NZTA_WEEKLY_LOCKOUT_HOURS;
+  const lastWeekly = weeklyResetByRest
+    ? 0
+    : Math.max(state.weeklyWorkedMinutes, last?.weeklyWorkedMinutes ?? 0);
+
   const canContinueWindow =
     hoursSinceEnd < NZTA_REST_CONTINUE_HOURS &&
     !!lastStart &&
@@ -269,7 +278,11 @@ export async function initializeNztaOnLogin(companyId: string, uid: string): Pro
 
 export async function startShiftClock(companyId: string, uid: string) {
   const { companyId: cid, uid: id } = requireNztaDriver(companyId, uid);
-  let base = healStaleNztaState(clearExpiredLockout(ensureWeekBucket(await loadNztaHours(cid, id))));
+  let base = healStaleNztaState(
+    applyCompletedWeeklyRest(
+      clearExpiredLockout(ensureWeekBucket(await loadNztaHours(cid, id))),
+    ),
+  );
   if (!base.shiftStartedAt && !base.continuedWindow) {
     base = await initializeNztaOnLogin(cid, id);
   }
@@ -532,7 +545,7 @@ export function exceedsMaxWorkHours(state: NztaHoursState) {
 }
 
 export function exceedsWeeklyHours(state: NztaHoursState) {
-  const s = ensureWeekBucket(state);
+  const s = applyCompletedWeeklyRest(ensureWeekBucket(state));
   return s.weeklyWorkedMinutes >= NZTA_WEEKLY_MAX_HOURS * 60;
 }
 

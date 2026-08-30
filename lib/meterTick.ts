@@ -3,7 +3,8 @@ import type { MeterMode, MeterState, Tariff } from '../types/index.ts';
 
 const SPEED_MOVING_KMH = 3;
 const SPEED_MOVING_MS = SPEED_MOVING_KMH / 3.6;
-const MAX_GPS_ACCURACY_M = 50;
+/** Soft gate: still record points / distance up to this accuracy. */
+const MAX_GPS_ACCURACY_M = 100;
 const MAX_JUMP_M = 500;
 export const METER_TICK_MS = 2000;
 const UNPAUSE_DISTANCE_M = 50;
@@ -150,8 +151,7 @@ export function tickMeterWithGps(
   let autoUnpaused = false;
   let next = { ...meter };
 
-  // Inaccurate fix: still accrue waiting time (stationary / unknown motion).
-  // Skipping the whole tick left UI on "Waiting" with a frozen wait charge.
+  // Very poor accuracy: still accrue waiting, but keep last known fix for continuity.
   if (gpsAccuracyBlocksDistance(accuracyM)) {
     const tick = tickMeter(next, tariff, 0);
     return { ...tick, autoUnpaused: false };
@@ -173,10 +173,18 @@ export function tickMeterWithGps(
     if (distanceDeltaM > MAX_JUMP_M) {
       next.lastLat = lat;
       next.lastLng = lng;
+      next = appendRoutePoint(next, lat, lng);
       // Reject jump distance, but keep the 2s clock (wait) advancing.
       const tick = tickMeter(next, tariff, 0);
       return { ...tick, autoUnpaused };
     }
+  } else {
+    // First trustworthy fix — seed anchor so the next tick can measure distance.
+    next.lastLat = lat;
+    next.lastLng = lng;
+    next = appendRoutePoint(next, lat, lng);
+    const tick = tickMeter(next, tariff, normalizeSpeed(speedMs));
+    return { ...tick, autoUnpaused };
   }
   next.lastLat = lat;
   next.lastLng = lng;
@@ -188,11 +196,14 @@ export function tickMeterWithGps(
   const effectiveSpeedMs = Math.max(speed, derivedSpeedMs);
   const isMoving = effectiveSpeedMs > SPEED_MOVING_MS || speedKmh(effectiveSpeedMs) > SPEED_MOVING_KMH;
 
-  if (!next.paused && isMoving && distanceDeltaM > 0) {
+  // Always credit haversine when the fix moved — don't require speed>threshold alone
+  // (GPS speed is often null / 0 on Android while position still advances).
+  if (!next.paused && distanceDeltaM > 0) {
     next.distanceKm += distanceDeltaM / 1000;
   }
 
   next.mode = (isMoving ? 'moving' : 'waiting') as MeterMode;
-  const tick = tickMeter(next, tariff, isMoving ? effectiveSpeedMs : 0);
+  // Clock: moving when we credited distance, else waiting.
+  const tick = tickMeter(next, tariff, distanceDeltaM > 0 ? Math.max(effectiveSpeedMs, SPEED_MOVING_MS + 0.01) : 0);
   return { ...tick, autoUnpaused };
 }

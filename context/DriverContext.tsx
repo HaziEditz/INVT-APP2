@@ -4939,13 +4939,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const stepTimes: JobStepTimes = { ...activeJob.stepTimes };
       if (nextStage === 'arrived') stepTimes.arrivedAt = now;
       let onboardFixedFare: number | undefined;
+      if (nextStage === 'arrived') {
+        // Prepaid/fixed: start GPS track-only at Arrived so distance accumulates
+        // during PIN wait + trip (onboard-only left many jobs with gpsN=1 / 0.00 km).
+        if (!shouldStartMeterForBooking(bookingRawRef.current, activeJob) && !meterRef.current?.running) {
+          startMeterForJob();
+        }
+      }
       if (nextStage === 'onboard') {
         stepTimes.onboardAt = now;
         if (!shouldStartMeterForBooking(bookingRawRef.current, activeJob)) {
           onboardFixedFare = readFixedFareAmount(bookingRawRef.current, activeJob);
         }
         // Always start meter or GPS track-only (fixed/prepaid) for Closed Job route/distance.
-        startMeterForJob();
+        if (!meterRef.current?.running) {
+          startMeterForJob();
+        }
       }
 
       const updated: ActiveJob = {

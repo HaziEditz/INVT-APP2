@@ -12,6 +12,7 @@ import { QueuePromoteFlash } from '@/components/QueuePromoteFlash';
 import { SosNotificationBootstrap } from '@/components/SosNotificationBootstrap';
 import { SosIncidentRelease } from '@/components/SosIncidentRelease';
 import { ShiftKeepAwake } from '@/components/ShiftKeepAwake';
+import { applyPendingOtaUpdate } from '@/lib/otaUpdates';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
@@ -26,6 +27,8 @@ export default function RootLayout() {
     registerForPushNotifications().catch((err) => {
       console.error('[RootLayout] push registration failed:', err);
     });
+    // Explicit OTA apply — close/reopen alone was leaving devices on the prior update.
+    void applyPendingOtaUpdate();
   }, [], 'RootLayout-push');
 
   return (
