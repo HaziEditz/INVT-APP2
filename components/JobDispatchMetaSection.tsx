@@ -16,8 +16,23 @@ type Props = {
   showPassengerContact?: boolean;
 };
 
+function tripTariffLabel(job: JobOffer | ActiveJob): string | null {
+  if (job.isFixedPrice) {
+    const fare = job.fixedFare ?? job.estimatedFare;
+    if (fare != null && Number.isFinite(Number(fare))) {
+      return `Fixed $${Number(fare).toFixed(2)}`;
+    }
+    return 'Fixed';
+  }
+  const name = String(job.tariffName || '').trim();
+  if (name && !/^automatic$/i.test(name)) return name;
+  const id = String(job.tariffId || '').trim();
+  if (id && id !== '0' && id !== '-1') return `Tariff #${id}`;
+  return null;
+}
+
 /**
- * Always-visible compact strip: ASAP/LATER · vehicle · created · source · passenger.
+ * Always-visible compact strip: ASAP/LATER · vehicle · tariff · created · source · passenger.
  * Expand stays reserved for long notes / full stop breakdowns.
  */
 export function JobDispatchMetaSection({ job, compact, showPassengerContact }: Props) {
@@ -26,16 +41,19 @@ export function JobDispatchMetaSection({ job, compact, showPassengerContact }: P
     job.bookedAtMs != null ? formatJobDateTimeCompact(new Date(job.bookedAtMs)) : null;
   const sourceLabel = sourceDisplayLabel(job.source, job.createdBy, job.dispatcherName);
   const vehicleLabel = vehicleTypeDisplayLabel(job);
+  const tariffLabel = tripTariffLabel(job);
   const name = showPassengerContact ? String(job.passengerName || '').trim() : '';
   const phone = showPassengerContact ? String(job.passengerPhone || '').trim() : '';
   const contactLabel = [name, phone].filter(Boolean).join(' · ') || null;
 
-  if (!pickupType && !vehicleLabel && !bookedLabel && !sourceLabel && !contactLabel) return null;
+  if (!pickupType && !vehicleLabel && !tariffLabel && !bookedLabel && !sourceLabel && !contactLabel) {
+    return null;
+  }
 
   return (
     <View
       style={[styles.strip, compact && styles.stripCompact]}
-      accessibilityLabel={[pickupType, vehicleLabel, bookedLabel, sourceLabel, contactLabel]
+      accessibilityLabel={[pickupType, vehicleLabel, tariffLabel, bookedLabel, sourceLabel, contactLabel]
         .filter(Boolean)
         .join(', ')}
     >
@@ -49,6 +67,14 @@ export function JobDispatchMetaSection({ job, compact, showPassengerContact }: P
           <Ionicons name="car-outline" size={12} color={Colors.textMuted} />
           <Text style={styles.itemText} numberOfLines={1}>
             {vehicleLabel}
+          </Text>
+        </View>
+      ) : null}
+      {tariffLabel ? (
+        <View style={styles.item}>
+          <Ionicons name="pricetag-outline" size={12} color={Colors.textMuted} />
+          <Text style={styles.itemText} numberOfLines={1}>
+            {tariffLabel}
           </Text>
         </View>
       ) : null}

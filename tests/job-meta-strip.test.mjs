@@ -90,6 +90,8 @@ test('Offer + Queue + Modal render JobDispatchMetaSection strip', () => {
   const strip = readFileSync(join(root, 'components/JobDispatchMetaSection.tsx'), 'utf8');
   assert.match(strip, /showPassengerContact/);
   assert.match(strip, /person-outline/);
+  assert.match(strip, /pricetag-outline/);
+  assert.match(strip, /tripTariffLabel|tariffLabel/);
   assert.match(strip, /car-outline/);
   assert.match(strip, /vehicleTypeDisplayLabel/);
   assert.match(strip, /bookedLabel/);

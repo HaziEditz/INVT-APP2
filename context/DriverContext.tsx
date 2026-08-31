@@ -757,6 +757,14 @@ function buildNotificationFieldPatch(val: Record<string, unknown>): Partial<JobO
   if (isFixedPriceBooking(val)) {
     patch.isFixedPrice = true;
   }
+  const tariffId = String(val.TarriffId ?? val.TariffId ?? val.tariffId ?? '').trim();
+  if (tariffId) patch.tariffId = tariffId;
+  const tariffName = String(
+    val.TarriffName ?? val.TariffName ?? val.tariffName ?? val.TarriffType ?? val.tarriffType ?? '',
+  ).trim();
+  if (tariffName && !isForbiddenPlaceholderTariffName(tariffName)) {
+    patch.tariffName = tariffName;
+  }
   const pay = readPaymentFromRecord(val);
   if (pay) {
     patch.paymentType =

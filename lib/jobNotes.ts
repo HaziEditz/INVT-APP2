@@ -25,6 +25,9 @@ const NOTE_FIELDS: { label: string; keys: string[] }[] = [
       'Notes',
       'Info',
       'info',
+      'jobinfo',
+      'EntitiesDetails',
+      'entitiesDetails',
       'remarks',
       'Remarks',
       'comment',
@@ -40,8 +43,30 @@ function pickText(val: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const raw = val[key];
     if (raw == null) continue;
-    const text = String(raw).trim();
-    if (text) return text;
+    let text = String(raw).trim();
+    if (!text) continue;
+    // EntitiesDetails / jobinfo often mixes payment extras with pickup notes.
+    if (key === 'EntitiesDetails' || key === 'entitiesDetails' || key === 'jobinfo') {
+      text = text
+        .split('|')
+        .map((s) => s.trim())
+        .filter(
+          (s) =>
+            s &&
+            !/^Payment:/i.test(s) &&
+            !/^Ref:/i.test(s) &&
+            !/^TM Card:/i.test(s) &&
+            !/^TM Expiry:/i.test(s) &&
+            !/^Council %:/i.test(s) &&
+            !/^Passenger %:/i.test(s) &&
+            !/^EFTPOS surcharge/i.test(s) &&
+            !/^Account:/i.test(s),
+        )
+        .join(' | ')
+        .trim();
+      if (!text) continue;
+    }
+    return text;
   }
   return '';
 }

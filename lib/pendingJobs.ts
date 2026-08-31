@@ -7,6 +7,7 @@ import { readDropoffAddress, readPickupAddress } from '@/lib/jobAddressFields';
 import { jobMatchesDriverVehicle, serviceTypeToJobType } from '@/lib/jobMatching';
 import { normalizeDriverPaymentType, readAccountFieldsFromRecord } from '@/lib/driverPayment';
 import { parseFiniteFare } from '@/lib/tariffs';
+import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
 import { JobOffer, Vehicle } from '@/types';
 
 function parseLatLng(raw?: string): { lat?: number; lng?: number } {
@@ -111,6 +112,16 @@ export function parseJobOfferRecord(
     isFixedPrice:
       String(val.TarriffId ?? val.TariffId ?? val.tariffId ?? '') === '-1' ||
       val.isFixedPrice === true,
+    tariffId: (() => {
+      const id = String(val.TarriffId ?? val.TariffId ?? val.tariffId ?? '').trim();
+      return id || undefined;
+    })(),
+    tariffName: (() => {
+      const name = String(
+        val.TarriffName ?? val.TariffName ?? val.tariffName ?? val.TarriffType ?? val.tarriffType ?? '',
+      ).trim();
+      return name && !isForbiddenPlaceholderTariffName(name) ? name : undefined;
+    })(),
     expiresAt: Date.now() + 3600000,
     postedAt: (() => {
       const raw = val.createdAt ?? val.CreatedAt ?? val.OfferedAt ?? val.offeredAt;
