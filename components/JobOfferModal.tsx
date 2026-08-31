@@ -87,8 +87,7 @@ export function JobOfferModal() {
     pendingTripSync ||
     !!syncingBanner;
 
-  // Harden offer beep: play when the exclusive popup actually becomes visible,
-  // even if an earlier deferred path skipped alertDriverToOffer.
+  // Only beep when the exclusive popup is genuinely visible/actionable.
   useSafeEffect(() => {
     if (modalHeldHidden || !jobOffer?.id) return;
     if (soundedOfferIdRef.current === jobOffer.id) return;

@@ -58,7 +58,7 @@ import {
   readNotificationJobId,
   readNotificationType,
 } from '@/lib/driverNotifications';
-import { playInAppNotificationSound, alertDriverToOffer } from '@/lib/notificationSound';
+import { playInAppNotificationSound } from '@/lib/notificationSound';
 import { subscribeChat } from '@/lib/chatService';
 import {
   subscribeDriverQueue,
@@ -2681,7 +2681,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
 
     setJobOffer(offer);
-    void alertDriverToOffer(offer);
+    // Sound only from JobOfferModal when the popup is actually visible —
+    // do not alert while held hidden (payment / sync / active trip / hail / offline).
   };
 
   /** Promote Offer-tab deferred exclusive offers to popup immediately (no effect lag). */
@@ -2704,7 +2705,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     console.log('[Driver] flush deferred offer popup', reason, best.id);
     setJobOffer({ ...best, silent: false });
-    void alertDriverToOffer({ ...best, silent: false });
+    // JobOfferModal plays alert only once the modal is visible/actionable.
   };
   const flushDeferredOfferPopupNowRef = useRef(flushDeferredOfferPopupNow);
   flushDeferredOfferPopupNowRef.current = flushDeferredOfferPopupNow;

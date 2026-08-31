@@ -29,6 +29,16 @@ export function isJobOfferModalHeldHidden(state: OfferModalHoldState): boolean {
 }
 
 /**
+ * Offer alert sound must only fire when the exclusive popup is actually
+ * visible and actionable — never while held hidden mid-sync / on a trip.
+ */
+export function shouldPlayOfferAlertSound(
+  state: OfferModalHoldState & { hasJobOffer?: boolean },
+): boolean {
+  return !!state.hasJobOffer && !isJobOfferModalHeldHidden(state);
+}
+
+/**
  * After a successful Queued→Assigned promote from the post-trip release path,
  * the driver must adopt the job as activeJob without requiring Accept.
  */
