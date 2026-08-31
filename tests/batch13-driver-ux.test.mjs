@@ -20,10 +20,13 @@ test('CurrentTripPanel has one-tap verify + expand/minimize + Call passenger', (
   assert.doesNotMatch(src, /Step 1 — Confirm: PIN matches/);
   assert.match(src, /Minimize/);
   assert.match(src, /Expand/);
-  assert.match(src, /Call passenger/);
+  assert.match(src, /Call passenger|title="Call"/);
   assert.match(src, /expandedInline/);
   assert.match(src, /detailsExpandSheet/);
   assert.match(src, /pinnedBand/);
+  assert.match(src, /actionRow/);
+  assert.match(src, /Notes & pickup instructions/);
+  assert.match(src, /showPassengerContact/);
   assert.match(src, /detailsHeaderRaised/);
   assert.match(src, /zIndex: 60/);
   assert.match(src, /prepaidSheet/);
@@ -37,18 +40,15 @@ test('CurrentTripPanel has one-tap verify + expand/minimize + Call passenger', (
 test('CurrentTripPanel pins details band outside ScrollView and Expand uses a sheet', () => {
   const src = readFileSync(join(root, 'components/home/CurrentTripPanel.tsx'), 'utf8');
   const pinIdx = src.indexOf('accessibilityLabel="Trip details summary"');
-  const scrollAfterPin = src.indexOf('style={styles.detailsScroll}', pinIdx);
   const expandSheetIdx = src.indexOf('detailsExpandSheet');
   const actionIdx = src.indexOf('style={styles.actionBar}', pinIdx);
   assert.ok(pinIdx > 0, 'pinned band accessibility label must exist');
-  assert.ok(scrollAfterPin > pinIdx, 'detailsScroll must follow pinned band in main trip UI');
-  assert.ok(actionIdx > scrollAfterPin, 'action bar stays after scroll');
+  assert.ok(actionIdx > pinIdx, 'action bar stays after pinned band');
   assert.ok(expandSheetIdx > 0, 'Expand must use a real sheet surface');
   assert.match(src, /pinnedBand:[\s\S]{0,120}flexShrink:\s*0/);
   assert.match(src, /JobDispatchMetaSection job=\{activeJob\}/);
-  assert.doesNotMatch(
-    src.slice(scrollAfterPin, Math.min(src.length, scrollAfterPin + 900)),
-    /JobDispatchMetaSection job=\{activeJob\}/,
-    'meta strip must not live only inside crushed ScrollView',
-  );
+  assert.match(src, /contactRow/);
+  assert.match(src, /actionRow/);
+  assert.match(src, /title="Call"/);
+  assert.match(src, /title="Text"/);
 });

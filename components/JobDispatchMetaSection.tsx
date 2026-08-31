@@ -12,25 +12,30 @@ import { StyleSheet, Text, View } from 'react-native';
 type Props = {
   job: JobOffer | ActiveJob;
   compact?: boolean;
+  /** When set, name/phone share the same compact meta strip row. */
+  showPassengerContact?: boolean;
 };
 
 /**
- * Always-visible compact strip: ASAP/LATER · vehicle · created · source.
+ * Always-visible compact strip: ASAP/LATER · vehicle · created · source · passenger.
  * Expand stays reserved for long notes / full stop breakdowns.
  */
-export function JobDispatchMetaSection({ job, compact }: Props) {
+export function JobDispatchMetaSection({ job, compact, showPassengerContact }: Props) {
   const pickupType = pickupTypeLabelFromOffer(job);
   const bookedLabel =
     job.bookedAtMs != null ? formatJobDateTimeCompact(new Date(job.bookedAtMs)) : null;
   const sourceLabel = sourceDisplayLabel(job.source, job.createdBy, job.dispatcherName);
   const vehicleLabel = vehicleTypeDisplayLabel(job);
+  const name = showPassengerContact ? String(job.passengerName || '').trim() : '';
+  const phone = showPassengerContact ? String(job.passengerPhone || '').trim() : '';
+  const contactLabel = [name, phone].filter(Boolean).join(' · ') || null;
 
-  if (!pickupType && !vehicleLabel && !bookedLabel && !sourceLabel) return null;
+  if (!pickupType && !vehicleLabel && !bookedLabel && !sourceLabel && !contactLabel) return null;
 
   return (
     <View
       style={[styles.strip, compact && styles.stripCompact]}
-      accessibilityLabel={[pickupType, vehicleLabel, bookedLabel, sourceLabel]
+      accessibilityLabel={[pickupType, vehicleLabel, bookedLabel, sourceLabel, contactLabel]
         .filter(Boolean)
         .join(', ')}
     >
@@ -60,6 +65,14 @@ export function JobDispatchMetaSection({ job, compact }: Props) {
           <Ionicons name="globe-outline" size={12} color={Colors.textMuted} />
           <Text style={styles.itemText} numberOfLines={1}>
             {sourceLabel}
+          </Text>
+        </View>
+      ) : null}
+      {contactLabel ? (
+        <View style={styles.item}>
+          <Ionicons name="person-outline" size={12} color={Colors.textMuted} />
+          <Text style={styles.itemText} numberOfLines={1}>
+            {contactLabel}
           </Text>
         </View>
       ) : null}

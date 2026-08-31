@@ -70,11 +70,12 @@ test('CurrentTripPanel shows JobDispatchMetaSection in pinned band outside Expan
   const src = readFileSync(join(root, 'components/home/CurrentTripPanel.tsx'), 'utf8');
   assert.match(src, /pinnedBand/);
   assert.match(src, /detailsExpandSheet/);
-  const pinIdx = src.indexOf('style={styles.pinnedBand}');
-  const metaIdx = src.indexOf('<JobDispatchMetaSection job={activeJob}');
+  const pinIdx = src.indexOf('accessibilityLabel="Trip details summary"');
+  const pinSlice = src.slice(pinIdx, pinIdx + 2200);
+  assert.match(pinSlice, /JobDispatchMetaSection job=\{activeJob\}/, 'meta strip inside pinned band');
+  assert.match(pinSlice, /showPassengerContact/);
   const expandModalIdx = src.indexOf('detailsExpandSheet');
-  assert.ok(pinIdx > 0 && metaIdx > pinIdx, 'meta strip inside pinned band');
-  assert.ok(metaIdx < expandModalIdx, 'meta strip before Expand sheet');
+  assert.ok(pinIdx > 0 && expandModalIdx > pinIdx, 'Expand sheet after pinned band markup');
 });
 
 test('Offer + Queue + Modal render JobDispatchMetaSection strip', () => {
@@ -87,6 +88,8 @@ test('Offer + Queue + Modal render JobDispatchMetaSection strip', () => {
     assert.match(src, /JobDispatchMetaSection/, rel);
   }
   const strip = readFileSync(join(root, 'components/JobDispatchMetaSection.tsx'), 'utf8');
+  assert.match(strip, /showPassengerContact/);
+  assert.match(strip, /person-outline/);
   assert.match(strip, /car-outline/);
   assert.match(strip, /vehicleTypeDisplayLabel/);
   assert.match(strip, /bookedLabel/);

@@ -445,6 +445,13 @@ export function CurrentTripPanel() {
 
   const expandedDetailsBody = (
     <View style={styles.expandedInline}>
+      <View style={styles.summaryRow}>
+        <JobTypeBadge type={activeJob.type} />
+        <Text style={styles.jobId}>Job #{activeJob.id}</Text>
+        <Text style={styles.stageChipInline} numberOfLines={1}>
+          {isOnBoard ? 'On board' : stageLabel(activeJob.stage)}
+        </Text>
+      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
         {STAGES.map((s, i) => (
           <View key={s} style={styles.stageChip}>
@@ -453,9 +460,22 @@ export function CurrentTripPanel() {
           </View>
         ))}
       </ScrollView>
+      <JobDispatchMetaSection job={activeJob} compact showPassengerContact />
+      <Text style={styles.routeLine}>{routeOneLiner}</Text>
+      {estFare != null ? (
+        <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
+      ) : null}
       {activeJob.estimatedDistanceKm != null ? (
         <Text style={styles.metaLine}>
           Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km
+        </Text>
+      ) : null}
+      {activeJob.serviceTypeRaw ? (
+        <Text style={styles.metaLine}>Service: {activeJob.serviceTypeRaw}</Text>
+      ) : null}
+      {activeJob.vehicleTypeRequired || activeJob.vehicleType ? (
+        <Text style={styles.metaLine}>
+          Vehicle: {activeJob.vehicleTypeRequired || activeJob.vehicleType}
         </Text>
       ) : null}
       {activeJob.isTotalMobility ? (
@@ -472,6 +492,14 @@ export function CurrentTripPanel() {
             ? ' (paid)'
             : ''}
         </Text>
+      ) : null}
+      {activeJob.accountName || activeJob.accountId ? (
+        <Text style={styles.metaLine}>
+          Account: {activeJob.accountName || activeJob.accountId}
+        </Text>
+      ) : null}
+      {activeJob.pickupPin ? (
+        <Text style={styles.metaLine}>Pickup PIN: {String(activeJob.pickupPin)}</Text>
       ) : null}
       <View style={styles.addrBlock}>
         <Text style={styles.addrLabel}>Pickup</Text>
@@ -493,6 +521,14 @@ export function CurrentTripPanel() {
           <Text style={styles.addr}>{activeJob.dropoff}</Text>
         </View>
       ) : null}
+      {activeJob.passengerName ? (
+        <Text style={styles.metaLine}>Passenger: {activeJob.passengerName}</Text>
+      ) : null}
+      {activeJob.passengerPhone ? (
+        <Text style={styles.metaLine} selectable>
+          Phone: {activeJob.passengerPhone}
+        </Text>
+      ) : null}
       {activeJob.passengerEmail ? (
         <Text style={styles.metaLine}>Email: {activeJob.passengerEmail}</Text>
       ) : null}
@@ -503,14 +539,23 @@ export function CurrentTripPanel() {
         <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
       ) : null}
       {isHailTrip ? (
-        <Text style={styles.metaLine} numberOfLines={3}>
+        <Text style={styles.metaLine}>
           Picked up from: {hailPickupAddress || activeJob.pickup || 'Current location'}
           {meter?.startedAt ? ` · Started ${fmtTime(meter.startedAt)}` : ''}
         </Text>
       ) : null}
-      <JobNotesSection job={activeJob} compact />
+      <JobNotesSection job={activeJob} compact title="Notes & pickup instructions" />
+      {!activeJob.notes && !(activeJob.allNotes && activeJob.allNotes.length) ? (
+        <Text style={styles.metaLine}>No notes on this booking.</Text>
+      ) : null}
     </View>
   );
+
+  const primaryAdvanceTitle = completionBusy
+    ? 'Please wait…'
+    : nextStage === 'onboard' && needsPickupVerify && !pickupVerified
+      ? 'Verify first'
+      : nextLabel;
 
   return (
     <View style={styles.panelActive}>
@@ -540,55 +585,31 @@ export function CurrentTripPanel() {
           <Text style={styles.routeLine} numberOfLines={2}>
             {routeOneLiner}
           </Text>
-          {activeJob.passengerName ? (
-            <Text style={styles.metaLine} numberOfLines={1}>
-              {activeJob.passengerName}
-            </Text>
-          ) : null}
-          <JobDispatchMetaSection job={activeJob} compact />
-        </View>
-      </View>
-
-      {/* Optional extras only — may shrink to zero; pin band stays */}
-      <ScrollView
-        style={styles.detailsScroll}
-        contentContainerStyle={styles.detailsContent}
-        showsVerticalScrollIndicator
-        nestedScrollEnabled
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Call/Text (non-prepaid Arrived / pre-arrival): stay in details.
-            Prepaid Arrived: Call/Text lives in the Arrived action group below so it
-            appears with PIN/wrong/no-show — not buried under the verify sticky. */}
-        {showCallText && !showPrepaidArrivedGroup ? (
-          <View style={styles.callBlock}>
-            <Text style={styles.metaLine} numberOfLines={1} selectable>
-              {activeJob.passengerPhone}
-            </Text>
-            <View style={styles.phoneRow}>
+          <JobDispatchMetaSection job={activeJob} compact showPassengerContact />
+          {showCallText && !showPrepaidArrivedGroup ? (
+            <View style={styles.contactRow}>
               <Button
-                title="Call passenger"
+                title="Call"
                 compact
-                style={styles.secondaryBtn}
+                style={styles.contactBtn}
                 onPress={callPassenger}
               />
               <Button
                 title="Text"
                 variant="secondary"
                 compact
-                style={styles.secondaryBtn}
+                style={styles.contactBtn}
                 onPress={textPassenger}
               />
             </View>
-          </View>
-        ) : null}
+          ) : null}
+          {needsPickupVerify && pickupVerified ? (
+            <Text style={styles.verified}>Verified — On Board unlocked</Text>
+          ) : null}
+        </View>
+      </View>
 
-        {needsPickupVerify && pickupVerified ? (
-          <Text style={styles.verified}>Verified — On Board unlocked</Text>
-        ) : null}
-      </ScrollView>
-
-      {/* Expand = real sheet over map; End Trip / actions stay on the panel underneath */}
+      {/* Expand = real sheet with FULL job details; End Trip / actions stay underneath */}
       {detailsExpanded ? (
         <Modal visible transparent animationType="slide" statusBarTranslucent>
           <View style={styles.detailsExpandRoot} pointerEvents="box-none">
@@ -600,7 +621,7 @@ export function CurrentTripPanel() {
             <View
               style={[
                 styles.detailsExpandSheet,
-                { maxHeight: Math.round(windowHeight * 0.62), minHeight: Math.round(windowHeight * 0.34) },
+                { maxHeight: Math.round(windowHeight * 0.72), minHeight: Math.round(windowHeight * 0.4) },
               ]}
             >
               <View style={[styles.detailsHeader, styles.detailsHeaderRaised, styles.prepaidSheetHeader]}>
@@ -662,50 +683,48 @@ export function CurrentTripPanel() {
       ) : null}
 
       <View style={styles.actionBar}>
-        {showEndTrip ? (
-          <Button
-            title={completionBusy ? 'Ending…' : 'End Trip'}
-            variant="danger"
-            disabled={completionBusy}
-            compact
-            onPress={() => confirmEndTrip(() => void endTrip())}
-          />
-        ) : (
-          <Animated.View style={{ opacity: highlightArrived ? pulse : 1 }}>
+        <View style={styles.actionRow}>
+          {showEndTrip ? (
             <Button
-              title={
-                completionBusy
-                  ? 'Please wait…'
-                  : nextStage === 'onboard' && needsPickupVerify && !pickupVerified
-                    ? 'Verify passenger first'
-                    : nextLabel
-              }
-              onPress={onAdvance}
-              disabled={
-                completionBusy ||
-                (nextStage === 'onboard' && needsPickupVerify && !pickupVerified)
-              }
+              title={completionBusy ? 'Ending…' : 'End Trip'}
+              variant="danger"
+              disabled={completionBusy}
               compact
+              style={styles.actionTab}
+              onPress={() => confirmEndTrip(() => void endTrip())}
             />
-          </Animated.View>
-        )}
+          ) : (
+            <Animated.View style={[styles.actionTabGrow, { opacity: highlightArrived ? pulse : 1 }]}>
+              <Button
+                title={primaryAdvanceTitle}
+                onPress={onAdvance}
+                disabled={
+                  completionBusy ||
+                  (nextStage === 'onboard' && needsPickupVerify && !pickupVerified)
+                }
+                compact
+                style={styles.actionTab}
+              />
+            </Animated.View>
+          )}
 
-        <View style={styles.secondaryRow}>
+          {/* Navigate: pickup pre-onboard; dropoff when On Board (navTarget switches). */}
           {canNavigate ? (
             <Button
-              title="Navigate"
+              title={isOnBoard ? 'Dropoff' : 'Navigate'}
               variant="secondary"
               compact
-              style={styles.secondaryBtn}
+              style={styles.actionTab}
               onPress={() => showNavigationPicker(navTarget, navTitle)}
             />
           ) : null}
+
           {!showEndTrip && !isHailTrip && preArrival ? (
             <Button
               title="Recall"
               variant="secondary"
               compact
-              style={styles.secondaryBtn}
+              style={styles.actionTab}
               onPress={() => {
                 Alert.alert('Recall job?', 'Return this job to dispatch (before pickup arrival).', [
                   { text: 'Back', style: 'cancel' },
@@ -719,7 +738,7 @@ export function CurrentTripPanel() {
               title="Cancel"
               variant="danger"
               compact
-              style={styles.secondaryBtn}
+              style={styles.actionTab}
               onPress={() => {
                 Alert.alert('Cancel job?', 'This permanently closes the job.', [
                   { text: 'Back', style: 'cancel' },
@@ -781,14 +800,16 @@ const styles = StyleSheet.create({
     color: Colors.accent,
     textTransform: 'uppercase',
   },
-  detailsScroll: {
-    flex: 1,
-    minHeight: 0,
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
   },
-  detailsContent: {
-    padding: 12,
-    paddingBottom: 8,
-    gap: 8,
+  contactBtn: {
+    flexGrow: 0,
+    minWidth: 64,
+    paddingHorizontal: 10,
   },
   detailsHeader: {
     flexDirection: 'row',
@@ -932,7 +953,30 @@ const styles = StyleSheet.create({
   verifyName: { fontSize: 14, fontWeight: '600', color: Colors.text },
   verifyPin: { fontSize: 20, fontWeight: '800', letterSpacing: 3, color: Colors.primary },
   verified: { fontSize: 13, fontWeight: '600', color: Colors.success || '#16a34a' },
-  actionBar: { padding: 10, borderTopWidth: 1, borderTopColor: Colors.border, gap: 8, zIndex: 40, flexShrink: 0 },
+  actionBar: {
+    padding: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    gap: 6,
+    zIndex: 40,
+    flexShrink: 0,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  actionTab: {
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+  },
+  actionTabGrow: {
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+  },
   secondaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   secondaryBtn: { flexGrow: 1, minWidth: '40%' },
   errorBox: { gap: 6 },
