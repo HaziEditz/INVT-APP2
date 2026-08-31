@@ -29,14 +29,6 @@ import {
 
 export default function MainScreen() {
   const { height: windowHeight } = useWindowDimensions();
-  const tripLayout = useMemo(() => {
-    // Keep job details readable after Accept across phone sizes: map capped,
-    // work panel gets a solid minimum (details + stage actions).
-    const mapMax = Math.round(Math.min(Math.max(windowHeight * 0.3, 180), 280));
-    const mapMin = Math.round(Math.min(Math.max(windowHeight * 0.2, 140), 200));
-    const workMin = Math.round(Math.max(windowHeight * 0.52, 340));
-    return { mapMax, mapMin, workMin };
-  }, [windowHeight]);
   const { firebaseUser, driver, profileLoading, refreshDriver } = useAuth();
   const {
     shiftActive,
@@ -58,6 +50,22 @@ export default function MainScreen() {
     selectedVehicleId,
     vehicles,
   } = useDriver();
+
+  const tripLayout = useMemo(() => {
+    // Keep job details readable after Accept across phone sizes: map capped,
+    // work panel gets a solid minimum (details + stage actions).
+    // On Board + live meter: shrink map further so the pinned trip band cannot
+    // be crushed to zero height by TripToolsBar meter chrome.
+    const meterLive = !!meter?.running && !meter?.trackOnly;
+    const mapMax = Math.round(
+      Math.min(Math.max(windowHeight * (meterLive ? 0.22 : 0.3), meterLive ? 140 : 180), meterLive ? 200 : 280),
+    );
+    const mapMin = Math.round(
+      Math.min(Math.max(windowHeight * (meterLive ? 0.16 : 0.2), meterLive ? 110 : 140), meterLive ? 160 : 200),
+    );
+    const workMin = Math.round(Math.max(windowHeight * (meterLive ? 0.58 : 0.52), meterLive ? 380 : 340));
+    return { mapMax, mapMin, workMin };
+  }, [windowHeight, meter?.running, meter?.trackOnly]);
 
   const [mainTab, setMainTab] = useState<MainPanelTab>('current');
   const [tariffOpen, setTariffOpen] = useState(false);

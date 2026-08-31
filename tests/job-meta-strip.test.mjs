@@ -66,21 +66,15 @@ test('jobDisplayMeta exports vehicleTypeDisplayLabel', () => {
   assert.match(src, /Wheelchair/);
 });
 
-test('CurrentTripPanel shows JobDispatchMetaSection outside Expand', () => {
+test('CurrentTripPanel shows JobDispatchMetaSection in pinned band outside Expand', () => {
   const src = readFileSync(join(root, 'components/home/CurrentTripPanel.tsx'), 'utf8');
-  const alwaysIdx = src.indexOf('<JobDispatchMetaSection job={activeJob}');
-  const expandIdx = src.search(/\{detailsExpanded \? \(\r?\n\s*<View style=\{styles\.expandedInline\}/);
-  assert.ok(alwaysIdx > 0, 'meta strip must be present');
-  assert.ok(expandIdx > 0, 'Expand block must remain');
-  assert.ok(
-    alwaysIdx < expandIdx,
-    'meta strip must render before Expand (always visible)',
-  );
-  assert.doesNotMatch(
-    src.slice(expandIdx, expandIdx + 900),
-    /<JobDispatchMetaSection job=\{activeJob\}/,
-    'meta strip must not be gated behind Expand',
-  );
+  assert.match(src, /pinnedBand/);
+  assert.match(src, /detailsExpandSheet/);
+  const pinIdx = src.indexOf('style={styles.pinnedBand}');
+  const metaIdx = src.indexOf('<JobDispatchMetaSection job={activeJob}');
+  const expandModalIdx = src.indexOf('detailsExpandSheet');
+  assert.ok(pinIdx > 0 && metaIdx > pinIdx, 'meta strip inside pinned band');
+  assert.ok(metaIdx < expandModalIdx, 'meta strip before Expand sheet');
 });
 
 test('Offer + Queue + Modal render JobDispatchMetaSection strip', () => {

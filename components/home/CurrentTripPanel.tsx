@@ -318,7 +318,7 @@ export function CurrentTripPanel() {
       ? `${Math.floor(remainingMs / 60000)}:${String(Math.floor((remainingMs % 60000) / 1000)).padStart(2, '0')}`
       : 'Ready';
 
-  const compactOnboard =
+  const isOnBoard =
     activeJob.stage === 'onboard' ||
     (!!st.onboardAt && activeJob.stage !== 'complete');
   // Prepaid Arrived group: ALL FIVE live in one bottom sheet over the map
@@ -333,6 +333,14 @@ export function CurrentTripPanel() {
     activeJob.stage !== 'onboard' &&
     !st.onboardAt &&
     !(isPrepaidUpfront && postArrival && pickupVerified);
+
+  const routeOneLiner = [
+    (activeJob.pickup || 'Pickup').split(',')[0],
+    ...((activeJob.stops ?? []).map((s) => s.address.split(',')[0])),
+    showDropoff ? (activeJob.dropoff || 'Dropoff').split(',')[0] : isOnBoard ? '—' : null,
+  ]
+    .filter(Boolean)
+    .join(' → ');
 
   const prepaidSheetBody = (
     <>
@@ -435,18 +443,113 @@ export function CurrentTripPanel() {
     </>
   );
 
+  const expandedDetailsBody = (
+    <View style={styles.expandedInline}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
+        {STAGES.map((s, i) => (
+          <View key={s} style={styles.stageChip}>
+            <View style={[styles.dot, i <= idx && styles.dotOn]} />
+            <Text style={[styles.stageText, i <= idx && styles.stageOn]}>{stageLabel(s)}</Text>
+          </View>
+        ))}
+      </ScrollView>
+      {activeJob.estimatedDistanceKm != null ? (
+        <Text style={styles.metaLine}>
+          Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km
+        </Text>
+      ) : null}
+      {activeJob.isTotalMobility ? (
+        <Text style={styles.metaLine}>
+          Total Mobility
+          {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
+          {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
+        </Text>
+      ) : activeJob.paymentType ? (
+        <Text style={styles.metaLine}>
+          Payment: {activeJob.paymentType}
+          {activeJob.isPrePaid ||
+          String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
+            ? ' (paid)'
+            : ''}
+        </Text>
+      ) : null}
+      <View style={styles.addrBlock}>
+        <Text style={styles.addrLabel}>Pickup</Text>
+        <Text style={styles.addr}>{activeJob.pickup}</Text>
+      </View>
+      {(activeJob.stops?.length ?? 0) > 0
+        ? activeJob.stops!.map((stop, i) => (
+            <View key={`stop-${i}-${stop.address}`} style={styles.addrBlock}>
+              <Text style={styles.addrLabel}>
+                {(activeJob.stops?.length ?? 0) === 1 ? 'Stop' : `Stop ${i + 1}`}
+              </Text>
+              <Text style={styles.addr}>{stop.address}</Text>
+            </View>
+          ))
+        : null}
+      {showDropoff ? (
+        <View style={styles.addrBlock}>
+          <Text style={styles.addrLabel}>Dropoff</Text>
+          <Text style={styles.addr}>{activeJob.dropoff}</Text>
+        </View>
+      ) : null}
+      {activeJob.passengerEmail ? (
+        <Text style={styles.metaLine}>Email: {activeJob.passengerEmail}</Text>
+      ) : null}
+      {activeJob.passengers != null ? (
+        <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
+      ) : null}
+      {activeJob.dispatcherName ? (
+        <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
+      ) : null}
+      {isHailTrip ? (
+        <Text style={styles.metaLine} numberOfLines={3}>
+          Picked up from: {hailPickupAddress || activeJob.pickup || 'Current location'}
+          {meter?.startedAt ? ` · Started ${fmtTime(meter.startedAt)}` : ''}
+        </Text>
+      ) : null}
+      <JobNotesSection job={activeJob} compact />
+    </View>
+  );
+
   return (
     <View style={styles.panelActive}>
-      <View style={[styles.detailsHeader, styles.detailsHeaderRaised]}>
-        <Text style={styles.detailsHeaderTitle}>Trip details</Text>
-        <Button
-          title={detailsExpanded ? 'Minimize' : 'Expand'}
-          variant="secondary"
-          compact
-          onPress={() => setDetailsExpanded((v) => !v)}
-        />
+      {/* flexShrink:0 — never crushed by meter/map; always visible without scrolling */}
+      <View style={styles.pinnedBand} accessibilityLabel="Trip details summary">
+        <View style={[styles.detailsHeader, styles.detailsHeaderRaised]}>
+          <Text style={styles.detailsHeaderTitle}>Trip details</Text>
+          <Button
+            title={detailsExpanded ? 'Minimize' : 'Expand'}
+            variant="secondary"
+            compact
+            onPress={() => setDetailsExpanded((v) => !v)}
+          />
+        </View>
+        <View style={styles.pinnedBody}>
+          <View style={styles.summaryRow}>
+            <JobTypeBadge type={activeJob.type} />
+            <Text style={styles.jobId}>Job #{activeJob.id}</Text>
+            <Text style={styles.stageChipInline} numberOfLines={1}>
+              {isOnBoard ? 'On board' : stageLabel(activeJob.stage)}
+            </Text>
+          </View>
+          {isHailTrip ? <Text style={styles.hailTitle}>Street hail</Text> : null}
+          {estFare != null ? (
+            <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
+          ) : null}
+          <Text style={styles.routeLine} numberOfLines={2}>
+            {routeOneLiner}
+          </Text>
+          {activeJob.passengerName ? (
+            <Text style={styles.metaLine} numberOfLines={1}>
+              {activeJob.passengerName}
+            </Text>
+          ) : null}
+          <JobDispatchMetaSection job={activeJob} compact />
+        </View>
       </View>
 
+      {/* Optional extras only — may shrink to zero; pin band stays */}
       <ScrollView
         style={styles.detailsScroll}
         contentContainerStyle={styles.detailsContent}
@@ -454,69 +557,6 @@ export function CurrentTripPanel() {
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
       >
-        {!compactOnboard ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stageScroll}>
-            {STAGES.map((s, i) => (
-              <View key={s} style={styles.stageChip}>
-                <View style={[styles.dot, i <= idx && styles.dotOn]} />
-                <Text style={[styles.stageText, i <= idx && styles.stageOn]}>{stageLabel(s)}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        ) : (
-          <Text style={styles.metaLine}>On board · Job #{activeJob.id}</Text>
-        )}
-
-        {!compactOnboard ? (
-          <View style={styles.summaryRow}>
-            <JobTypeBadge type={activeJob.type} />
-            <Text style={styles.jobId}>Job #{activeJob.id}</Text>
-          </View>
-        ) : null}
-
-        {isHailTrip ? (
-          <>
-            <Text style={styles.hailTitle}>Street hail</Text>
-            <Text style={styles.pickupFrom} numberOfLines={3}>
-              Picked up from: {hailPickupAddress || activeJob.pickup || 'Current location'}
-            </Text>
-            {meter?.startedAt ? (
-              <Text style={styles.metaLine}>Started {fmtTime(meter.startedAt)}</Text>
-            ) : null}
-          </>
-        ) : null}
-
-        {estFare != null ? (
-          <Text style={styles.fareEst}>Est. fare ${formatFareAmount(estFare)}</Text>
-        ) : null}
-
-        {compactOnboard ? (
-          <View style={styles.addrBlock}>
-            <Text style={styles.addr} numberOfLines={2}>
-              {activeJob.pickup?.split(',')[0] || 'Pickup'}
-              {(activeJob.stops?.length ?? 0) > 0
-                ? ` → ${activeJob.stops!.map((s) => s.address.split(',')[0]).join(' → ')}`
-                : ''}
-              {showDropoff ? ` → ${activeJob.dropoff?.split(',')[0] || 'Dropoff'}` : ' → —'}
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.addrBlock}>
-            <Text style={styles.addr} numberOfLines={3}>
-              {(activeJob.pickup || 'Pickup').split(',')[0]}
-              {(activeJob.stops?.length ?? 0) > 0
-                ? ` → ${activeJob.stops!.map((s) => s.address.split(',')[0]).join(' → ')}`
-                : ''}
-              {showDropoff ? ` → ${(activeJob.dropoff || 'Dropoff').split(',')[0]}` : ''}
-            </Text>
-            {activeJob.passengerName ? (
-              <Text style={styles.metaLine} numberOfLines={1}>
-                {activeJob.passengerName}
-              </Text>
-            ) : null}
-          </View>
-        )}
-
         {/* Call/Text (non-prepaid Arrived / pre-arrival): stay in details.
             Prepaid Arrived: Call/Text lives in the Arrived action group below so it
             appears with PIN/wrong/no-show — not buried under the verify sticky. */}
@@ -543,68 +583,48 @@ export function CurrentTripPanel() {
           </View>
         ) : null}
 
-        {/* Always-visible glance strip — Expand is only for long/secondary details. */}
-        <JobDispatchMetaSection job={activeJob} compact />
-
-        {detailsExpanded ? (
-          <View style={styles.expandedInline}>
-            {activeJob.estimatedDistanceKm != null ? (
-              <Text style={styles.metaLine}>
-                Est. distance {activeJob.estimatedDistanceKm.toFixed(1)} km
-              </Text>
-            ) : null}
-            {activeJob.isTotalMobility ? (
-              <Text style={styles.metaLine}>
-                Total Mobility
-                {activeJob.tmCardNumber ? ` · card ${activeJob.tmCardNumber}` : ''}
-                {activeJob.paymentType ? ` · remainder ${activeJob.paymentType}` : ''}
-              </Text>
-            ) : activeJob.paymentType ? (
-              <Text style={styles.metaLine}>
-                Payment: {activeJob.paymentType}
-                {activeJob.isPrePaid ||
-                String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
-                  ? ' (paid)'
-                  : ''}
-              </Text>
-            ) : null}
-            <View style={styles.addrBlock}>
-              <Text style={styles.addrLabel}>Pickup</Text>
-              <Text style={styles.addr}>{activeJob.pickup}</Text>
-            </View>
-            {(activeJob.stops?.length ?? 0) > 0
-              ? activeJob.stops!.map((stop, i) => (
-                  <View key={`stop-${i}-${stop.address}`} style={styles.addrBlock}>
-                    <Text style={styles.addrLabel}>
-                      {(activeJob.stops?.length ?? 0) === 1 ? 'Stop' : `Stop ${i + 1}`}
-                    </Text>
-                    <Text style={styles.addr}>{stop.address}</Text>
-                  </View>
-                ))
-              : null}
-            {showDropoff ? (
-              <View style={styles.addrBlock}>
-                <Text style={styles.addrLabel}>Dropoff</Text>
-                <Text style={styles.addr}>{activeJob.dropoff}</Text>
-              </View>
-            ) : null}
-            {activeJob.passengerEmail ? (
-              <Text style={styles.metaLine}>Email: {activeJob.passengerEmail}</Text>
-            ) : null}
-            {activeJob.passengers != null ? (
-              <Text style={styles.metaLine}>Passengers: {activeJob.passengers}</Text>
-            ) : null}
-            {activeJob.dispatcherName ? (
-              <Text style={styles.metaLine}>Assigned by: {activeJob.dispatcherName}</Text>
-            ) : null}
-            <JobNotesSection job={activeJob} compact />
-          </View>
-        ) : null}
-
         {needsPickupVerify && pickupVerified ? (
           <Text style={styles.verified}>Verified — On Board unlocked</Text>
         ) : null}
       </ScrollView>
+
+      {/* Expand = real sheet over map; End Trip / actions stay on the panel underneath */}
+      {detailsExpanded ? (
+        <Modal visible transparent animationType="slide" statusBarTranslucent>
+          <View style={styles.detailsExpandRoot} pointerEvents="box-none">
+            <Pressable
+              style={styles.detailsExpandBackdrop}
+              accessibilityLabel="Close trip details"
+              onPress={() => setDetailsExpanded(false)}
+            />
+            <View
+              style={[
+                styles.detailsExpandSheet,
+                { maxHeight: Math.round(windowHeight * 0.62), minHeight: Math.round(windowHeight * 0.34) },
+              ]}
+            >
+              <View style={[styles.detailsHeader, styles.detailsHeaderRaised, styles.prepaidSheetHeader]}>
+                <Text style={styles.detailsHeaderTitle}>Full trip details</Text>
+                <Button
+                  title="Minimize"
+                  variant="secondary"
+                  compact
+                  onPress={() => setDetailsExpanded(false)}
+                />
+              </View>
+              <ScrollView
+                style={styles.detailsExpandScroll}
+                contentContainerStyle={styles.detailsExpandContent}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+              >
+                {expandedDetailsBody}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
 
       {showVerifySticky ? (
         <Modal visible transparent animationType="slide" statusBarTranslucent>
@@ -734,6 +754,33 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     minHeight: 0,
   },
+  /** Never flex-shrink — always-visible band above crushed scroll / meter. */
+  pinnedBand: {
+    flexGrow: 0,
+    flexShrink: 0,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+    zIndex: 50,
+  },
+  pinnedBody: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 4,
+  },
+  routeLine: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+    lineHeight: 18,
+  },
+  stageChipInline: {
+    marginLeft: 'auto',
+    fontSize: 11,
+    fontWeight: '800',
+    color: Colors.accent,
+    textTransform: 'uppercase',
+  },
   detailsScroll: {
     flex: 1,
     minHeight: 0,
@@ -761,8 +808,33 @@ const styles = StyleSheet.create({
   expandedInline: {
     gap: 8,
     paddingTop: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  detailsExpandRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  detailsExpandBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  detailsExpandSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderTopWidth: 2,
     borderTopColor: Colors.border,
+    width: '100%',
+    zIndex: 70,
+    elevation: 14,
+  },
+  detailsExpandScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  detailsExpandContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 20,
+    gap: 8,
   },
   waitChip: {
     fontSize: 13,
@@ -785,9 +857,9 @@ const styles = StyleSheet.create({
   stageOn: { color: Colors.text, fontWeight: '600' },
   summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   jobId: { fontSize: 14, fontWeight: '600', color: Colors.text },
-  hailTitle: { fontSize: 18, fontWeight: '700', color: Colors.text },
+  hailTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
   pickupFrom: { fontSize: 14, color: Colors.text },
-  fareEst: { fontSize: 16, fontWeight: '700', color: Colors.primary },
+  fareEst: { fontSize: 15, fontWeight: '700', color: Colors.primary },
   metaLine: { fontSize: 13, color: Colors.textMuted },
   addrBlock: { gap: 2 },
   addrLabel: { fontSize: 11, fontWeight: '600', color: Colors.textMuted, textTransform: 'uppercase' },
@@ -860,7 +932,7 @@ const styles = StyleSheet.create({
   verifyName: { fontSize: 14, fontWeight: '600', color: Colors.text },
   verifyPin: { fontSize: 20, fontWeight: '800', letterSpacing: 3, color: Colors.primary },
   verified: { fontSize: 13, fontWeight: '600', color: Colors.success || '#16a34a' },
-  actionBar: { padding: 10, borderTopWidth: 1, borderTopColor: Colors.border, gap: 8, zIndex: 40 },
+  actionBar: { padding: 10, borderTopWidth: 1, borderTopColor: Colors.border, gap: 8, zIndex: 40, flexShrink: 0 },
   secondaryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   secondaryBtn: { flexGrow: 1, minWidth: '40%' },
   errorBox: { gap: 6 },

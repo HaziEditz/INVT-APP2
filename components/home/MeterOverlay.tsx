@@ -113,9 +113,9 @@ export function MeterOverlay({ meter, onPause, layout = 'overlay' }: Props) {
 const styles = StyleSheet.create({
   tripBox: {
     backgroundColor: Colors.surface,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 4,
   },
   tripTop: {
     flexDirection: 'row',
@@ -129,27 +129,27 @@ const styles = StyleSheet.create({
   },
   tripFare: {
     color: Colors.success,
-    fontSize: 36,
+    fontSize: 28,
     fontWeight: '900',
-    lineHeight: 40,
+    lineHeight: 32,
     letterSpacing: -0.5,
   },
   tripTariff: {
     color: Colors.textMuted,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    marginTop: 2,
+    marginTop: 1,
   },
   tripMode: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
-    marginTop: 2,
+    marginTop: 1,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   tripPauseBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     borderRadius: 8,
     backgroundColor: Colors.surfaceElevated,
     borderWidth: 1,
