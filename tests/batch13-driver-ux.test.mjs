@@ -21,6 +21,13 @@ test('CurrentTripPanel has one-tap verify + expand/minimize + Call passenger', (
   assert.match(src, /Minimize/);
   assert.match(src, /Expand/);
   assert.match(src, /Call passenger/);
-  assert.match(src, /detailsOverlay/);
-  assert.match(src, /zIndex: 80/);
+  assert.match(src, /expandedInline/);
+  assert.match(src, /detailsHeaderRaised/);
+  assert.match(src, /zIndex: 60/);
+  assert.match(src, /prepaidSheet/);
+  assert.match(src, /prepaidSheetExpanded/);
+  assert.match(src, /animationType="slide"/);
+  assert.match(src, /Wrong passenger/);
+  assert.match(src, /Walk-up hail/);
+  assert.match(src, /No Show/);
 });

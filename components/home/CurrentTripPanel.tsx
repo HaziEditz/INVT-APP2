@@ -7,7 +7,18 @@ import { useDriver } from '@/context/DriverContext';
 import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
 import { formatFareAmount, parseFiniteFare } from '@/lib/tariffs';
 import { STAGE_LABELS, JobStage } from '@/types';
-import { Alert, Animated, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Animated,
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const STAGES: JobStage[] = ['pickup', 'arrived', 'onboard', 'complete'];
@@ -63,6 +74,9 @@ export function CurrentTripPanel() {
   const [pinOk, setPinOk] = useState(false);
   // Default minimized so Expand never buries the action bar under a full-screen overlay.
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  /** Prepaid Arrived sheet: false = bottom sheet over map; true = full screen. */
+  const [prepaidSheetExpanded, setPrepaidSheetExpanded] = useState(false);
+  const { height: windowHeight } = useWindowDimensions();
   const deadlineIso = useMemo(() => {
     if (!activeJob) return undefined;
     if (activeJob.noShowDeadlineAt) return activeJob.noShowDeadlineAt;
@@ -108,7 +122,10 @@ export function CurrentTripPanel() {
   const showVerifyStickyEarly = !!needsPickupVerifyEarly;
 
   useEffect(() => {
-    if (showVerifyStickyEarly) setDetailsExpanded(false);
+    if (showVerifyStickyEarly) {
+      setDetailsExpanded(false);
+      setPrepaidSheetExpanded(false);
+    }
   }, [showVerifyStickyEarly, activeJob?.id]);
 
   useEffect(() => {
@@ -304,10 +321,9 @@ export function CurrentTripPanel() {
   const compactOnboard =
     activeJob.stage === 'onboard' ||
     (!!st.onboardAt && activeJob.stage !== 'complete');
-  // Prepaid Arrived group: ALL FIVE live in one scrollable sticky (not actionBar
-  // secondaryRow). Prior OTAs put Call/Wrong/Walk-up/No-show below the verify
-  // sticky outside any ScrollView — clipped off real-device trip panels so testers
-  // only ever saw "confirm PIN and name". Cash: no prepaid group.
+  // Prepaid Arrived group: ALL FIVE live in one bottom sheet over the map
+  // (PIN+name, call/text, wrong-passenger, walk-up hail, no-show). Expand → full
+  // screen; Minimize → smaller sheet. PIN confirm hides the whole sheet. Cash: no group.
   const showPrepaidArrivedGroup =
     !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
   const showVerifySticky = showPrepaidArrivedGroup;
@@ -317,6 +333,107 @@ export function CurrentTripPanel() {
     activeJob.stage !== 'onboard' &&
     !st.onboardAt &&
     !(isPrepaidUpfront && postArrival && pickupVerified);
+
+  const prepaidSheetBody = (
+    <>
+      <Text style={styles.verifyHint}>
+        Confirm PIN and name with the passenger. Call/text, wrong-passenger, walk-up
+        hail, and no-show stay here until you confirm — then this whole group hides.
+      </Text>
+      <Text style={styles.verifyPin}>
+        PIN:{' '}
+        {activeJob.pickupPin && String(activeJob.pickupPin).trim()
+          ? String(activeJob.pickupPin).trim()
+          : '…'}
+      </Text>
+      <Text style={styles.verifyName}>Name: {activeJob.passengerName || '—'}</Text>
+
+      {showCallText ? (
+        <View style={styles.phoneRow}>
+          <Button title="Call passenger" compact style={styles.secondaryBtn} onPress={callPassenger} />
+          <Button
+            title="Text"
+            variant="secondary"
+            compact
+            style={styles.secondaryBtn}
+            onPress={textPassenger}
+          />
+        </View>
+      ) : null}
+
+      <Text style={styles.metaLine}>
+        No-show countdown: {remainLabel}
+        {activeJob.imComingAt ? ' (passenger said I’m coming)' : ''}
+      </Text>
+
+      {showWrongPassengerActions ? (
+        <View style={styles.secondaryRow}>
+          <Button
+            title="Wrong passenger"
+            variant="secondary"
+            compact
+            style={styles.secondaryBtn}
+            onPress={() => {
+              Alert.alert(
+                'Wrong / uninvited passenger?',
+                'Return the booked job to the pool so the real passenger gets another driver.',
+                [
+                  { text: 'Back', style: 'cancel' },
+                  { text: 'Return to pool', onPress: () => void recallWrongPassenger() },
+                ],
+              );
+            }}
+          />
+          <Button
+            title="Walk-up hail"
+            variant="secondary"
+            compact
+            style={styles.secondaryBtn}
+            onPress={() => {
+              Alert.alert(
+                'Start walk-up fare?',
+                'Returns the booked job to the pool, then starts a new hail for the person in the cab.',
+                [
+                  { text: 'Back', style: 'cancel' },
+                  {
+                    text: 'Start hail',
+                    onPress: () => void forkWalkUpHailFromWrongPassenger(),
+                  },
+                ],
+              );
+            }}
+          />
+          <Button
+            title={canNoShow ? 'No Show' : `No Show (${remainLabel})`}
+            variant="secondary"
+            compact
+            disabled={!canNoShow || completionBusy}
+            style={styles.secondaryBtn}
+            onPress={() => {
+              Alert.alert(
+                'Mark No Show?',
+                'Closes this booking. Waiting time is charged at the waiting rate.',
+                [
+                  { text: 'Back', style: 'cancel' },
+                  {
+                    text: 'No Show',
+                    style: 'destructive',
+                    onPress: () => void noShowActiveJob(),
+                  },
+                ],
+              );
+            }}
+          />
+        </View>
+      ) : null}
+
+      <Button
+        title={completionBusy ? 'Saving…' : 'Confirm PIN & name — unlock On Board'}
+        disabled={completionBusy || !(activeJob.pickupPin && String(activeJob.pickupPin).trim())}
+        onPress={() => void onConfirmVerify()}
+      />
+    </>
+  );
 
   return (
     <View style={styles.panelActive}>
@@ -410,7 +527,7 @@ export function CurrentTripPanel() {
             </Text>
             <View style={styles.phoneRow}>
               <Button
-                title="Call"
+                title="Call passenger"
                 compact
                 style={styles.secondaryBtn}
                 onPress={callPassenger}
@@ -488,111 +605,38 @@ export function CurrentTripPanel() {
       </ScrollView>
 
       {showVerifySticky ? (
-        <ScrollView
-          style={styles.verifyStickyScroll}
-          contentContainerStyle={styles.verifySticky}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator
-        >
-          <Text style={styles.verifyTitle}>Pickup verification</Text>
-          <Text style={styles.verifyHint}>
-            Confirm PIN and name with the passenger. Call/text, wrong-passenger, walk-up
-            hail, and no-show stay here until you confirm — then this whole group hides.
-          </Text>
-          <Text style={styles.verifyPin}>
-            PIN:{' '}
-            {activeJob.pickupPin && String(activeJob.pickupPin).trim()
-              ? String(activeJob.pickupPin).trim()
-              : '…'}
-          </Text>
-          <Text style={styles.verifyName}>Name: {activeJob.passengerName || '—'}</Text>
-
-          {showCallText ? (
-            <View style={styles.phoneRow}>
-              <Button title="Call" compact style={styles.secondaryBtn} onPress={callPassenger} />
-              <Button
-                title="Text"
-                variant="secondary"
-                compact
-                style={styles.secondaryBtn}
-                onPress={textPassenger}
-              />
+        <Modal visible transparent animationType="slide" statusBarTranslucent>
+          <View style={styles.prepaidSheetRoot} pointerEvents="box-none">
+            <Pressable style={styles.prepaidSheetBackdrop} accessibilityLabel="Pickup verification open" />
+            <View
+              style={[
+                styles.prepaidSheet,
+                prepaidSheetExpanded
+                  ? styles.prepaidSheetFull
+                  : { maxHeight: Math.round(windowHeight * 0.52) },
+              ]}
+            >
+              <View style={[styles.detailsHeader, styles.detailsHeaderRaised, styles.prepaidSheetHeader]}>
+                <Text style={styles.verifyTitle}>Pickup verification</Text>
+                <Button
+                  title={prepaidSheetExpanded ? 'Minimize' : 'Expand'}
+                  variant="secondary"
+                  compact
+                  onPress={() => setPrepaidSheetExpanded((v) => !v)}
+                />
+              </View>
+              <ScrollView
+                style={styles.prepaidSheetScroll}
+                contentContainerStyle={styles.verifySticky}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+              >
+                {prepaidSheetBody}
+              </ScrollView>
             </View>
-          ) : null}
-
-          <Text style={styles.metaLine}>
-            No-show countdown: {remainLabel}
-            {activeJob.imComingAt ? ' (passenger said I’m coming)' : ''}
-          </Text>
-
-          {showWrongPassengerActions ? (
-            <View style={styles.secondaryRow}>
-              <Button
-                title="Wrong passenger"
-                variant="secondary"
-                compact
-                style={styles.secondaryBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Wrong / uninvited passenger?',
-                    'Return the booked job to the pool so the real passenger gets another driver.',
-                    [
-                      { text: 'Back', style: 'cancel' },
-                      { text: 'Return to pool', onPress: () => void recallWrongPassenger() },
-                    ],
-                  );
-                }}
-              />
-              <Button
-                title="Walk-up hail"
-                variant="secondary"
-                compact
-                style={styles.secondaryBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Start walk-up fare?',
-                    'Returns the booked job to the pool, then starts a new hail for the person in the cab.',
-                    [
-                      { text: 'Back', style: 'cancel' },
-                      {
-                        text: 'Start hail',
-                        onPress: () => void forkWalkUpHailFromWrongPassenger(),
-                      },
-                    ],
-                  );
-                }}
-              />
-              <Button
-                title={canNoShow ? 'No Show' : `No Show (${remainLabel})`}
-                variant="secondary"
-                compact
-                disabled={!canNoShow || completionBusy}
-                style={styles.secondaryBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Mark No Show?',
-                    'Closes this booking. Waiting time is charged at the waiting rate.',
-                    [
-                      { text: 'Back', style: 'cancel' },
-                      {
-                        text: 'No Show',
-                        style: 'destructive',
-                        onPress: () => void noShowActiveJob(),
-                      },
-                    ],
-                  );
-                }}
-              />
-            </View>
-          ) : null}
-
-          <Button
-            title={completionBusy ? 'Saving…' : 'Confirm PIN & name — unlock On Board'}
-            disabled={completionBusy || !(activeJob.pickupPin && String(activeJob.pickupPin).trim())}
-            onPress={() => void onConfirmVerify()}
-          />
-        </ScrollView>
+          </View>
+        </Modal>
       ) : null}
 
       <View style={styles.actionBar}>
@@ -763,10 +807,45 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.primary,
     backgroundColor: Colors.surface,
   },
+  prepaidSheetRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  prepaidSheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  prepaidSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderTopWidth: 2,
+    borderTopColor: Colors.primary,
+    width: '100%',
+    minHeight: 280,
+    zIndex: 80,
+    elevation: 16,
+  },
+  prepaidSheetFull: {
+    flex: 1,
+    maxHeight: '100%',
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    minHeight: '100%',
+  },
+  prepaidSheetHeader: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
+  prepaidSheetScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
   verifySticky: {
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
+    paddingBottom: 24,
   },
   phoneRow: {
     flexDirection: 'row',
