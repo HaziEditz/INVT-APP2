@@ -543,6 +543,9 @@ export function CurrentTripPanel() {
           </View>
         ) : null}
 
+        {/* Always-visible glance strip — Expand is only for long/secondary details. */}
+        <JobDispatchMetaSection job={activeJob} compact />
+
         {detailsExpanded ? (
           <View style={styles.expandedInline}>
             {activeJob.estimatedDistanceKm != null ? (
@@ -565,7 +568,6 @@ export function CurrentTripPanel() {
                   : ''}
               </Text>
             ) : null}
-            <JobDispatchMetaSection job={activeJob} compact />
             <View style={styles.addrBlock}>
               <Text style={styles.addrLabel}>Pickup</Text>
               <Text style={styles.addr}>{activeJob.pickup}</Text>

@@ -82,9 +82,14 @@ export function parseJobOfferRecord(
     passengerPhone: String(val.PhoneNo ?? val.passengerPhone ?? '').trim() || undefined,
     fixedFare: parseFiniteFare(val.Fare ?? val.fixedFare ?? val.estimatedFare),
     estimatedFare: parseFiniteFare(val.Fare ?? val.estimatedFare ?? val.fixedFare),
-    vehicleTypeRequired: String(
-      val.VehicleType ?? val.vehicleType ?? val.jobvehicletype ?? val.jobVehicleType ?? '',
-    ).trim(),
+    vehicleTypeRequired: (() => {
+      const raw = String(
+        val.VehicleType ?? val.vehicleType ?? val.jobvehicletype ?? val.jobVehicleType ?? '',
+      ).trim();
+      if (!raw) return undefined;
+      if (raw.toLowerCase() === 'not specified' || raw.toLowerCase() === 'any') return 'Any';
+      return raw;
+    })(),
     passengers: Number(val.Passengers ?? val.passengers ?? 1) || 1,
     serviceTypeRaw: serviceRaw,
     paymentType,

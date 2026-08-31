@@ -156,3 +156,15 @@ export function sourceDisplayLabel(
   if (badge === 'HAIL') return 'Hail';
   return badge;
 }
+
+/** Compact vehicle label for Offer / Current / Queue meta strip. */
+export function vehicleTypeDisplayLabel(
+  job: Pick<JobOffer, 'vehicleTypeRequired'> & { vehicleType?: string },
+): string | null {
+  const raw = String(job.vehicleTypeRequired ?? job.vehicleType ?? '').trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (lower === 'not specified' || lower === 'any' || lower === 'all') return 'Any';
+  if (/wav|wheelchair|accessible/i.test(raw)) return 'Wheelchair';
+  return raw;
+}

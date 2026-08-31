@@ -164,9 +164,6 @@ export function JobOfferModal() {
 
             <Text style={styles.section}>Job details</Text>
             <Text style={styles.detail}>Service type: {jobOffer.serviceTypeRaw ?? jobOffer.type}</Text>
-            {jobOffer.vehicleTypeRequired ? (
-              <Text style={styles.detail}>Vehicle required: {jobOffer.vehicleTypeRequired}</Text>
-            ) : null}
             {jobOffer.passengers != null ? (
               <Text style={styles.detail}>Passengers: {jobOffer.passengers}</Text>
             ) : null}

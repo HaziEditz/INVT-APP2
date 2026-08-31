@@ -73,7 +73,6 @@ export function OffersPanel() {
               </Text>
             ) : null}
             <JobDispatchMetaSection job={o} compact />
-            {o.vehicleTypeRequired ? <Text style={styles.meta}>Vehicle: {o.vehicleTypeRequired}</Text> : null}
             {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
             {fare != null ? (
               o.isPrePaid || String(o.paymentStatus || '').toLowerCase() === 'paid' ? (
