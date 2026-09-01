@@ -35,17 +35,18 @@ export function parseJobOfferRecord(
     return null;
   }
   const status = String(val.Status ?? val.status ?? 'Pending').toLowerCase();
+  const bookingStatus = String(
+    val.BookingStatus ?? val.bookingStatus ?? val.Status ?? val.status ?? 'Pending',
+  ).toLowerCase();
   // Option 1: pool browse includes Pending and Offered (exclusive offer stuck
   // while busy must still appear in Offers tab).
-  if (
-    opts?.requirePending !== false &&
-    status &&
-    status !== 'pending' &&
-    status !== 'offered' &&
-    status !== 'offer' &&
-    status !== 'offering'
-  ) {
-    return null;
+  // Require Status AND BookingStatus to agree on an accept-pool value — website
+  // scheduler historically set Status=Pending while BookingStatus stayed Scheduled
+  // (#8692608313), which showed in Offer tab then failed accept.
+  const poolOk = new Set(['pending', 'offered', 'offer', 'offering', 'no one', 'noone']);
+  if (opts?.requirePending !== false) {
+    if (!status || !poolOk.has(status)) return null;
+    if (!bookingStatus || !poolOk.has(bookingStatus)) return null;
   }
   if (opts?.requireDispatchWindow !== false && !isDispatchWindowOpen(val)) return null;
 
