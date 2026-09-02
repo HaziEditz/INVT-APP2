@@ -733,7 +733,7 @@ export function CurrentTripPanel() {
               }}
             />
           ) : null}
-          {!showEndTrip && !isHailTrip && postArrival ? (
+          {!showEndTrip && !isHailTrip && postArrival && !pickupVerified ? (
             <Button
               title="Cancel"
               variant="danger"
