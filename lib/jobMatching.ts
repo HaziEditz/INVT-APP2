@@ -53,7 +53,8 @@ export function jobMatchesDriverVehicle(offer: JobOffer, vehicle: Vehicle | unde
   }
 
   if (reqCat === 'car') {
-    if (drvCat === 'car' || !reqCat) return cap >= reqPax;
+    // Pax < 5: vans may take Sedan/car jobs (car tariff stays stamped on the booking).
+    if (drvCat === 'car' || drvCat === 'van' || !reqCat) return cap >= reqPax;
     const reqExact = norm(offer.vehicleTypeRequired ?? '');
     const drvExact = body;
     return !!reqExact && reqExact === drvExact && cap >= reqPax;

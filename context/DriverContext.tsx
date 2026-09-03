@@ -493,8 +493,8 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
     stops: parseJobStopsFromRecord(val),
     passengerName: val.passengerName
       ? String(val.passengerName)
-      : val.name || val.jobname
-        ? String(val.name ?? val.jobname)
+      : val.PassengerName || val.Name || val.name || val.jobname
+        ? String(val.PassengerName ?? val.Name ?? val.name ?? val.jobname)
         : undefined,
     passengerPhone: val.passengerPhone
       ? String(val.passengerPhone)
