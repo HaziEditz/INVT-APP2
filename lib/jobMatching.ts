@@ -1,10 +1,13 @@
-import { JobOffer, JobType, Vehicle } from '@/types';
+﻿import { JobOffer, JobType, Vehicle } from '@/types';
 
 function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
 const OPEN_VEHICLE_TYPES = new Set(['', 'any', 'all', 'not specified']);
+
+/** Seat capacity at/above this is a "big van" (HiAce-class) — not a default TM substitute. */
+export const TM_BIG_VAN_MIN_SEATS = 10;
 
 function normalizeCategory(raw?: string): string | null {
   const s = norm(String(raw ?? ''));
@@ -27,6 +30,14 @@ export function serviceTypeToJobType(raw?: string): JobType {
   return mapServiceToJobType(String(raw ?? 'taxi'));
 }
 
+function isTmOffer(offer: JobOffer): boolean {
+  return !!(
+    offer.isTotalMobility ||
+    offer.paymentType === 'TM' ||
+    offer.tmCardNumber
+  );
+}
+
 /** Whether this pending/offer job can be taken by the driver's current vehicle & services. */
 export function jobMatchesDriverVehicle(offer: JobOffer, vehicle: Vehicle | undefined): boolean {
   if (!vehicle) return false;
@@ -36,30 +47,38 @@ export function jobMatchesDriverVehicle(offer: JobOffer, vehicle: Vehicle | unde
   if (jobType === 'Freight' && !vehicle.hasFreightService) return false;
 
   const body = norm(vehicle.bodyType || vehicle.displayType || '');
-  const drvCat = normalizeCategory(vehicle.bodyType || vehicle.displayType) ||
-    (body.includes('van') || body.includes('minibus') ? 'van' : body.includes('wav') ? 'wav' : 'car');
+  const drvCat =
+    normalizeCategory(vehicle.bodyType || vehicle.displayType) ||
+    (body.includes('van') || body.includes('minibus')
+      ? 'van'
+      : body.includes('wav')
+        ? 'wav'
+        : 'car');
   const reqPax = Math.max(1, offer.passengers ?? 1);
   const cap = vehicle.seatCapacity || 4;
   // Mirror server _driverEligibleForJob: 5+ passengers require a van.
   let reqCat = normalizeCategory(offer.vehicleTypeRequired);
   if (reqPax >= 5) reqCat = 'van';
 
+  // TM open/car jobs: never auto-substitute 10–11 seat big vans (Estima-class OK).
+  // Explicit Van (or WAV) selection may still use a big van.
+  if (isTmOffer(offer) && cap >= TM_BIG_VAN_MIN_SEATS && (!reqCat || reqCat === 'car')) {
+    return false;
+  }
+
   if (reqCat === 'wav') return vehicle.isWav && cap >= reqPax;
 
   if (reqCat === 'van') {
-    const isVanBody =
-      drvCat === 'van' || body.includes('van') || body.includes('suv') || body.includes('minibus');
+    const isVanBody = drvCat === 'van' || body.includes('van') || body.includes('minibus');
     return isVanBody && cap >= reqPax;
   }
 
   if (reqCat === 'car') {
-    // Pax < 5: vans may take Sedan/car jobs (car tariff stays stamped on the booking).
-    if (drvCat === 'car' || drvCat === 'van' || !reqCat) return cap >= reqPax;
-    const reqExact = norm(offer.vehicleTypeRequired ?? '');
-    const drvExact = body;
-    return !!reqExact && reqExact === drvExact && cap >= reqPax;
+    // Exclusive: stamped Car/Sedan/SUV jobs never silently go to vans.
+    return drvCat === 'car' && cap >= reqPax;
   }
 
+  // "Any" / missing VehicleType → capacity-based open matching.
   if (!reqCat) return cap >= reqPax;
 
   if (reqCat === drvCat) return cap >= reqPax;

@@ -43,7 +43,17 @@ export function parseJobOfferRecord(
   // Require Status AND BookingStatus to agree on an accept-pool value — website
   // scheduler historically set Status=Pending while BookingStatus stayed Scheduled
   // (#8692608313), which showed in Offer tab then failed accept.
-  const poolOk = new Set(['pending', 'offered', 'offer', 'offering', 'no one', 'noone']);
+  // Include "waiting" — passenger-app ASAP historically wrote Status=Waiting while
+  // website writes Pending. Busy Offer-tab browse must see both (matching still applies).
+  const poolOk = new Set([
+    'pending',
+    'waiting',
+    'offered',
+    'offer',
+    'offering',
+    'no one',
+    'noone',
+  ]);
   if (opts?.requirePending !== false) {
     if (!status || !poolOk.has(status)) return null;
     if (!bookingStatus || !poolOk.has(bookingStatus)) return null;
