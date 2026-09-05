@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  convertLiveMeterToTrackOnly,
   createInitialMeter,
   gpsAccuracyBlocksDistance,
   tickMeterWithGps,
@@ -56,4 +57,24 @@ test('GPS jump rejects distance but still accrues wait time', () => {
   meter = tickMeterWithGps(meter, tariff, -35.84, 174.76, 0, 15).meter;
   assert.equal(meter.distanceKm, distAfterFirst);
   assert.equal(meter.waitingMs, waitAfterFirst + 2000);
+});
+
+test('convertLiveMeterToTrackOnly locks fare and stops climbing on tick', () => {
+  let meter = createInitialMeter(tariff);
+  meter = tickMeterWithGps(meter, tariff, -36.84, 174.76, 0, 15).meter;
+  meter = { ...meter, distanceKm: 1.2, waitingMs: 60000 };
+  const liveFare = meter.fare;
+  assert.equal(meter.trackOnly, undefined);
+  assert.ok(liveFare > 0);
+
+  meter = convertLiveMeterToTrackOnly(meter, tariff, 9.34);
+  assert.equal(meter.trackOnly, true);
+  assert.equal(meter.fare, 9.34);
+  assert.equal(meter.lockedFare, 9.34);
+  assert.equal(meter.tariffId, '-1');
+  assert.equal(meter.distanceKm, 1.2);
+
+  const after = tickMeterWithGps(meter, tariff, -36.841, 174.761, 5, 15).meter;
+  assert.equal(after.fare, 9.34, 'fixed fare must not climb after conversion');
+  assert.equal(after.trackOnly, true);
 });

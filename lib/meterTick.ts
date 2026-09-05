@@ -81,6 +81,35 @@ export function createTrackOnlyMeter(tariff: Tariff, lockedFare: number): MeterS
   };
 }
 
+/**
+ * Convert a live (climbing) meter to track-only when booking turns out fixed/prepaid.
+ * Preserves GPS distance / wait / route; locks charged fare (#8692609048).
+ */
+export function convertLiveMeterToTrackOnly(
+  meter: MeterState,
+  tariff: Tariff,
+  lockedFare: number,
+): MeterState {
+  const fare =
+    Number.isFinite(lockedFare) && lockedFare >= 0
+      ? lockedFare
+      : Number.isFinite(meter.lockedFare)
+        ? (meter.lockedFare as number)
+        : meter.fare;
+  const waitMin = meter.waitingMs / 60000;
+  const ref = calcMeterBreakdown(tariff, meter.distanceKm, waitMin);
+  return {
+    ...meter,
+    running: true,
+    tariffId: '-1',
+    tariffName: 'Fixed',
+    trackOnly: true,
+    lockedFare: fare,
+    fare,
+    breakdown: { ...ref, total: fare },
+  };
+}
+
 function applyTariffToMeter(meter: MeterState, tariff: Tariff): MeterState {
   const waitMin = meter.waitingMs / 60000;
   if (meter.trackOnly) {

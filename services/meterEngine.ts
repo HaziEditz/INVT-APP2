@@ -1,6 +1,7 @@
 import * as Location from 'expo-location';
 import { Tariff } from '@/types';
 import {
+  convertLiveMeterToTrackOnly,
   createInitialMeter,
   createTrackOnlyMeter,
   gpsAccuracyBlocksDistance,
@@ -11,6 +12,7 @@ import {
 } from '@/lib/meterTick';
 
 export {
+  convertLiveMeterToTrackOnly,
   createInitialMeter,
   createTrackOnlyMeter,
   gpsAccuracyBlocksDistance,

@@ -224,7 +224,12 @@ import {
   type EndShiftSummary,
 } from '@/services/nztaService';
 import { notifyBreakReminder } from '@/services/notificationService';
-import { createInitialMeter, createTrackOnlyMeter, watchMeter } from '@/services/meterEngine';
+import {
+  convertLiveMeterToTrackOnly,
+  createInitialMeter,
+  createTrackOnlyMeter,
+  watchMeter,
+} from '@/services/meterEngine';
 import { disableWakeLock, enableWakeLock } from '@/services/wakeLock';
 import { calcMeterBreakdown, isTariffConfigured, NO_TARIFF_CONFIGURED, parseFiniteFare } from '@/lib/tariffs';
 import {
@@ -670,6 +675,14 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
 }
 
 function bookingRawSeedFromOffer(offer: JobOffer): Record<string, unknown> | null {
+  const paid =
+    !!offer.isPrePaid ||
+    String(offer.paymentStatus || '')
+      .trim()
+      .toLowerCase() === 'paid';
+  const paidSeed = paid
+    ? { paymentStatus: 'paid', PaymentStatus: 'paid', isPrePaid: true, isPrepaid: true }
+    : {};
   if (offer.isFixedPrice) {
     return {
       TarriffId: '-1',
@@ -677,16 +690,19 @@ function bookingRawSeedFromOffer(offer: JobOffer): Record<string, unknown> | nul
       tarriffType: 'Fixed',
       CustomeRate: offer.fixedFare ?? offer.estimatedFare ?? offer.fare ?? '',
       jobFare: offer.fixedFare ?? offer.estimatedFare ?? offer.fare ?? '',
+      isFixedPrice: true,
+      ...paidSeed,
     };
   }
   const id = String(offer.tariffId ?? '').trim();
   const name = String(offer.tariffName ?? '').trim();
-  if (!id && !name) return null;
+  if (!id && !name && !paid) return null;
   return {
     ...(id ? { TarriffId: id, TariffId: id, tariffId: id } : {}),
     ...(name
       ? { TarriffType: name, TarriffName: name, TariffName: name, tariffName: name }
       : {}),
+    ...paidSeed,
   };
 }
 
@@ -3263,6 +3279,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (isFixedPriceBooking(update.raw)) {
         patch.isFixedPrice = true;
       }
+      const payStatusRaw = String(
+        update.raw.paymentStatus ?? update.raw.PaymentStatus ?? '',
+      )
+        .trim()
+        .toLowerCase();
+      if (payStatusRaw === 'paid' || update.raw.isPrePaid || update.raw.isPrepaid || update.raw.IsPrePaid) {
+        patch.isPrePaid = true;
+        patch.paymentStatus = 'paid';
+      }
+      // Fixed/prepaid must never keep a climbing live meter alongside locked fare (#8692609048).
+      ensureTrackOnlyIfFixedPaid(update.raw, {
+        isFixedPrice: patch.isFixedPrice === true || !!activeJobRef.current?.isFixedPrice,
+        isPrePaid: patch.isPrePaid === true || !!activeJobRef.current?.isPrePaid,
+        paymentStatus: patch.paymentStatus || activeJobRef.current?.paymentStatus,
+        fixedFare: patch.fixedFare ?? activeJobRef.current?.fixedFare,
+        estimatedFare: patch.estimatedFare ?? activeJobRef.current?.estimatedFare,
+        fare: patch.fare ?? activeJobRef.current?.fare,
+      });
       // §FIX source/PIN — keep passenger origin + pickup PIN on activeJob after Arrived
       const pinFromRaw = String(update.raw.PickupPin ?? update.raw.pickupPin ?? '').trim();
       if (pinFromRaw) patch.pickupPin = pinFromRaw;
@@ -4777,6 +4811,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
       const refTariff = isTariffConfigured(tariff) ? tariff : selectedTariffRef.current;
       const locked = fixedFare ?? activeJobRef.current?.fare ?? 0;
+      // Already running a live meter from a sparse re-accept — convert, don't leave climbing fare.
+      const running = meterRef.current;
+      if (running?.running && !running.trackOnly) {
+        const converted = convertLiveMeterToTrackOnly(running, refTariff, locked);
+        setMeter(converted);
+        meterRef.current = converted;
+        storeData(STORAGE_KEYS.meterState, converted).catch(() => undefined);
+        startMeterWatch();
+        return;
+      }
+      if (running?.running && running.trackOnly) {
+        return;
+      }
       const m = createTrackOnlyMeter(refTariff, locked);
       setMeter(m);
       meterRef.current = m;
@@ -4798,6 +4845,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     meterRef.current = m;
     storeData(STORAGE_KEYS.meterState, m).catch(() => undefined);
     startMeterWatch();
+  };
+
+  /** When booking sync stamps Fixed/paid after a live meter already started, lock it. */
+  const ensureTrackOnlyIfFixedPaid = (
+    raw: Record<string, unknown> | null | undefined,
+    jobHints?: { isFixedPrice?: boolean; isPrePaid?: boolean; paymentStatus?: string; fixedFare?: number; estimatedFare?: number; fare?: number } | null,
+  ) => {
+    if (shouldStartMeterForBooking(raw, jobHints)) return;
+    const running = meterRef.current;
+    if (!running?.running || running.trackOnly) return;
+    const tariffs = tariffsListRef.current;
+    const fromBooking = raw ? resolveTariffFromList(tariffs, readBookingTariffHints(raw)) : null;
+    const tariff =
+      fromBooking ??
+      resolveTariffForDriver(tariffs, null, selectedTariffRef.current) ??
+      selectedTariffRef.current;
+    const locked = readFixedFareAmount(raw, jobHints ?? undefined) ?? running.lockedFare ?? running.fare ?? 0;
+    const converted = convertLiveMeterToTrackOnly(running, tariff, locked);
+    setMeter(converted);
+    meterRef.current = converted;
+    storeData(STORAGE_KEYS.meterState, converted).catch(() => undefined);
   };
 
   const stopMeterForJob = () => {
@@ -4952,8 +5020,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (nextStage === 'arrived') {
         // Prepaid/fixed: start GPS track-only at Arrived so distance accumulates
         // during PIN wait + trip (onboard-only left many jobs with gpsN=1 / 0.00 km).
-        if (!shouldStartMeterForBooking(bookingRawRef.current, activeJob) && !meterRef.current?.running) {
+        // Also convert a wrongly-started live meter after re-accept (#8692609048).
+        if (!shouldStartMeterForBooking(bookingRawRef.current, activeJob)) {
           startMeterForJob();
+        } else if (!meterRef.current?.running) {
+          // cash/meter jobs still wait for On Board to start the live meter
         }
       }
       if (nextStage === 'onboard') {
@@ -4962,7 +5033,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           onboardFixedFare = readFixedFareAmount(bookingRawRef.current, activeJob);
         }
         // Always start meter or GPS track-only (fixed/prepaid) for Closed Job route/distance.
-        if (!meterRef.current?.running) {
+        if (!meterRef.current?.running || (!shouldStartMeterForBooking(bookingRawRef.current, activeJob) && !meterRef.current?.trackOnly)) {
           startMeterForJob();
         }
       }
