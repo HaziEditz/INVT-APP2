@@ -102,7 +102,11 @@ export function CurrentTripPanel() {
 
   // Collapse details only for prepaid Arrived (same gate as the verify sticky).
   // Do not require pickupPin — Website jobs often receive PIN a beat late.
+  // Dispatch Console desk bookings never enter the PIN / wrong-pax / no-show group.
   const payRawEarly = String(activeJob?.paymentType || '').toLowerCase();
+  const srcRawEarly = String(activeJob?.bookingSource || activeJob?.source || '').toLowerCase();
+  const isDispatchCreatedEarly =
+    /dispatch|desk/.test(srcRawEarly) && !/passenger|website/.test(srcRawEarly);
   const isPrepaidEarly = !!(
     activeJob &&
     (activeJob.isPrePaid ||
@@ -114,6 +118,7 @@ export function CurrentTripPanel() {
   const needsPickupVerifyEarly =
     !!activeJob &&
     isPrepaidEarly &&
+    !isDispatchCreatedEarly &&
     !activeJob.pickupVerifiedAt &&
     (activeJob.stage === 'arrived' ||
       (!!activeJob.stepTimes?.arrivedAt &&
@@ -220,8 +225,12 @@ export function CurrentTripPanel() {
     activeJob.stage === 'arrived' ||
     (!!st.arrivedAt && activeJob.stage !== 'onboard' && activeJob.stage !== 'complete');
   // Prepaid Arrived group (PIN / wrong-passenger / no-show / walk-up) — Card,
-  // Account, ACC, TM remainder — any source. Cash uses Recall only (no group).
+  // Account, ACC, TM remainder — Website + Passenger App only. Dispatch Console
+  // desk bookings are excluded (passenger cannot see a PIN on a phone booking).
   const payRaw = String(activeJob.paymentType || '').toLowerCase();
+  const srcRaw = String(activeJob.bookingSource || activeJob.source || '').toLowerCase();
+  const isDispatchCreatedBooking =
+    /dispatch|desk/.test(srcRaw) && !/passenger|website/.test(srcRaw);
   const isPrepaidUpfront = !!(
     activeJob.isPrePaid ||
     String(activeJob.paymentStatus || '').toLowerCase() === 'paid' ||
@@ -229,7 +238,8 @@ export function CurrentTripPanel() {
     /card|stripe|account|acc\b|tm/.test(payRaw) ||
     !!activeJob.isTotalMobility
   );
-  const needsPickupVerify = !isHailTrip && postArrival && isPrepaidUpfront;
+  const needsPickupVerify =
+    !isHailTrip && postArrival && isPrepaidUpfront && !isDispatchCreatedBooking;
   const pickupVerified = !!activeJob.pickupVerifiedAt;
   const canNoShow = postArrival && remainingMs <= 0;
 
@@ -323,16 +333,21 @@ export function CurrentTripPanel() {
     (!!st.onboardAt && activeJob.stage !== 'complete');
   // Prepaid Arrived group: ALL FIVE live in one bottom sheet over the map
   // (PIN+name, call/text, wrong-passenger, walk-up hail, no-show). Expand → full
-  // screen; Minimize → smaller sheet. PIN confirm hides the whole sheet. Cash: no group.
+  // screen; Minimize → smaller sheet. PIN confirm hides the whole sheet.
+  // Dispatch Console desk bookings are excluded (no passenger-visible PIN).
   const showPrepaidArrivedGroup =
-    !isHailTrip && postArrival && !pickupVerified && isPrepaidUpfront;
+    !isHailTrip &&
+    postArrival &&
+    !pickupVerified &&
+    isPrepaidUpfront &&
+    !isDispatchCreatedBooking;
   const showVerifySticky = showPrepaidArrivedGroup;
   const showWrongPassengerActions = showPrepaidArrivedGroup;
   const showCallText =
     activeJob.stage !== 'complete' &&
     activeJob.stage !== 'onboard' &&
     !st.onboardAt &&
-    !(isPrepaidUpfront && postArrival && pickupVerified);
+    !(isPrepaidUpfront && !isDispatchCreatedBooking && postArrival && pickupVerified);
 
   const routeOneLiner = [
     (activeJob.pickup || 'Pickup').split(',')[0],
