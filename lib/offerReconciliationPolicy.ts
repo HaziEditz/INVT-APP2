@@ -1,6 +1,10 @@
 export type ReturnedOfferLike = {
   returnReason?: string;
   lastOfferDriverId?: string;
+  /** Live BookingStatus/Status when known (pendingjobs may still be Offered). */
+  status?: string;
+  /** Live assigned DriverId when known. */
+  driverId?: string;
 };
 
 function normalizeId(value: unknown): string {
@@ -34,13 +38,53 @@ export function shouldSuppressReturnedPoolOffer(
   offer: ReturnedOfferLike,
   driverId: string,
 ): boolean {
+  const self = normalizeId(driverId);
+  const status = String(offer.status ?? '')
+    .trim()
+    .toLowerCase();
+  const liveDrv = normalizeId(offer.driverId);
+  // Exclusive re-offer to this driver is live — leftover Declined/Timeout
+  // returnReason on the pendingjobs node must not hide/kill the popup.
+  if (
+    (status === 'offered' || status === 'offer' || status === 'offering') &&
+    liveDrv &&
+    liveDrv === self
+  ) {
+    return false;
+  }
   const lastDriver = normalizeId(offer.lastOfferDriverId);
   const reason = String(offer.returnReason ?? '').trim();
   return (
     !!lastDriver &&
-    lastDriver === normalizeId(driverId) &&
+    lastDriver === self &&
     RETURNED_OFFER_REASON.test(reason)
   );
+}
+
+/**
+ * Lagging allbookings Pending/removed from a prior decline must not dismiss a
+ * fresh exclusive popup (a cached pool restore can arrive after the new offer
+ * mounts). A newer seq, or assignment to another driver, is a real take-back.
+ */
+export function liveExclusiveOfferBeatsLaggingPoolRestore(opts: {
+  liveExpiresAt: number;
+  liveVersion?: number;
+  snapshotSeq?: number;
+  snapshotDriverId?: string;
+  selfDriverId?: string;
+  now?: number;
+}): boolean {
+  const now = opts.now ?? Date.now();
+  if (!(Number(opts.liveExpiresAt) > now)) return false;
+  const snapDrv = normalizeId(opts.snapshotDriverId);
+  const self = normalizeId(opts.selfDriverId);
+  if (snapDrv && snapDrv !== '0' && snapDrv !== '-1' && self && snapDrv !== self) {
+    return false;
+  }
+  const liveVer = Number(opts.liveVersion) || 0;
+  const snapSeq = Number(opts.snapshotSeq) || 0;
+  if (liveVer > 0 && snapSeq > liveVer) return false;
+  return true;
 }
 
 /** A direct offer remains live only while dispatch still has it Offered to this driver. */

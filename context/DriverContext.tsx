@@ -76,6 +76,7 @@ import {
 import { subscribePendingJobs } from '@/lib/pendingJobs';
 import {
   findStaleDirectOfferIds,
+  liveExclusiveOfferBeatsLaggingPoolRestore,
   shouldSuppressReturnedPoolOffer,
 } from '@/lib/offerReconciliation';
 import {
@@ -561,6 +562,9 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
         .toLowerCase() === 'paid'
     ),
     expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
+    version: Number(val.version ?? val.updateSeq ?? val._seq) || undefined,
+    status: String(val.BookingStatus ?? val.Status ?? val.status ?? '').trim() || undefined,
+    driverId: String(val.DriverId ?? val.driverId ?? val.AssignedDriver ?? '').trim() || undefined,
     source: String(
       val.BookingSource ??
         val.bookingSource ??
@@ -3435,11 +3439,29 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (!driver?.companyId || !jobOffer?.id) return;
     return subscribeBooking(driver.companyId, jobOffer.id, (update) => {
       const rawOfferedAt = update.raw.offeredAt ?? update.raw.OfferedAt;
+      const snapshotSeq = Number(update.raw.updateSeq ?? update.raw.version ?? update.raw._seq) || 0;
+      const snapshotDriverId = String(
+        update.raw.DriverId ?? update.raw.driverId ?? update.raw.AssignedDriverId ?? '',
+      );
+      const live = jobOfferRef.current;
+      const laggingPoolRestore =
+        update.terminal &&
+        update.status === 'removed' &&
+        !update.cancelled &&
+        !!live &&
+        jobIdsMatch(live.id, jobOffer.id) &&
+        liveExclusiveOfferBeatsLaggingPoolRestore({
+          liveExpiresAt: live.expiresAt,
+          liveVersion: live.version,
+          snapshotSeq,
+          snapshotDriverId,
+          selfDriverId: driver?.id,
+        });
       const isStalePoolSnapshot =
         update.terminal &&
         update.status === 'removed' &&
         (rawOfferedAt == null || rawOfferedAt === '');
-      if (isStalePoolSnapshot) {
+      if (isStalePoolSnapshot || laggingPoolRestore) {
         return;
       }
       if (update.cancelled || (update.terminal && update.status.includes('cancel'))) {

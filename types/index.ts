@@ -91,6 +91,12 @@ export interface JobOffer {
   passengers?: number;
   serviceTypeRaw?: string;
   originalStatus?: 'pending' | 'manual';
+  /** Live BookingStatus when parsed from pendingjobs / notification. */
+  status?: string;
+  /** Live assigned driver id when parsed from pendingjobs. */
+  driverId?: string;
+  /** jobStore updateSeq / notification version. */
+  version?: number;
   /** Why dispatch returned this booking to the pool. */
   returnReason?: string;
   /** Last driver who held the exclusive offer. */

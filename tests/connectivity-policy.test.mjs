@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isDirectOfferStillLive,
+  liveExclusiveOfferBeatsLaggingPoolRestore,
   shouldSuppressReturnedPoolOffer,
 } from '../lib/offerReconciliationPolicy.ts';
 import {
@@ -23,6 +24,76 @@ test('C4 suppresses returned offer only for its previous driver', () => {
       { returnReason: '', lastOfferDriverId: 'D001' },
       'D001',
     ),
+    false,
+  );
+});
+
+test('C4 does not suppress a live exclusive re-offer to the same driver', () => {
+  assert.equal(
+    shouldSuppressReturnedPoolOffer(
+      {
+        returnReason: 'Declined by driver',
+        lastOfferDriverId: 'D001',
+        status: 'Offered',
+        driverId: 'D001',
+      },
+      'D001',
+    ),
+    false,
+  );
+  assert.equal(
+    shouldSuppressReturnedPoolOffer(
+      {
+        returnReason: 'Declined by driver',
+        lastOfferDriverId: 'D001',
+        status: 'Pending',
+        driverId: '0',
+      },
+      'D001',
+    ),
+    true,
+  );
+});
+
+test('live exclusive popup beats lagging Pending allbookings from prior decline', () => {
+  const expiresAt = Date.now() + 25_000;
+  assert.equal(
+    liveExclusiveOfferBeatsLaggingPoolRestore({
+      liveExpiresAt: expiresAt,
+      liveVersion: 8,
+      snapshotSeq: 7,
+      snapshotDriverId: '0',
+      selfDriverId: 'D001',
+    }),
+    true,
+  );
+  assert.equal(
+    liveExclusiveOfferBeatsLaggingPoolRestore({
+      liveExpiresAt: expiresAt,
+      liveVersion: 8,
+      snapshotSeq: 9,
+      snapshotDriverId: '0',
+      selfDriverId: 'D001',
+    }),
+    false,
+  );
+  assert.equal(
+    liveExclusiveOfferBeatsLaggingPoolRestore({
+      liveExpiresAt: expiresAt,
+      snapshotSeq: 7,
+      snapshotDriverId: '0',
+      selfDriverId: 'D001',
+    }),
+    true,
+  );
+  assert.equal(
+    liveExclusiveOfferBeatsLaggingPoolRestore({
+      liveExpiresAt: expiresAt,
+      liveVersion: 8,
+      snapshotSeq: 7,
+      snapshotDriverId: 'D002',
+      selfDriverId: 'D001',
+    }),
     false,
   );
 });

@@ -165,6 +165,11 @@ export function parseJobOfferRecord(
     dropoffLat: dropLl.lat,
     dropoffLng: dropLl.lng,
     silent: true,
+    status: String(val.BookingStatus ?? val.Status ?? val.status ?? '').trim() || undefined,
+    driverId: String(
+      val.DriverId ?? val.driverId ?? val.AssignedDriverId ?? val.AssignedDriver ?? '',
+    ).trim() || undefined,
+    version: Number(val.version ?? val.updateSeq ?? val._seq) || undefined,
     returnReason:
       String(val.returnReason ?? val.ReturnReason ?? '').trim() || undefined,
     lastOfferDriverId:

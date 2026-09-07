@@ -2,6 +2,7 @@ import { get, ref } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 export {
   isDirectOfferStillLive,
+  liveExclusiveOfferBeatsLaggingPoolRestore,
   shouldSuppressReturnedPoolOffer,
 } from '@/lib/offerReconciliationPolicy';
 import { isDirectOfferStillLive } from '@/lib/offerReconciliationPolicy';
