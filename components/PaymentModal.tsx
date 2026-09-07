@@ -13,6 +13,7 @@ import {
   type DriverAccountSearchHit,
 } from '@/lib/dispatchApi';
 import { normalizeDriverPaymentType } from '@/lib/driverPayment';
+import { jobShowsAsAlreadyPaid } from '@/lib/pickupResolution';
 import type { CardScanFields } from '@/lib/cardOcrParse';
 import {
   buildTmHoistEntries,
@@ -438,11 +439,7 @@ export function PaymentModal() {
   /** WAV only: null until driver taps Yes/No. Yes auto-adds first hoist from primary (silent). */
   const [hoistUsedAnswer, setHoistUsedAnswer] = useState<null | 'yes' | 'no'>(null);
 
-  const isAlreadyPaidCard = !!(
-    paymentJob &&
-    (paymentJob.isPrePaid ||
-      String(paymentJob.paymentStatus || '').toLowerCase() === 'paid')
-  );
+  const isAlreadyPaidCard = !!(paymentJob && jobShowsAsAlreadyPaid(paymentJob));
   const isTmPayment = paymentType === 'TM';
   const isWav = !!activeVehicle?.isWav;
   const accountLockedFromDispatch = !!String(paymentJob?.accountId || '').trim();

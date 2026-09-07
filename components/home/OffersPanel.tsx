@@ -5,6 +5,7 @@ import { hasJobNotes } from '@/lib/jobNotes';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
+import { jobShowsAsAlreadyPaid } from '@/lib/pickupResolution';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 function timeSince(ts?: number): string {
@@ -75,12 +76,14 @@ export function OffersPanel() {
             <JobDispatchMetaSection job={o} compact />
             {hasJobNotes(o) ? <JobNotesSection job={o} compact title="Notes" /> : null}
             {fare != null ? (
-              o.isPrePaid || String(o.paymentStatus || '').toLowerCase() === 'paid' ? (
+              jobShowsAsAlreadyPaid(o) ? (
                 <Text style={styles.fare}>
                   Paid{o.isFixedPrice || o.fixedFare != null ? ' + fixed fare' : ''} ${fare.toFixed(2)}
                 </Text>
               ) : (
-                <Text style={styles.fare}>Est. fare ${fare.toFixed(2)}</Text>
+                <Text style={styles.fare}>
+                  {o.isFixedPrice ? 'Fixed fare' : 'Est. fare'} ${fare.toFixed(2)}
+                </Text>
               )
             ) : null}
             <Button

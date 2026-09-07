@@ -19,6 +19,7 @@ import {
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
 import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, fetchDriverActiveBookings, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, recallWrongPassengerOnDispatch, reportNoShow, respondToDriverSos, syncJobStageOnDispatch, verifyPickupOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
+import { isCashCollectedAtCompletion, needsPickupVerification } from '@/lib/pickupResolution';
 import {
   catchUpJobStagesOnDispatch,
   isTerminalBookingStatus,
@@ -553,14 +554,30 @@ function parseJobOffer(val: Record<string, unknown>): JobOffer {
       String(val.paymentStatus ?? val.PaymentStatus ?? '')
         .trim()
         .toLowerCase() || undefined,
-    isPrePaid: !!(
-      val.isPrePaid ||
-      val.isPrepaid ||
-      val.IsPrePaid ||
-      String(val.paymentStatus ?? val.PaymentStatus ?? '')
-        .trim()
-        .toLowerCase() === 'paid'
-    ),
+    isPrePaid: (() => {
+      const payType =
+        normalizeDriverPaymentType(
+          String(val.paymentType ?? val.PaymentType ?? rawPayment ?? ''),
+        ) ?? String(val.paymentType ?? val.PaymentType ?? rawPayment ?? '');
+      if (
+        isCashCollectedAtCompletion({
+          paymentType: payType,
+          PaymentType: payType,
+          isTotalMobility: !!(val.isTotalMobility || val.isTM || val.IsTM || val.tmUsed),
+          isAcc: !!val.isAcc,
+        })
+      ) {
+        return false;
+      }
+      return !!(
+        val.isPrePaid ||
+        val.isPrepaid ||
+        val.IsPrePaid ||
+        String(val.paymentStatus ?? val.PaymentStatus ?? '')
+          .trim()
+          .toLowerCase() === 'paid'
+      );
+    })(),
     expiresAt: Number(val.expiresAt ?? Date.now() + 30000),
     version: Number(val.version ?? val.updateSeq ?? val._seq) || undefined,
     status: String(val.BookingStatus ?? val.Status ?? val.status ?? '').trim() || undefined,
@@ -680,10 +697,11 @@ function defaultActiveJob(offer: JobOffer): ActiveJob {
 
 function bookingRawSeedFromOffer(offer: JobOffer): Record<string, unknown> | null {
   const paid =
-    !!offer.isPrePaid ||
-    String(offer.paymentStatus || '')
-      .trim()
-      .toLowerCase() === 'paid';
+    !isCashCollectedAtCompletion(offer) &&
+    (!!offer.isPrePaid ||
+      String(offer.paymentStatus || '')
+        .trim()
+        .toLowerCase() === 'paid');
   const paidSeed = paid
     ? { paymentStatus: 'paid', PaymentStatus: 'paid', isPrePaid: true, isPrepaid: true }
     : {};
@@ -3288,7 +3306,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       )
         .trim()
         .toLowerCase();
-      if (payStatusRaw === 'paid' || update.raw.isPrePaid || update.raw.isPrepaid || update.raw.IsPrePaid) {
+      if (
+        !isCashCollectedAtCompletion({
+          ...update.raw,
+          paymentType: String(update.raw.PaymentType ?? update.raw.paymentType ?? activeJobRef.current?.paymentType ?? ''),
+        }) &&
+        (payStatusRaw === 'paid' || update.raw.isPrePaid || update.raw.isPrepaid || update.raw.IsPrePaid)
+      ) {
         patch.isPrePaid = true;
         patch.paymentStatus = 'paid';
       }
@@ -4958,19 +4982,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       if (nextStage === 'arrived' || nextStage === 'onboard') {
         if (nextStage === 'onboard') {
-          const payRaw = String(activeJob.paymentType || '').toLowerCase();
-          const prepaid = !!(
-            activeJob.isPrePaid ||
-            String(activeJob.paymentStatus || '').toLowerCase() === 'paid' ||
-            activeJob.isAcc ||
-            /card|stripe|account|acc\b|tm/.test(payRaw) ||
-            !!activeJob.isTotalMobility
-          );
-          const needsVerify =
-            prepaid ||
-            !!activeJob.pickupPin ||
-            /passenger/i.test(String(activeJob.bookingSource || activeJob.source || ''));
-          if (needsVerify && !activeJob.pickupVerifiedAt) {
+          if (needsPickupVerification(activeJob) && !activeJob.pickupVerifiedAt) {
             Alert.alert(
               'Verify passenger first',
               'Ask for their name and PIN, compare to your screen, then tap Confirm name & PIN.',
@@ -5758,6 +5770,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const verifyPickupForActiveJob = async (): Promise<boolean> => {
     if (!activeJob || !driver) return false;
     if (activeJob.pickupVerifiedAt) return true;
+    if (!needsPickupVerification(activeJob)) {
+      const at = new Date().toISOString();
+      setActiveJob((prev) => (prev ? { ...prev, pickupVerifiedAt: at } : prev));
+      return true;
+    }
     try {
       const res = await verifyPickupOnDispatch({
         bookingId: activeJob.id,
@@ -5774,7 +5791,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       setActiveJob((prev) => (prev ? { ...prev, pickupVerifiedAt: at } : prev));
       return true;
     } catch (err) {
-      Alert.alert('Verification failed', err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        err instanceof DispatchApiError &&
+        (err.status === 403 || err.errorCode === 'forbidden') &&
+        /PIN verify is only for Website|Passenger App/i.test(msg)
+      ) {
+        const at = new Date().toISOString();
+        setActiveJob((prev) => (prev ? { ...prev, pickupVerifiedAt: at } : prev));
+        return true;
+      }
+      Alert.alert('Verification failed', msg);
       return false;
     }
   };

@@ -2,6 +2,7 @@ import { Button } from '@/components/Button';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
+import { jobShowsAsAlreadyPaid } from '@/lib/pickupResolution';
 import { STAGE_LABELS, JobStage } from '@/types';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -61,10 +62,7 @@ export function ActiveJobPanel() {
       ) : activeJob.paymentType ? (
         <Text style={styles.detail}>
           Pay: {activeJob.paymentType}
-          {activeJob.isPrePaid ||
-          String(activeJob.paymentStatus || "").toLowerCase() === "paid"
-            ? " (paid)"
-            : ""}
+          {jobShowsAsAlreadyPaid(activeJob) ? ' (paid)' : ''}
         </Text>
       ) : null}
       {runningMeter && meter ? (

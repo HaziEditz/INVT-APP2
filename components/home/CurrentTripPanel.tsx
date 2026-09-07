@@ -3,6 +3,7 @@ import { JobDispatchMetaSection } from '@/components/JobDispatchMetaSection';
 import { JobNotesSection } from '@/components/JobNotesSection';
 import { JobTypeBadge } from '@/components/JobTypeBadge';
 import { Colors } from '@/constants/theme';
+import { jobShowsAsAlreadyPaid, needsPickupVerification } from '@/lib/pickupResolution';
 import { useDriver } from '@/context/DriverContext';
 import { canOpenNavigation, showNavigationPicker } from '@/lib/navigation';
 import { formatFareAmount, parseFiniteFare } from '@/lib/tariffs';
@@ -101,24 +102,10 @@ export function CurrentTripPanel() {
   }, [activeJob?.id, activeJob?.stage]);
 
   // Collapse details only for prepaid Arrived (same gate as the verify sticky).
-  // Do not require pickupPin — Website jobs often receive PIN a beat late.
   // Dispatch Console desk bookings never enter the PIN / wrong-pax / no-show group.
-  const payRawEarly = String(activeJob?.paymentType || '').toLowerCase();
-  const srcRawEarly = String(activeJob?.bookingSource || activeJob?.source || '').toLowerCase();
-  const isDispatchCreatedEarly =
-    /dispatch|desk/.test(srcRawEarly) && !/passenger|website/.test(srcRawEarly);
-  const isPrepaidEarly = !!(
-    activeJob &&
-    (activeJob.isPrePaid ||
-      String(activeJob.paymentStatus || '').toLowerCase() === 'paid' ||
-      activeJob.isAcc ||
-      /card|stripe|account|acc\b|tm/.test(payRawEarly) ||
-      !!activeJob.isTotalMobility)
-  );
   const needsPickupVerifyEarly =
     !!activeJob &&
-    isPrepaidEarly &&
-    !isDispatchCreatedEarly &&
+    needsPickupVerification(activeJob) &&
     !activeJob.pickupVerifiedAt &&
     (activeJob.stage === 'arrived' ||
       (!!activeJob.stepTimes?.arrivedAt &&
@@ -226,20 +213,9 @@ export function CurrentTripPanel() {
     (!!st.arrivedAt && activeJob.stage !== 'onboard' && activeJob.stage !== 'complete');
   // Prepaid Arrived group (PIN / wrong-passenger / no-show / walk-up) — Card,
   // Account, ACC, TM remainder — Website + Passenger App only. Dispatch Console
-  // desk bookings are excluded (passenger cannot see a PIN on a phone booking).
-  const payRaw = String(activeJob.paymentType || '').toLowerCase();
-  const srcRaw = String(activeJob.bookingSource || activeJob.source || '').toLowerCase();
-  const isDispatchCreatedBooking =
-    /dispatch|desk/.test(srcRaw) && !/passenger|website/.test(srcRaw);
-  const isPrepaidUpfront = !!(
-    activeJob.isPrePaid ||
-    String(activeJob.paymentStatus || '').toLowerCase() === 'paid' ||
-    activeJob.isAcc ||
-    /card|stripe|account|acc\b|tm/.test(payRaw) ||
-    !!activeJob.isTotalMobility
-  );
+  // desk bookings and cash (collected at completion) are excluded.
   const needsPickupVerify =
-    !isHailTrip && postArrival && isPrepaidUpfront && !isDispatchCreatedBooking;
+    !isHailTrip && postArrival && needsPickupVerification(activeJob);
   const pickupVerified = !!activeJob.pickupVerifiedAt;
   const canNoShow = postArrival && remainingMs <= 0;
 
@@ -339,15 +315,14 @@ export function CurrentTripPanel() {
     !isHailTrip &&
     postArrival &&
     !pickupVerified &&
-    isPrepaidUpfront &&
-    !isDispatchCreatedBooking;
+    needsPickupVerification(activeJob);
   const showVerifySticky = showPrepaidArrivedGroup;
   const showWrongPassengerActions = showPrepaidArrivedGroup;
   const showCallText =
     activeJob.stage !== 'complete' &&
     activeJob.stage !== 'onboard' &&
     !st.onboardAt &&
-    !(isPrepaidUpfront && !isDispatchCreatedBooking && postArrival && pickupVerified);
+    !(needsPickupVerification(activeJob) && postArrival && pickupVerified);
 
   const routeOneLiner = [
     (activeJob.pickup || 'Pickup').split(',')[0],
@@ -452,7 +427,7 @@ export function CurrentTripPanel() {
 
       <Button
         title={completionBusy ? 'Saving…' : 'Confirm PIN & name — unlock On Board'}
-        disabled={completionBusy || !(activeJob.pickupPin && String(activeJob.pickupPin).trim())}
+        disabled={completionBusy}
         onPress={() => void onConfirmVerify()}
       />
     </>
@@ -502,10 +477,7 @@ export function CurrentTripPanel() {
       ) : activeJob.paymentType ? (
         <Text style={styles.metaLine}>
           Payment: {activeJob.paymentType}
-          {activeJob.isPrePaid ||
-          String(activeJob.paymentStatus || '').toLowerCase() === 'paid'
-            ? ' (paid)'
-            : ''}
+          {jobShowsAsAlreadyPaid(activeJob) ? ' (paid)' : ''}
         </Text>
       ) : null}
       {activeJob.accountName || activeJob.accountId ? (

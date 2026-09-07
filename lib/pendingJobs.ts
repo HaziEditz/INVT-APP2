@@ -8,6 +8,7 @@ import { jobMatchesDriverVehicle, serviceTypeToJobType } from '@/lib/jobMatching
 import { normalizeDriverPaymentType, readAccountFieldsFromRecord } from '@/lib/driverPayment';
 import { parseFiniteFare } from '@/lib/tariffs';
 import { isForbiddenPlaceholderTariffName } from '@/lib/tariffGuard';
+import { isCashCollectedAtCompletion } from '@/lib/pickupResolution';
 import { JobOffer, Vehicle } from '@/types';
 
 function parseLatLng(raw?: string): { lat?: number; lng?: number } {
@@ -113,13 +114,25 @@ export function parseJobOfferRecord(
       String(val.paymentStatus ?? val.PaymentStatus ?? '')
         .trim()
         .toLowerCase() || undefined,
-    isPrePaid: !!(
-      val.isPrePaid ||
-      val.isPrepaid ||
-      String(val.paymentStatus ?? val.PaymentStatus ?? '')
-        .trim()
-        .toLowerCase() === 'paid'
-    ),
+    isPrePaid: (() => {
+      if (
+        isCashCollectedAtCompletion({
+          paymentType,
+          PaymentType: paymentType,
+          isTotalMobility,
+          isAcc: !!val.isAcc,
+        })
+      ) {
+        return false;
+      }
+      return !!(
+        val.isPrePaid ||
+        val.isPrepaid ||
+        String(val.paymentStatus ?? val.PaymentStatus ?? '')
+          .trim()
+          .toLowerCase() === 'paid'
+      );
+    })(),
     isFixedPrice:
       String(val.TarriffId ?? val.TariffId ?? val.tariffId ?? '') === '-1' ||
       val.isFixedPrice === true,

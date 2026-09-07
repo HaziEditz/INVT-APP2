@@ -6,6 +6,7 @@ import { Colors } from '@/constants/theme';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
 import { alertDriverToOffer } from '@/lib/notificationSound';
+import { jobShowsAsAlreadyPaid } from '@/lib/pickupResolution';
 import { useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -137,14 +138,15 @@ export function JobOfferModal() {
             </View>
 
             {estFare != null ? (
-              jobOffer.isPrePaid ||
-              String(jobOffer.paymentStatus || '').toLowerCase() === 'paid' ? (
+              jobShowsAsAlreadyPaid(jobOffer) ? (
                 <Text style={styles.fare}>
                   Paid{jobOffer.isFixedPrice || jobOffer.fixedFare != null ? ' + fixed fare' : ''} $
                   {estFare.toFixed(2)}
                 </Text>
               ) : (
-                <Text style={styles.fare}>Est. fare ${estFare.toFixed(2)}</Text>
+                <Text style={styles.fare}>
+                  {jobOffer.isFixedPrice ? 'Fixed fare' : 'Est. fare'} ${estFare.toFixed(2)}
+                </Text>
               )
             ) : null}
             {jobOffer.estimatedDistanceKm != null ? (
@@ -153,10 +155,7 @@ export function JobOfferModal() {
             {jobOffer.paymentType ? (
               <Text style={styles.meta}>
                 Payment: {jobOffer.paymentType}
-                {jobOffer.isPrePaid ||
-                String(jobOffer.paymentStatus || '').toLowerCase() === 'paid'
-                  ? ' (paid)'
-                  : ''}
+                {jobShowsAsAlreadyPaid(jobOffer) ? ' (paid)' : ''}
               </Text>
             ) : null}
 
