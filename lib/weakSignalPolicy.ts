@@ -39,6 +39,17 @@ export function isTransportLikeError(err: unknown): boolean {
   return false;
 }
 
+/** Driver is clearly not at pickup — show the distance, do not journal a fake Arrived. */
+export function isArrivedPresenceReject(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = String(
+    (err as { errorCode?: string; error_code?: string }).errorCode ||
+      (err as { error_code?: string }).error_code ||
+      '',
+  );
+  return code === 'arrived_not_at_pickup';
+}
+
 /**
  * Online Arrived/OnBoard: try sync; on transport hang/fail → journal and continue locally.
  * Non-transport errors may still try a short Firebase verify before journaling.
@@ -53,6 +64,7 @@ export async function runOnlineStageWithJournalFallback(deps: {
     await deps.syncStage();
     return 'synced';
   } catch (err) {
+    if (isArrivedPresenceReject(err)) throw err;
     if (isTransportLikeError(err)) {
       await deps.journalStage();
       return 'journal_fallback';

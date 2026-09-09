@@ -70,6 +70,10 @@ test('stage invalid_transition may drop (Arrived when already Active)', () => {
     false,
   );
   assert.equal(
+    isRetryableStageFlushError({ status: 409, errorCode: 'arrived_not_at_pickup' }),
+    true,
+  );
+  assert.equal(
     isRetryableStageFlushError({ status: 503, errorCode: '' }),
     true,
   );

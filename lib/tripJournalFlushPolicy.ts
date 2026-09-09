@@ -166,6 +166,7 @@ export function isRetryableStageFlushError(err: unknown): boolean {
   if (code === 'version_conflict') return true;
   // invalid_transition on stages: drop that stage, continue (caller marks synced).
   if (code === 'invalid_transition') return false;
+  if (code === 'arrived_not_at_pickup') return true;
   if (!('status' in (err as object))) return true;
   return false;
 }

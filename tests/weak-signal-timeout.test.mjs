@@ -17,6 +17,7 @@ import {
   STAGE_HTTP_TIMEOUT_MS,
   STAGE_VERIFY_TIMEOUT_MS,
   isTransportLikeError,
+  isArrivedPresenceReject,
   runOnlineCompleteWithJournalFallback,
   runOnlineHailCreateWithJournalFallback,
   runOnlineStageWithJournalFallback,
@@ -50,6 +51,27 @@ test('isTransportLikeError detects StageTransportError and timeout messages', ()
   assert.equal(isTransportLikeError(new Error('Network request failed')), true);
   assert.equal(isTransportLikeError(new Error('getIdToken(true) timed out after 3000ms')), true);
   assert.equal(isTransportLikeError(new Error('invalid_transition')), false);
+});
+
+test('arrived_not_at_pickup is a presence reject — do not journal Arrived', async () => {
+  const err = Object.assign(new Error("You're not at the pickup location yet — approximately 800 meters away."), {
+    errorCode: 'arrived_not_at_pickup',
+    status: 409,
+  });
+  assert.equal(isArrivedPresenceReject(err), true);
+  let journaled = false;
+  await assert.rejects(
+    () => runOnlineStageWithJournalFallback({
+      syncStage: async () => {
+        throw err;
+      },
+      journalStage: async () => {
+        journaled = true;
+      },
+    }),
+    /approximately 800 meters/,
+  );
+  assert.equal(journaled, false);
 });
 
 test('Arrived/OnBoard: hanging sync journals and returns without waiting forever', async () => {

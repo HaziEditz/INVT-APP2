@@ -633,6 +633,7 @@ export async function syncJobStageOnDispatch(
   status: string,
   driverId: string,
   ifVersion?: number,
+  gps?: { lat?: number; lng?: number } | null,
 ): Promise<{
   version?: number;
   idempotent?: boolean;
@@ -651,6 +652,12 @@ export async function syncJobStageOnDispatch(
     clientRequestId: `stage-${bid}-${status}-${ifVersion ?? 0}`,
   };
   if (ifVersion != null && !Number.isNaN(ifVersion)) body.ifVersion = ifVersion;
+  const lat = Number(gps?.lat);
+  const lng = Number(gps?.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    body.lat = lat;
+    body.lng = lng;
+  }
 
   const headers = await driverApiHeaders();
   let lastErr: unknown;

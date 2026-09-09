@@ -4398,6 +4398,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const syncJobStageToDispatch = async (
     stage: JobStage,
     jobOverride?: { id: string; updateSeq?: number },
+    gps?: { lat: number; lng: number } | null,
   ) => {
     if (!driver) {
       throw new Error('Driver profile not loaded.');
@@ -4434,6 +4435,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       bookingStatus,
       driver.id,
       jobRef.updateSeq,
+      gps,
     );
     if ((version != null || pickupPin) && activeJob?.id === jobRef.id) {
       setActiveJob((prev) => {
@@ -5020,12 +5022,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         } else if (!offline && numericJob && !isProvisionalBookingId(activeJob.id)) {
           // Weak cellular: NetInfo may still say online — timeout → journal (not hang).
           const expectedBookingStatus = nextStage === 'arrived' ? 'Arrived' : 'Active';
+          let arrivedGps: { lat: number; lng: number } | null = null;
+          if (nextStage === 'arrived') {
+            // Short GPS reacquire using existing location helpers — never block the trip.
+            try {
+              const coords = await withTimeout(getCurrentCoords(), 4_000, 'arrivedGps');
+              const lat = Number(coords?.latitude);
+              const lng = Number(coords?.longitude);
+              if (Number.isFinite(lat) && Number.isFinite(lng)) arrivedGps = { lat, lng };
+            } catch {
+              arrivedGps = null;
+            }
+          }
           await runOnlineStageWithJournalFallback({
             syncStage: async () => {
               await syncJobStageToDispatch(nextStage, {
                 id: activeJob.id,
                 updateSeq: activeJob.updateSeq,
-              });
+              }, arrivedGps);
             },
             journalStage: journalStageLocal,
             verifyFirebase: async () => {
@@ -5089,10 +5103,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error('[Driver] advanceStage failed:', err);
       const msg =
         err instanceof DispatchApiError
-          ? `${err.message}${err.errorCode ? ` (${err.errorCode})` : ''}`
+          ? `${err.message}${err.errorCode && err.errorCode !== 'arrived_not_at_pickup' ? ` (${err.errorCode})` : ''}`
           : completionErrorMessage(err);
       setCompletionError(msg);
-      Alert.alert('Could not update trip', `${msg}\n\nDispatch was not updated — try again when connected.`);
+      const title = err instanceof DispatchApiError && err.errorCode === 'arrived_not_at_pickup'
+        ? 'Not at pickup yet'
+        : 'Could not update trip';
+      Alert.alert(title, err instanceof DispatchApiError && err.errorCode === 'arrived_not_at_pickup'
+        ? msg
+        : `${msg}\n\nDispatch was not updated — try again when connected.`);
     } finally {
       setCompletionBusy(false);
     }
