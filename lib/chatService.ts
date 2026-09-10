@@ -133,7 +133,7 @@ export function subscribeChat(
     if (decision === 'skip-dup') return;
     lastStamp = Math.max(lastStamp, ts);
     lastFingerprint = fingerprint;
-    const msgId = String(val.messageId ?? ts || fingerprint);
+    const msgId = String(val.messageId ?? (ts || fingerprint));
     const msg = chatPayloadToMessage(msgId, val, driverId);
     if (msg && msg.sender === 'dispatcher') onMessage(msg);
   };
