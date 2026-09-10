@@ -3,7 +3,7 @@ import { Alert } from 'react-native';
 import { get, onValue, ref, update } from 'firebase/database';
 import { getDatabaseInstance, isFirebaseReady } from '@/lib/firebase';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
-import { getData, storeData, STORAGE_KEYS } from '@/lib/storage';
+import { getData, storeData, STORAGE_KEYS, chatLastReadStorageKey } from '@/lib/storage';
 import { collectJobNotes } from '@/lib/jobNotes';
 import { parseSchedulingMetaFromRecord } from '@/lib/jobDisplayMeta';
 import { parseJobStopsFromRecord, formatStopsSummary } from '@/lib/jobStops';
@@ -61,6 +61,7 @@ import {
 } from '@/lib/driverNotifications';
 import { playInAppNotificationSound } from '@/lib/notificationSound';
 import { subscribeChat } from '@/lib/chatService';
+import { shouldAlertIncomingDispatcherChat } from '@/lib/chatReadPolicy';
 import {
   subscribeDriverQueue,
   filterLiveDriverQueueOffers,
@@ -897,6 +898,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const chatTabFocusedRef = useRef(false);
   const lastChatNotifyKeyRef = useRef('');
+  const lastChatReadTsRef = useRef(0);
   const lastSosAlertRef = useRef('');
   const incomingSosAlertRef = useRef<IncomingSosAlert | null>(null);
   const [queuedOffers, setQueuedOffers] = useState<QueuedOffer[]>([]);
@@ -1953,10 +1955,19 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     shiftActive && !offersLockedForEnrouteDispatch ? visibleOffers.length : 0;
   const nextQueuedOffer = queuedOffers[0] ?? null;
 
-  const notifyDispatcherChat = useCallback((text: string, dedupeKey?: string) => {
+  const notifyDispatcherChat = useCallback((text: string, dedupeKey?: string, messageTs?: number) => {
     const body = text.trim() || 'New message from dispatch';
     const key = dedupeKey || body;
-    if (lastChatNotifyKeyRef.current === key) return;
+    if (
+      !shouldAlertIncomingDispatcherChat({
+        messageTimestamp: Number(messageTs) || 0,
+        lastReadTimestamp: lastChatReadTsRef.current,
+        lastAlertKey: lastChatNotifyKeyRef.current,
+        alertKey: key,
+      })
+    ) {
+      return;
+    }
     lastChatNotifyKeyRef.current = key;
     void playInAppNotificationSound('general');
     if (!chatTabFocusedRef.current) {
@@ -1968,7 +1979,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const markChatViewed = useCallback(() => {
     chatTabFocusedRef.current = true;
     setChatUnreadCount(0);
-  }, []);
+    const ts = Date.now();
+    lastChatReadTsRef.current = ts;
+    const did = driver?.id;
+    if (did) {
+      void storeData(chatLastReadStorageKey(did), ts);
+      void clearChatNotification(did);
+    }
+  }, [driver?.id]);
 
   const markChatTabBlurred = useCallback(() => {
     chatTabFocusedRef.current = false;
@@ -3067,38 +3085,50 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.id) return;
-    try {
-      const chatRef = ref(getDatabaseInstance(), `notificationChat/${driver.id}`);
-      return onValue(chatRef, async (snap) => {
-        try {
-          const val = snap.val() as Record<string, unknown> | null;
-          if (!val || typeof val !== 'object') return;
-          const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
-          if (eventType !== 'chat_message') return;
-          const body = String(val.content ?? val.message ?? 'New message from dispatch');
-          const dedupeKey = String(val.messageId ?? val.timestamp ?? body);
-          notifyDispatcherChat(body, dedupeKey);
-          await clearChatNotification(driver.id);
-        } catch (err) {
-          console.error('[Driver] chat notification listener', err);
-        }
-      });
-    } catch (err) {
-      console.error('[Driver] chat notification subscribe failed', err);
-    }
+    let cancelled = false;
+    let unsubChat: (() => void) | undefined;
+    let unsubNotify: (() => void) | undefined;
+    void (async () => {
+      const stored = await getData<number>(chatLastReadStorageKey(driver.id));
+      if (cancelled) return;
+      lastChatReadTsRef.current = Number(stored) || 0;
+      try {
+        const chatRef = ref(getDatabaseInstance(), `notificationChat/${driver.id}`);
+        unsubNotify = onValue(chatRef, async (snap) => {
+          try {
+            const val = snap.val() as Record<string, unknown> | null;
+            if (!val || typeof val !== 'object') return;
+            const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
+            if (eventType !== 'chat_message') return;
+            const body = String(val.content ?? val.message ?? 'New message from dispatch');
+            const dedupeKey = String(val.messageId ?? val.timestamp ?? body);
+            const ts = parseInt(String(val.timestamp ?? ''), 10) || 0;
+            notifyDispatcherChat(body, dedupeKey, ts);
+            await clearChatNotification(driver.id);
+          } catch (err) {
+            console.error('[Driver] chat notification listener', err);
+          }
+        });
+      } catch (err) {
+        console.error('[Driver] chat notification subscribe failed', err);
+      }
+      unsubChat = subscribeChat(
+        driver.id,
+        (msg) => {
+          if (msg.sender !== 'dispatcher') return;
+          notifyDispatcherChat(msg.text, msg.id, msg.timestamp);
+          void clearChatNotification(driver.id);
+        },
+        { minTimestamp: lastChatReadTsRef.current },
+      );
+    })();
+    return () => {
+      cancelled = true;
+      unsubChat?.();
+      unsubNotify?.();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shiftActive, driver?.id, notifyDispatcherChat], 'Driver-notificationChat');
-
-  useSafeEffect(() => {
-    if (!shiftActive || !driver?.id) return;
-    const unsub = subscribeChat(driver.id, (msg) => {
-      if (msg.sender !== 'dispatcher') return;
-      notifyDispatcherChat(msg.text, msg.id);
-      void clearChatNotification(driver.id);
-    });
-    return unsub;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftActive, driver?.id, notifyDispatcherChat], 'Driver-globalChat');
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.id) return;

@@ -19,7 +19,8 @@ test('poor GPS accuracy blocks distance but not the accuracy helper', () => {
   assert.equal(gpsAccuracyBlocksDistance(null), false);
   assert.equal(gpsAccuracyBlocksDistance(20), false);
   assert.equal(gpsAccuracyBlocksDistance(50), false);
-  assert.equal(gpsAccuracyBlocksDistance(51), true);
+  assert.equal(gpsAccuracyBlocksDistance(100), false);
+  assert.equal(gpsAccuracyBlocksDistance(101), true);
   assert.equal(gpsAccuracyBlocksDistance(200), true);
 });
 

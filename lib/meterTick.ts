@@ -1,8 +1,10 @@
 import { calcMeterBreakdown } from './tariffs.ts';
 import type { MeterMode, MeterState, Tariff } from '../types/index.ts';
+import {
+  SPEED_MOVING_MS,
+  shouldAccrueMeterMoving,
+} from './meterMotionPolicy.ts';
 
-const SPEED_MOVING_KMH = 3;
-const SPEED_MOVING_MS = SPEED_MOVING_KMH / 3.6;
 /** Soft gate: still record points / distance up to this accuracy. */
 const MAX_GPS_ACCURACY_M = 100;
 const MAX_JUMP_M = 500;
@@ -22,10 +24,6 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
 function normalizeSpeed(speedMs?: number | null): number {
   if (speedMs == null || !Number.isFinite(speedMs) || speedMs <= 0) return 0;
   return speedMs;
-}
-
-function speedKmh(speedMs: number): number {
-  return speedMs * 3.6;
 }
 
 function appendRoutePoint(meter: MeterState, lat: number, lng: number): MeterState {
@@ -169,6 +167,11 @@ export function gpsAccuracyBlocksDistance(accuracyM?: number | null): boolean {
   return accuracyM != null && accuracyM > MAX_GPS_ACCURACY_M;
 }
 
+export type MeterTickHints = {
+  samePositionRepeat?: boolean;
+  movingHoldTicks?: number;
+};
+
 export function tickMeterWithGps(
   meter: MeterState,
   tariff: Tariff,
@@ -176,13 +179,31 @@ export function tickMeterWithGps(
   lng: number,
   speedMs?: number | null,
   accuracyM?: number | null,
+  hints?: MeterTickHints,
 ): MeterTickResult {
   let autoUnpaused = false;
   let next = { ...meter };
+  const prevMode: MeterMode = meter.mode === 'moving' ? 'moving' : 'waiting';
+  const holdTicks = Number(hints?.movingHoldTicks) || 0;
+  const samePositionRepeat = !!hints?.samePositionRepeat;
 
-  // Very poor accuracy: still accrue waiting, but keep last known fix for continuity.
+  const clockFromMotion = (distanceDeltaM: number, blocked: boolean): number => {
+    const moving = shouldAccrueMeterMoving({
+      prevMode,
+      speedMs: normalizeSpeed(speedMs),
+      distanceDeltaM,
+      dtMs: METER_TICK_MS,
+      accuracyBlocked: blocked,
+      samePositionRepeat,
+      movingHoldTicks: holdTicks,
+    });
+    return moving ? Math.max(normalizeSpeed(speedMs), SPEED_MOVING_MS + 0.01) : 0;
+  };
+
+  // Very poor accuracy: still accrue the 2s clock. Do not force Waiting if we
+  // were already moving (city canyon GPS must not drip wait onto a live trip).
   if (gpsAccuracyBlocksDistance(accuracyM)) {
-    const tick = tickMeter(next, tariff, 0);
+    const tick = tickMeter(next, tariff, clockFromMotion(0, true));
     return { ...tick, autoUnpaused: false };
   }
 
@@ -203,8 +224,7 @@ export function tickMeterWithGps(
       next.lastLat = lat;
       next.lastLng = lng;
       next = appendRoutePoint(next, lat, lng);
-      // Reject jump distance, but keep the 2s clock (wait) advancing.
-      const tick = tickMeter(next, tariff, 0);
+      const tick = tickMeter(next, tariff, clockFromMotion(0, false));
       return { ...tick, autoUnpaused };
     }
   } else {
@@ -212,7 +232,7 @@ export function tickMeterWithGps(
     next.lastLat = lat;
     next.lastLng = lng;
     next = appendRoutePoint(next, lat, lng);
-    const tick = tickMeter(next, tariff, normalizeSpeed(speedMs));
+    const tick = tickMeter(next, tariff, clockFromMotion(0, false));
     return { ...tick, autoUnpaused };
   }
   next.lastLat = lat;
@@ -223,7 +243,15 @@ export function tickMeterWithGps(
   const derivedSpeedMs =
     distanceDeltaM > 0 && METER_TICK_MS > 0 ? distanceDeltaM / (METER_TICK_MS / 1000) : 0;
   const effectiveSpeedMs = Math.max(speed, derivedSpeedMs);
-  const isMoving = effectiveSpeedMs > SPEED_MOVING_MS || speedKmh(effectiveSpeedMs) > SPEED_MOVING_KMH;
+  const isMoving = shouldAccrueMeterMoving({
+    prevMode,
+    speedMs: effectiveSpeedMs,
+    distanceDeltaM,
+    dtMs: METER_TICK_MS,
+    accuracyBlocked: false,
+    samePositionRepeat,
+    movingHoldTicks: holdTicks,
+  });
 
   // Always credit haversine when the fix moved — don't require speed>threshold alone
   // (GPS speed is often null / 0 on Android while position still advances).
@@ -232,7 +260,6 @@ export function tickMeterWithGps(
   }
 
   next.mode = (isMoving ? 'moving' : 'waiting') as MeterMode;
-  // Clock: moving when we credited distance, else waiting.
-  const tick = tickMeter(next, tariff, distanceDeltaM > 0 ? Math.max(effectiveSpeedMs, SPEED_MOVING_MS + 0.01) : 0);
+  const tick = tickMeter(next, tariff, isMoving ? Math.max(effectiveSpeedMs, SPEED_MOVING_MS + 0.01) : 0);
   return { ...tick, autoUnpaused };
 }

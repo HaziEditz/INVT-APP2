@@ -75,13 +75,30 @@ export async function loadChatHistory(companyId: string, driverId: string): Prom
     .sort((a, b) => a.timestamp - b.timestamp);
 }
 
-export function subscribeChat(driverId: string, onMessage: (msg: ChatMessage) => void): () => void {
+export function subscribeChat(
+  driverId: string,
+  onMessage: (msg: ChatMessage) => void,
+  opts?: { minTimestamp?: number; ignoreInitial?: boolean },
+): () => void {
   const chatRef = ref(getDatabaseInstance(), `chat/${driverId}`);
-  let lastStamp = 0;
+  let lastStamp = Number(opts?.minTimestamp) || 0;
+  let primed = false;
   const handleSnap = (snap: DataSnapshot) => {
     const val = snap.val() as Record<string, unknown> | null;
-    if (!val) return;
-    const ts = parseInt(String(val.timestamp ?? ''), 10) || Date.now();
+    if (!val) {
+      primed = true;
+      return;
+    }
+    const ts = parseInt(String(val.timestamp ?? ''), 10) || 0;
+    if (!primed) {
+      primed = true;
+      const minTs = Number(opts?.minTimestamp) || 0;
+      // Leftover last-message node is not a new unread. ChatPanel uses history.
+      if (opts?.ignoreInitial || !(ts > minTs)) {
+        lastStamp = Math.max(lastStamp, ts);
+        return;
+      }
+    }
     if (ts <= lastStamp) return;
     lastStamp = ts;
     const msgId = String(val.messageId ?? ts);

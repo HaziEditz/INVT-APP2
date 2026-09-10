@@ -33,11 +33,14 @@ function runMeterTick(
   tariff: Tariff,
   gps: GpsSample | null,
   onUpdate: (result: MeterTickResult) => void,
+  hints: { samePositionRepeat: boolean; movingHoldTicks: number },
 ) {
   const m = getMeter();
   if (!m?.running) return;
   if (gps) {
-    onUpdate(tickMeterWithGps(m, tariff, gps.lat, gps.lng, gps.speedMs, gps.accuracyM));
+    onUpdate(
+      tickMeterWithGps(m, tariff, gps.lat, gps.lng, gps.speedMs, gps.accuracyM, hints),
+    );
   } else {
     onUpdate(tickMeter(m, tariff, 0));
   }
@@ -50,12 +53,35 @@ export async function watchMeter(
 ): Promise<() => void> {
   let sub: Location.LocationSubscription | null = null;
   let lastGps: GpsSample | null = null;
+  let lastTickedGps: GpsSample | null = null;
+  let movingHoldTicks = 0;
 
-  runMeterTick(getMeter, getTariff(), lastGps, onUpdate);
+  const pulse = () => {
+    const samePositionRepeat = !!(
+      lastGps &&
+      lastTickedGps &&
+      lastGps.lat === lastTickedGps.lat &&
+      lastGps.lng === lastTickedGps.lng
+    );
+    const before = getMeter();
+    runMeterTick(getMeter, getTariff(), lastGps, onUpdate, {
+      samePositionRepeat,
+      movingHoldTicks,
+    });
+    const after = getMeter();
+    if (before?.mode === 'moving' && after?.mode === 'moving' && samePositionRepeat) {
+      movingHoldTicks += 1;
+    } else if (after?.mode === 'moving') {
+      movingHoldTicks = 0;
+    } else {
+      movingHoldTicks = 0;
+    }
+    lastTickedGps = lastGps;
+  };
 
-  const intervalId = setInterval(() => {
-    runMeterTick(getMeter, getTariff(), lastGps, onUpdate);
-  }, METER_TICK_MS);
+  pulse();
+
+  const intervalId = setInterval(pulse, METER_TICK_MS);
 
   void (async () => {
     try {
@@ -70,7 +96,6 @@ export async function watchMeter(
           speedMs: cached.coords.speed ?? null,
           accuracyM: cached.coords.accuracy ?? null,
         };
-        runMeterTick(getMeter, getTariff(), lastGps, onUpdate);
       }
 
       sub = await Location.watchPositionAsync(
@@ -86,7 +111,8 @@ export async function watchMeter(
             speedMs: loc.coords.speed ?? null,
             accuracyM: loc.coords.accuracy ?? null,
           };
-          runMeterTick(getMeter, getTariff(), lastGps, onUpdate);
+          // GPS only refreshes the sample. The 2s interval is the sole clock so
+          // a 1s GPS callback cannot flip Waiting/Moving and double-count time.
         },
       );
     } catch (err) {

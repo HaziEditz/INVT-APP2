@@ -49,3 +49,8 @@ export const STORAGE_KEYS = {
   /** Cached TM companySettings/{cid}/tmConfig for offline TM split. */
   tmConfigCache: 'bw_tm_config_cache',
 } as const;
+
+/** Last dispatcher-chat timestamp the driver already opened (per driver id). */
+export function chatLastReadStorageKey(driverId: string): string {
+  return `bw_chat_last_read_${String(driverId || '').trim()}`;
+}

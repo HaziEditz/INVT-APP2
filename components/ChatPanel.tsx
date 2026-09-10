@@ -74,7 +74,7 @@ export function ChatPanel() {
     const unsub = subscribeChat(driver.id, (msg) => {
       mergeMessage(msg);
       void clearChatNotification(driver.id);
-    });
+    }, { ignoreInitial: true });
 
     return () => {
       cancelled = true;
