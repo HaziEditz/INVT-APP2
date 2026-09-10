@@ -546,15 +546,8 @@ export function CurrentTripPanel() {
 
   return (
     <View style={styles.panelActive}>
-      {/* Details scroll; action bar stays pinned so Fold-8 / Flex Mode cannot clip End Trip. */}
-      <ScrollView
-        style={styles.pinnedScroll}
-        contentContainerStyle={styles.pinnedBand}
-        nestedScrollEnabled
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        accessibilityLabel="Trip details summary"
-      >
+      {/* Expand stays pinned (not in the shrinking scroll) so short-wide folds cannot clip it. */}
+      <View style={styles.pinnedHeader} accessibilityLabel="Trip details summary">
         <View style={[styles.detailsHeader, styles.detailsHeaderRaised]}>
           <Text style={styles.detailsHeaderTitle}>Trip details</Text>
           <Button
@@ -564,6 +557,14 @@ export function CurrentTripPanel() {
             onPress={() => setDetailsExpanded((v) => !v)}
           />
         </View>
+      </View>
+      <ScrollView
+        style={styles.pinnedScroll}
+        contentContainerStyle={styles.pinnedBand}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.pinnedBody}>
           <View style={styles.summaryRow}>
             <JobTypeBadge type={activeJob.type} />
@@ -768,7 +769,15 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     minHeight: 0,
   },
-  /** Scroll details; never steal height from the action bar. */
+  /** Expand row — never shrink so short-wide screens keep the control. */
+  pinnedHeader: {
+    flexShrink: 0,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+    zIndex: 50,
+  },
+  /** Scroll extra summary; never steal height from Expand or the action bar. */
   pinnedScroll: {
     flexGrow: 1,
     flexShrink: 1,

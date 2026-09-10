@@ -12,6 +12,7 @@ import {
   tickMeterWithGps,
 } from '../lib/meterTick.ts';
 import { shouldAlertIncomingDispatcherChat } from '../lib/chatReadPolicy.ts';
+import { shouldAcceptLiveChatSnap } from '../lib/chatLivePolicy.ts';
 
 const tariff = {
   id: 't1',
@@ -119,7 +120,45 @@ test('already-read leftover chat node does not alert on login', () => {
   );
 });
 
-test('meter engine clocks from the interval only; chat skips leftover last-message', () => {
+test('live chat accepts a new payload even when console omits timestamp', () => {
+  assert.equal(
+    shouldAcceptLiveChatSnap({
+      primed: false,
+      ignoreInitial: true,
+      ts: 1_000,
+      minTs: 0,
+      lastStamp: 0,
+      fingerprint: 'old|hello|You have New Message|1000',
+      lastFingerprint: '',
+    }),
+    'skip-initial',
+  );
+  assert.equal(
+    shouldAcceptLiveChatSnap({
+      primed: true,
+      ignoreInitial: true,
+      ts: 0,
+      minTs: 0,
+      lastStamp: 1_000,
+      fingerprint: 'new|reply|You have New Message|',
+      lastFingerprint: 'old|hello|You have New Message|1000',
+    }),
+    'accept',
+  );
+  assert.equal(
+    shouldAcceptLiveChatSnap({
+      primed: true,
+      ts: 0,
+      minTs: 0,
+      lastStamp: 1_000,
+      fingerprint: 'old|hello|You have New Message|1000',
+      lastFingerprint: 'old|hello|You have New Message|1000',
+    }),
+    'skip-dup',
+  );
+});
+
+test('meter engine clocks from the interval only; chat thread listens live', () => {
   const engine = readFileSync(join(root, 'services/meterEngine.ts'), 'utf8');
   assert.match(engine, /GPS only refreshes the sample/);
   assert.doesNotMatch(
@@ -129,9 +168,12 @@ test('meter engine clocks from the interval only; chat skips leftover last-messa
   const chat = readFileSync(join(root, 'lib/chatService.ts'), 'utf8');
   assert.match(chat, /ignoreInitial/);
   assert.match(chat, /minTimestamp/);
+  assert.match(chat, /subscribeChatThread/);
+  assert.match(chat, /messages\/\$\{companyId\}\/\$\{driverId\}/);
   const ctx = readFileSync(join(root, 'context/DriverContext.tsx'), 'utf8');
   assert.match(ctx, /shouldAlertIncomingDispatcherChat/);
   assert.match(ctx, /chatLastReadStorageKey/);
   const panel = readFileSync(join(root, 'components/ChatPanel.tsx'), 'utf8');
+  assert.match(panel, /subscribeChatThread/);
   assert.match(panel, /ignoreInitial:\s*true/);
 });

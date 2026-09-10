@@ -41,8 +41,11 @@ test('CurrentTripPanel pins details band outside ScrollView and Expand uses a sh
   const src = readFileSync(join(root, 'components/home/CurrentTripPanel.tsx'), 'utf8');
   const pinIdx = src.indexOf('accessibilityLabel="Trip details summary"');
   const expandSheetIdx = src.indexOf('detailsExpandSheet');
+  const headerIdx = src.indexOf('styles.pinnedHeader');
+  const scrollIdx = src.indexOf('style={styles.pinnedScroll}');
   const actionIdx = src.indexOf('style={styles.actionBar}', pinIdx);
   assert.ok(pinIdx > 0, 'pinned band accessibility label must exist');
+  assert.ok(headerIdx > 0 && scrollIdx > headerIdx, 'Expand header is outside ScrollView');
   assert.ok(actionIdx > pinIdx, 'action bar stays after pinned band');
   assert.ok(expandSheetIdx > 0, 'Expand must use a real sheet surface');
   assert.match(src, /pinnedScroll/);

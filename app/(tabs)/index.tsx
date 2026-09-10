@@ -16,7 +16,7 @@ import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
-import { computeTripHomeLayout } from '@/lib/tripHomeLayout';
+import { computeTripHomeLayout, estimateTripColumnHeight } from '@/lib/tripHomeLayout';
 import { MainPanelTab } from '@/types';
 import { useMemo, useState, useRef } from 'react';
 import {
@@ -30,8 +30,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function MainScreen() {
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const [columnHeight, setColumnHeight] = useState(0);
   const { firebaseUser, driver, profileLoading, refreshDriver } = useAuth();
   const {
     shiftActive,
@@ -56,12 +57,24 @@ export default function MainScreen() {
 
   const tripLayout = useMemo(() => {
     const meterLive = !!meter?.running && !meter?.trackOnly;
+    const availableHeight =
+      columnHeight > 0
+        ? columnHeight
+        : estimateTripColumnHeight(windowHeight, insets.top, insets.bottom);
     return computeTripHomeLayout({
-      windowHeight,
+      availableHeight,
+      windowWidth,
       meterLive,
-      topInset: insets.top,
     });
-  }, [windowHeight, meter?.running, meter?.trackOnly, insets.top]);
+  }, [
+    columnHeight,
+    windowHeight,
+    windowWidth,
+    meter?.running,
+    meter?.trackOnly,
+    insets.top,
+    insets.bottom,
+  ]);
 
   const [mainTab, setMainTab] = useState<MainPanelTab>('current');
   const [tariffOpen, setTariffOpen] = useState(false);
@@ -152,7 +165,13 @@ export default function MainScreen() {
       </ErrorBoundary>
       <ConnectionStatusBanner />
 
-      <View style={[styles.body, hasCurrent && styles.bodyTrip]}>
+      <View
+        style={[styles.body, hasCurrent && styles.bodyTrip]}
+        onLayout={(e) => {
+          const next = e.nativeEvent.layout.height;
+          if (next > 0) setColumnHeight((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+        }}
+      >
         <View
           style={[
             styles.mapSection,
@@ -161,7 +180,7 @@ export default function MainScreen() {
               minHeight: tripLayout.mapMin,
               maxHeight: tripLayout.mapMax,
               flexGrow: 0,
-              flexShrink: 0,
+              flexShrink: 1,
               flexBasis: tripLayout.mapMax,
             },
           ]}
@@ -192,7 +211,7 @@ export default function MainScreen() {
           style={[
             styles.workSection,
             hasCurrent ? styles.workSectionTrip : styles.workSectionIdle,
-            hasCurrent && { minHeight: tripLayout.workMin, flex: 1 },
+            hasCurrent && { minHeight: tripLayout.workMin, flexGrow: 1, flexShrink: 0 },
           ]}
         >
           {hasCurrent ? (
@@ -328,8 +347,8 @@ const styles = StyleSheet.create({
     maxHeight: '52%',
   },
   workSectionTrip: {
-    flex: 1,
-    flexShrink: 1,
+    flexGrow: 1,
+    flexShrink: 0,
     minHeight: 0,
     overflow: 'hidden',
   },

@@ -5,9 +5,9 @@ import { sharedStyles } from '@/constants/styles';
 import { useAuth } from '@/context/AuthContext';
 import { clearChatNotification, clearDriverNotification } from '@/lib/driverNotifications';
 import {
-  loadChatHistory,
   sendChatToDispatch,
   subscribeChat,
+  subscribeChatThread,
 } from '@/lib/chatService';
 import { ChatMessage } from '@/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -58,27 +58,35 @@ export function ChatPanel() {
     let cancelled = false;
     seenIds.current.clear();
     setLoading(true);
-    loadChatHistory(driver.companyId, driver.id)
-      .then((hist) => {
-        if (cancelled) return;
-        hist.forEach((m) => {
-          seenIds.current.add(`${m.sender}:${m.text}:${Math.floor(m.timestamp / 5000)}`);
-        });
-        setMessages(hist);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+    const unsubThread = subscribeChatThread(driver.companyId, driver.id, (hist) => {
+      if (cancelled) return;
+      setMessages((prev) => {
+        const localOnly = prev.filter(
+          (m) =>
+            String(m.id).startsWith('local-') &&
+            !hist.some((h) => h.sender === m.sender && h.text === m.text),
+        );
+        const next = [...hist, ...localOnly].sort((a, b) => a.timestamp - b.timestamp);
+        seenIds.current = new Set(
+          next.map((m) => `${m.sender}:${m.text}:${Math.floor(m.timestamp / 5000)}`),
+        );
+        return next;
       });
-
-    const unsub = subscribeChat(driver.id, (msg) => {
-      mergeMessage(msg);
-      void clearChatNotification(driver.id);
-    }, { ignoreInitial: true });
+      setLoading(false);
+    });
+    const unsubLive = subscribeChat(
+      driver.id,
+      (msg) => {
+        mergeMessage(msg);
+        void clearChatNotification(driver.id);
+      },
+      { ignoreInitial: true },
+    );
 
     return () => {
       cancelled = true;
-      unsub();
+      unsubThread();
+      unsubLive();
     };
   }, [driver?.id, driver?.companyId, mergeMessage]);
 

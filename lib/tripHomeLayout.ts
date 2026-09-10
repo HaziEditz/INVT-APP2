@@ -1,21 +1,25 @@
 /**
- * Home trip column: map + work panel sizes that always leave room for the
- * End Trip / On Board action bar on short-wide screens (Galaxy Z Fold 8 inner
- * 4:3, Flex Mode, large insets).
+ * Home trip column: map vs work panel from the *measured* column height.
+ * Short-wide fold inners, Flex Mode, and tall phones share the same rules —
+ * never a device-model check that just moves the clip to another control.
  */
 
 export const TRIP_TABS_MIN = 48;
 export const TRIP_ACTION_BAR_MIN = 64;
+/** "Trip details" + Expand — must stay on-screen with End Trip. */
+export const TRIP_PINNED_HEADER_MIN = 44;
 export const TRIP_STATUS_ROW = 48;
 export const TRIP_METER_MIN = 108;
 export const TRIP_TARIFF_MIN = 44;
-export const TRIP_MAP_FLOOR = 72;
+export const TRIP_MAP_FLOOR = 56;
+/** Expo-router tab bar (height 56 + bottom inset padding). */
+export const TRIP_APP_TAB_BAR_MIN = 56;
 
 export type TripHomeLayoutInput = {
-  windowHeight: number;
+  /** Map + work column only (body onLayout). Not the full window. */
+  availableHeight: number;
+  windowWidth: number;
   meterLive: boolean;
-  /** Safe-area top inset from HomeStatusBar. */
-  topInset?: number;
 };
 
 export type TripHomeLayout = {
@@ -28,34 +32,68 @@ function round(n: number): number {
   return Math.round(Math.max(0, n));
 }
 
+/** Inner fold / Flex Mode: height is not much larger than width. */
+export function isShortWideAspect(height: number, width: number): boolean {
+  if (!(width > 0) || !(height > 0)) return false;
+  return height / width < 1.28;
+}
+
+export function tripWorkChrome(meterLive: boolean): number {
+  const toolsH = meterLive ? TRIP_METER_MIN : TRIP_TARIFF_MIN;
+  return toolsH + TRIP_TABS_MIN + TRIP_PINNED_HEADER_MIN + TRIP_ACTION_BAR_MIN;
+}
+
 /**
- * Map is capped; work panel gets leftover height. On a Fold-8-class short
- * window the map shrinks first so tools + tabs + action bar always fit.
+ * Map shrinks first on short-wide windows so Expand + End Trip always fit.
+ * Work min is never less than tools + tabs + Expand header + action bar.
  */
 export function computeTripHomeLayout(input: TripHomeLayoutInput): TripHomeLayout {
-  const windowHeight = Number(input.windowHeight) || 0;
-  const topChrome = (Number(input.topInset) || 0) + TRIP_STATUS_ROW;
-  const toolsH = input.meterLive ? TRIP_METER_MIN : TRIP_TARIFF_MIN;
-  const mustFitWithoutMap = topChrome + toolsH + TRIP_TABS_MIN + TRIP_ACTION_BAR_MIN;
+  const availableHeight = Number(input.availableHeight) || 0;
+  const windowWidth = Number(input.windowWidth) || 0;
+  const chrome = tripWorkChrome(input.meterLive);
+  const shortWide = isShortWideAspect(availableHeight, windowWidth);
 
-  const wantedMap = input.meterLive
-    ? Math.min(Math.max(windowHeight * 0.22, 140), 200)
-    : Math.min(Math.max(windowHeight * 0.3, 180), 280);
-  const mapBudget = windowHeight - mustFitWithoutMap;
+  const mapRatio = shortWide
+    ? input.meterLive
+      ? 0.12
+      : 0.16
+    : input.meterLive
+      ? 0.22
+      : 0.3;
+  const mapCap = shortWide
+    ? input.meterLive
+      ? 132
+      : 168
+    : input.meterLive
+      ? 200
+      : 280;
+  const mapWantMin = shortWide
+    ? input.meterLive
+      ? 80
+      : 110
+    : input.meterLive
+      ? 140
+      : 180;
+
+  const wantedMap = Math.min(Math.max(availableHeight * mapRatio, mapWantMin), mapCap);
+  const mapBudget = availableHeight - chrome;
   const mapMax = round(
     mapBudget >= TRIP_MAP_FLOOR
       ? Math.min(wantedMap, mapBudget)
       : Math.max(0, mapBudget),
   );
-
-  const wantedMapMin = input.meterLive
-    ? Math.min(Math.max(windowHeight * 0.16, 110), 160)
-    : Math.min(Math.max(windowHeight * 0.2, 140), 200);
-  const mapMin = round(Math.min(mapMax, wantedMapMin));
-
-  const leftover = windowHeight - topChrome - mapMax;
-  const workFloor = toolsH + TRIP_TABS_MIN + TRIP_ACTION_BAR_MIN;
-  const workMin = round(Math.max(workFloor, leftover));
+  const mapMin = round(Math.min(mapMax, Math.max(TRIP_MAP_FLOOR, Math.round(mapMax * 0.7))));
+  const leftover = availableHeight - mapMax;
+  const workMin = round(Math.max(chrome, leftover));
 
   return { mapMax, mapMin, workMin };
+}
+
+/** Fallback column height before body onLayout (tab bar + status row). */
+export function estimateTripColumnHeight(windowHeight: number, topInset: number, bottomInset: number): number {
+  const tabBar = TRIP_APP_TAB_BAR_MIN + Math.max(Number(bottomInset) || 0, 8);
+  return Math.max(
+    0,
+    (Number(windowHeight) || 0) - (Number(topInset) || 0) - TRIP_STATUS_ROW - tabBar,
+  );
 }

@@ -1,7 +1,10 @@
 import { get, onValue, ref, type DataSnapshot } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { sendDriverMessage } from '@/lib/dispatchApi';
+import { chatLiveFingerprint, shouldAcceptLiveChatSnap } from '@/lib/chatLivePolicy';
 import type { ChatMessage } from '@/types';
+
+export { chatLiveFingerprint, shouldAcceptLiveChatSnap } from '@/lib/chatLivePolicy';
 
 /** Parse legacy bookingid: "senderName,body,datetime,companyId,Source" */
 export function parseChatBookingId(bookingid: string): { senderName: string; text: string } {
@@ -65,14 +68,34 @@ function historyRowToMessage(key: string, row: Record<string, unknown>, driverId
   };
 }
 
-export async function loadChatHistory(companyId: string, driverId: string): Promise<ChatMessage[]> {
-  const snap = await get(ref(getDatabaseInstance(), `messages/${companyId}/${driverId}`));
-  const val = snap.val() as Record<string, Record<string, unknown>> | null;
+export function parseChatHistoryVal(
+  val: Record<string, Record<string, unknown>> | null,
+  driverId: string,
+): ChatMessage[] {
   if (!val || typeof val !== 'object') return [];
   return Object.entries(val)
     .map(([key, row]) => historyRowToMessage(key, row, driverId))
     .filter((m): m is ChatMessage => m != null)
     .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+export async function loadChatHistory(companyId: string, driverId: string): Promise<ChatMessage[]> {
+  const snap = await get(ref(getDatabaseInstance(), `messages/${companyId}/${driverId}`));
+  return parseChatHistoryVal(snap.val() as Record<string, Record<string, unknown>> | null, driverId);
+}
+
+/** Live thread: MessageInsert persists here. onValue fires when a new child is pushed. */
+export function subscribeChatThread(
+  companyId: string,
+  driverId: string,
+  onUpdate: (msgs: ChatMessage[]) => void,
+): () => void {
+  const histRef = ref(getDatabaseInstance(), `messages/${companyId}/${driverId}`);
+  return onValue(histRef, (snap) => {
+    onUpdate(
+      parseChatHistoryVal(snap.val() as Record<string, Record<string, unknown>> | null, driverId),
+    );
+  });
 }
 
 export function subscribeChat(
@@ -82,6 +105,7 @@ export function subscribeChat(
 ): () => void {
   const chatRef = ref(getDatabaseInstance(), `chat/${driverId}`);
   let lastStamp = Number(opts?.minTimestamp) || 0;
+  let lastFingerprint = '';
   let primed = false;
   const handleSnap = (snap: DataSnapshot) => {
     const val = snap.val() as Record<string, unknown> | null;
@@ -90,18 +114,26 @@ export function subscribeChat(
       return;
     }
     const ts = parseInt(String(val.timestamp ?? ''), 10) || 0;
-    if (!primed) {
-      primed = true;
-      const minTs = Number(opts?.minTimestamp) || 0;
-      // Leftover last-message node is not a new unread. ChatPanel uses history.
-      if (opts?.ignoreInitial || !(ts > minTs)) {
-        lastStamp = Math.max(lastStamp, ts);
-        return;
-      }
+    const fingerprint = chatLiveFingerprint(val);
+    const decision = shouldAcceptLiveChatSnap({
+      primed,
+      ignoreInitial: opts?.ignoreInitial,
+      ts,
+      minTs: Number(opts?.minTimestamp) || 0,
+      lastStamp,
+      fingerprint,
+      lastFingerprint,
+    });
+    primed = true;
+    if (decision === 'skip-initial') {
+      lastStamp = Math.max(lastStamp, ts);
+      lastFingerprint = fingerprint;
+      return;
     }
-    if (ts <= lastStamp) return;
-    lastStamp = ts;
-    const msgId = String(val.messageId ?? ts);
+    if (decision === 'skip-dup') return;
+    lastStamp = Math.max(lastStamp, ts);
+    lastFingerprint = fingerprint;
+    const msgId = String(val.messageId ?? ts || fingerprint);
     const msg = chatPayloadToMessage(msgId, val, driverId);
     if (msg && msg.sender === 'dispatcher') onMessage(msg);
   };
