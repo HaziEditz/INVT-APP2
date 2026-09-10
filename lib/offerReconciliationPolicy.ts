@@ -61,6 +61,39 @@ export function shouldSuppressReturnedPoolOffer(
   );
 }
 
+const POOL_AVAILABLE_STATUS = new Set(['', 'pending', 'waiting', 'no one', 'noone']);
+
+function isOfferedStatus(status: string): boolean {
+  return status === 'offered' || status === 'offer' || status === 'offering';
+}
+
+/**
+ * Accept stamps the booking id locally so lagging pendingjobs cannot bounce it
+ * back onto Offer tab. A genuine pool restore (recall → Pending, or Offered to
+ * someone else) must release that stamp so the recalling driver sees the job
+ * the same way other drivers who never accepted it already do.
+ *
+ * Timeout / decline / network-return still stay suppressed (C4).
+ */
+export function shouldReleaseSuppressedPoolOffer(
+  offer: ReturnedOfferLike,
+  driverId: string,
+): boolean {
+  if (shouldSuppressReturnedPoolOffer(offer, driverId)) return false;
+  const self = normalizeId(driverId);
+  const status = String(offer.status ?? '')
+    .trim()
+    .toLowerCase();
+  if (POOL_AVAILABLE_STATUS.has(status)) return true;
+  if (isOfferedStatus(status)) {
+    const liveDrv = normalizeId(offer.driverId);
+    // Lagging exclusive to self after accept must stay hidden on Offer tab.
+    if (liveDrv && liveDrv === self) return false;
+    return true;
+  }
+  return false;
+}
+
 /**
  * Lagging allbookings Pending/removed from a prior decline must not dismiss a
  * fresh exclusive popup (a cached pool restore can arrive after the new offer

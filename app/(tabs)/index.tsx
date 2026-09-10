@@ -16,6 +16,7 @@ import { Colors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { useSafeEffect } from '@/hooks/useSafeEffect';
+import { computeTripHomeLayout } from '@/lib/tripHomeLayout';
 import { MainPanelTab } from '@/types';
 import { useMemo, useState, useRef } from 'react';
 import {
@@ -26,9 +27,11 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function MainScreen() {
   const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { firebaseUser, driver, profileLoading, refreshDriver } = useAuth();
   const {
     shiftActive,
@@ -52,20 +55,13 @@ export default function MainScreen() {
   } = useDriver();
 
   const tripLayout = useMemo(() => {
-    // Keep job details readable after Accept across phone sizes: map capped,
-    // work panel gets a solid minimum (details + stage actions).
-    // On Board + live meter: shrink map further so the pinned trip band cannot
-    // be crushed to zero height by TripToolsBar meter chrome.
     const meterLive = !!meter?.running && !meter?.trackOnly;
-    const mapMax = Math.round(
-      Math.min(Math.max(windowHeight * (meterLive ? 0.22 : 0.3), meterLive ? 140 : 180), meterLive ? 200 : 280),
-    );
-    const mapMin = Math.round(
-      Math.min(Math.max(windowHeight * (meterLive ? 0.16 : 0.2), meterLive ? 110 : 140), meterLive ? 160 : 200),
-    );
-    const workMin = Math.round(Math.max(windowHeight * (meterLive ? 0.58 : 0.52), meterLive ? 380 : 340));
-    return { mapMax, mapMin, workMin };
-  }, [windowHeight, meter?.running, meter?.trackOnly]);
+    return computeTripHomeLayout({
+      windowHeight,
+      meterLive,
+      topInset: insets.top,
+    });
+  }, [windowHeight, meter?.running, meter?.trackOnly, insets.top]);
 
   const [mainTab, setMainTab] = useState<MainPanelTab>('current');
   const [tariffOpen, setTariffOpen] = useState(false);
@@ -290,6 +286,8 @@ const styles = StyleSheet.create({
   },
   bodyTrip: {
     flexDirection: 'column',
+    minHeight: 0,
+    overflow: 'hidden',
   },
   mapSection: {
     flex: 1,
@@ -333,6 +331,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexShrink: 1,
     minHeight: 0,
+    overflow: 'hidden',
   },
   /** Offers/Queue when idle — Current idle UI is IdleCurrentSection above, not here. */
   panelHostIdle: {

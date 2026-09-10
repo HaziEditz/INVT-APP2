@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   isDirectOfferStillLive,
   liveExclusiveOfferBeatsLaggingPoolRestore,
+  shouldReleaseSuppressedPoolOffer,
   shouldSuppressReturnedPoolOffer,
 } from '../lib/offerReconciliationPolicy.ts';
 import {
@@ -52,6 +53,64 @@ test('C4 does not suppress a live exclusive re-offer to the same driver', () => 
       'D001',
     ),
     true,
+  );
+});
+
+test('recall pool restore releases accept-suppress for the recalling driver', () => {
+  const recalled = {
+    returnReason: 'Recalled by Driver',
+    lastOfferDriverId: 'D001',
+    status: 'Pending',
+    driverId: '0',
+  };
+  assert.equal(shouldSuppressReturnedPoolOffer(recalled, 'D001'), false);
+  assert.equal(shouldReleaseSuppressedPoolOffer(recalled, 'D001'), true);
+  assert.equal(shouldReleaseSuppressedPoolOffer(recalled, 'D002'), true);
+  assert.equal(
+    shouldReleaseSuppressedPoolOffer(
+      {
+        returnReason: 'Recalled by Driver',
+        lastOfferDriverId: 'D002',
+        status: 'Offered',
+        driverId: 'D001',
+      },
+      'D002',
+    ),
+    true,
+  );
+});
+
+test('timeout/decline keep suppress; lagging Offered-to-self after accept stays hidden', () => {
+  assert.equal(
+    shouldReleaseSuppressedPoolOffer(
+      {
+        returnReason: 'Offer timeout (no response)',
+        lastOfferDriverId: 'D002',
+        status: 'Pending',
+        driverId: '0',
+      },
+      'D002',
+    ),
+    false,
+  );
+  assert.equal(
+    shouldReleaseSuppressedPoolOffer(
+      {
+        returnReason: 'Declined by driver',
+        lastOfferDriverId: 'D001',
+        status: 'Pending',
+        driverId: '0',
+      },
+      'D001',
+    ),
+    false,
+  );
+  assert.equal(
+    shouldReleaseSuppressedPoolOffer(
+      { status: 'Offered', driverId: 'D001' },
+      'D001',
+    ),
+    false,
   );
 });
 

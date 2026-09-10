@@ -546,8 +546,15 @@ export function CurrentTripPanel() {
 
   return (
     <View style={styles.panelActive}>
-      {/* flexShrink:0 — never crushed by meter/map; always visible without scrolling */}
-      <View style={styles.pinnedBand} accessibilityLabel="Trip details summary">
+      {/* Details scroll; action bar stays pinned so Fold-8 / Flex Mode cannot clip End Trip. */}
+      <ScrollView
+        style={styles.pinnedScroll}
+        contentContainerStyle={styles.pinnedBand}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        accessibilityLabel="Trip details summary"
+      >
         <View style={[styles.detailsHeader, styles.detailsHeaderRaised]}>
           <Text style={styles.detailsHeaderTitle}>Trip details</Text>
           <Button
@@ -594,7 +601,7 @@ export function CurrentTripPanel() {
             <Text style={styles.verified}>Verified — On Board unlocked</Text>
           ) : null}
         </View>
-      </View>
+      </ScrollView>
 
       {/* Expand = real sheet with FULL job details; End Trip / actions stay underneath */}
       {detailsExpanded ? (
@@ -669,6 +676,7 @@ export function CurrentTripPanel() {
         </Modal>
       ) : null}
 
+      {/* Always-visible footer — End Trip / On Board stay on-screen on short-wide devices */}
       <View style={styles.actionBar}>
         <View style={styles.actionRow}>
           {showEndTrip ? (
@@ -760,10 +768,15 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     minHeight: 0,
   },
-  /** Never flex-shrink — always-visible band above crushed scroll / meter. */
+  /** Scroll details; never steal height from the action bar. */
+  pinnedScroll: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+  },
+  /** Compact trip summary — may scroll on short-wide screens. */
   pinnedBand: {
     flexGrow: 0,
-    flexShrink: 0,
     backgroundColor: Colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border,
@@ -773,6 +786,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 8,
     gap: 4,
+  },
+  detailsScroll: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+  },
+  detailsContent: {
+    padding: 12,
+    gap: 8,
   },
   routeLine: {
     fontSize: 14,

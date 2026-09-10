@@ -78,6 +78,7 @@ import { subscribePendingJobs } from '@/lib/pendingJobs';
 import {
   findStaleDirectOfferIds,
   liveExclusiveOfferBeatsLaggingPoolRestore,
+  shouldReleaseSuppressedPoolOffer,
   shouldSuppressReturnedPoolOffer,
 } from '@/lib/offerReconciliation';
 import {
@@ -1612,6 +1613,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             .filter((offer) => shouldSuppressReturnedPoolOffer(offer, driver.id))
             .map((offer) => offer.id),
         );
+        for (const offer of offers) {
+          if (returnedIds.has(offer.id)) {
+            suppressedOfferIdsRef.current.add(offer.id);
+          } else if (shouldReleaseSuppressedPoolOffer(offer, driver.id)) {
+            // Recalled (or otherwise pool-available again) — stop hiding it
+            // from this phone's Offer tab. Timeout/decline stays suppressed.
+            suppressedOfferIdsRef.current.delete(offer.id);
+          }
+        }
         if (returnedIds.size) {
           let broadcastChanged = false;
           for (const id of returnedIds) {
@@ -1625,9 +1635,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             current && returnedIds.has(current.id) ? null : current,
           );
         }
+        const activeId = activeJobIdRef.current;
         setPoolOffers(
           offers.filter(
             (offer) =>
+              offer.id !== activeId &&
               !suppressedOfferIdsRef.current.has(offer.id) &&
               !shouldSuppressReturnedPoolOffer(offer, driver.id),
           ),
@@ -1640,8 +1652,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const visibleOffers = useMemo(() => {
     if (offersLockedForEnrouteDispatch) return [];
+    const activeId = activeJob?.id;
     const map = new Map<string, JobOffer>();
     for (const o of poolOffers) {
+      if (activeId && o.id === activeId) continue;
       if (suppressedOfferIdsRef.current.has(o.id)) continue;
       if (driver?.id && shouldSuppressReturnedPoolOffer(o, driver.id)) continue;
       map.set(o.id, { ...o, silent: true });
@@ -1651,7 +1665,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       map.set(o.id, o);
     }
     return Array.from(map.values());
-  }, [poolOffers, broadcastOffers, offersLockedForEnrouteDispatch, driver?.id]);
+  }, [poolOffers, broadcastOffers, offersLockedForEnrouteDispatch, driver?.id, activeJob?.id]);
 
   const upsertBroadcastOffer = (offer: JobOffer) => {
     // A fresh exclusive fanout supersedes any prior local suppression for this ID.
@@ -5867,6 +5881,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         return;
       }
       setQueuedOffers((prev) => prev.filter((o) => o.id !== q.id));
+      suppressedOfferIdsRef.current.delete(q.id);
       Alert.alert('Job recalled', 'Job returned to dispatch.');
       return;
     }
@@ -5887,6 +5902,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       Alert.alert('Recall failed', err instanceof Error ? err.message : 'Could not recall job');
       return;
     }
+
+    suppressedOfferIdsRef.current.delete(job.id);
 
     stopMeterForJob();
     setMeter(null);
@@ -5917,6 +5934,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
     setQueuedOffers((prev) => prev.filter((o) => o.id !== offerId));
+    suppressedOfferIdsRef.current.delete(offerId);
     Alert.alert('Job recalled', 'Job returned to dispatch.');
   };
 

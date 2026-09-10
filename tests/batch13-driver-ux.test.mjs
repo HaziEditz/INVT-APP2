@@ -45,7 +45,8 @@ test('CurrentTripPanel pins details band outside ScrollView and Expand uses a sh
   assert.ok(pinIdx > 0, 'pinned band accessibility label must exist');
   assert.ok(actionIdx > pinIdx, 'action bar stays after pinned band');
   assert.ok(expandSheetIdx > 0, 'Expand must use a real sheet surface');
-  assert.match(src, /pinnedBand:[\s\S]{0,120}flexShrink:\s*0/);
+  assert.match(src, /pinnedScroll/);
+  assert.match(src, /actionBar:[\s\S]{0,160}flexShrink:\s*0/);
   assert.match(src, /JobDispatchMetaSection job=\{activeJob\}/);
   assert.match(src, /contactRow/);
   assert.match(src, /actionRow/);
