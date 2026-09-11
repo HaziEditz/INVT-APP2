@@ -844,3 +844,8 @@ export async function markSosResponderArrived(sosDriverId: string) {
 export async function sendDriverMessage(message: string) {
   return driverApiPost<{ ok: boolean; messageId?: number }>('/api/driver/message', { message });
 }
+
+export async function fetchCompanyChatEnabled(): Promise<{ ok: boolean; chatEnabled: boolean }> {
+  const data = await driverApiGet<{ ok: boolean; chatEnabled?: boolean }>('/api/driver/company-chat');
+  return { ok: true, chatEnabled: data.chatEnabled !== false };
+}

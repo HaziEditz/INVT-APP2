@@ -169,7 +169,9 @@ test('meter engine clocks from the interval only; chat thread listens live', () 
   assert.match(chat, /ignoreInitial/);
   assert.match(chat, /minTimestamp/);
   assert.match(chat, /subscribeChatThread/);
-  assert.match(chat, /messages\/\$\{companyId\}\/\$\{driverId\}/);
+  assert.match(chat, /chatThreadDbPaths/);
+  assert.match(chat, /chatMessages/);
+  assert.match(chat, /messages/);
   const ctx = readFileSync(join(root, 'context/DriverContext.tsx'), 'utf8');
   assert.match(ctx, /shouldAlertIncomingDispatcherChat/);
   assert.match(ctx, /chatLastReadStorageKey/);

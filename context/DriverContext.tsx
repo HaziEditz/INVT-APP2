@@ -18,7 +18,7 @@ import {
   subscribeVehicleShiftLocks,
   VehicleShiftLock,
 } from '@/lib/vehicleShiftLock';
-import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, fetchDriverActiveBookings, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, recallWrongPassengerOnDispatch, reportNoShow, respondToDriverSos, syncJobStageOnDispatch, verifyPickupOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
+import { acceptJobOffer, cancelJobAsDriver, completeJobPayment, createHailJobOnDispatch, declineJobOffer, DispatchApiError, fetchCompanyChatEnabled, fetchDriverActiveBookings, isDispatchAcceptRetryable, markSosResponderArrived, newClientTripId, promoteQueuedJob, pruneDriverQueueOnDispatch, recallJobOnDispatch, recallWrongPassengerOnDispatch, reportNoShow, respondToDriverSos, syncJobStageOnDispatch, verifyPickupOnDispatch, withdrawSosResponse } from '@/lib/dispatchApi';
 import { isCashCollectedAtCompletion, needsPickupVerification } from '@/lib/pickupResolution';
 import {
   catchUpJobStagesOnDispatch,
@@ -1370,10 +1370,26 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [driver?.companyId, driver?.uid], 'Driver-company');
 
   useSafeEffect(() => {
-    if (!driver?.companyId || !isFirebaseReady) {
-      setChatEnabled(true);
-      return;
-    }
+    if (!driver?.companyId) return;
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const data = await fetchCompanyChatEnabled();
+        if (!cancelled && typeof data.chatEnabled === 'boolean') setChatEnabled(data.chatEnabled);
+      } catch (err) {
+        console.warn('[Driver] company-chat HTTP', err);
+      }
+    };
+    void pull();
+    const iv = setInterval(() => void pull(), 12000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [driver?.companyId], 'Driver-chat-http');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !isFirebaseReady) return;
     const companyId = driver.companyId;
     const unsub = onValue(
       ref(getDatabaseInstance(), `companySettings/${companyId}`),
@@ -1382,11 +1398,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       },
       (err) => {
         console.warn('[Driver] company chat flag', err);
-        setChatEnabled(true);
       },
     );
     return () => unsub();
-  }, [driver?.companyId], 'Driver-chat-enabled');
+  }, [driver?.companyId, isFirebaseReady], 'Driver-chat-enabled');
 
   useSafeEffect(() => {
     if (chatEnabled) return;
@@ -3121,9 +3136,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       lastChatReadTsRef.current = Number(stored) || 0;
       try {
+        let notifyInit = true;
         const chatRef = ref(getDatabaseInstance(), `notificationChat/${driver.id}`);
         unsubNotify = onValue(chatRef, async (snap) => {
           try {
+            if (notifyInit) {
+              notifyInit = false;
+              if (snap.exists()) await clearChatNotification(driver.id);
+              return;
+            }
             const val = snap.val() as Record<string, unknown> | null;
             if (!val || typeof val !== 'object') return;
             const eventType = String(val.eventType ?? val.type ?? '').toLowerCase();
@@ -3147,7 +3168,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           notifyDispatcherChat(msg.text, msg.id, msg.timestamp);
           void clearChatNotification(driver.id);
         },
-        { minTimestamp: lastChatReadTsRef.current },
+        { minTimestamp: lastChatReadTsRef.current, ignoreInitial: true },
       );
     })();
     return () => {

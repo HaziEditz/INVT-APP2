@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { driverChatTabHref, isCompanyChatEnabled } from '../lib/companyChatPolicy.ts';
+import { chatThreadDbPaths, chatThreadDriverIds } from '../lib/chatThreadPaths.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -47,4 +48,19 @@ test('driver chat listeners and banners are skipped when chat is off', () => {
   assert.match(ctx, /chatEnabled/);
   assert.match(ctx, /isCompanyChatEnabled/);
   assert.match(ctx, /!chatEnabled/);
+  assert.match(ctx, /fetchCompanyChatEnabled/);
+  assert.match(ctx, /ignoreInitial:\s*true/);
+  assert.doesNotMatch(ctx, /company chat flag[\s\S]{0,80}setChatEnabled\(true\)/);
+  const api = readFileSync(join(root, 'lib/dispatchApi.ts'), 'utf8');
+  assert.match(api, /\/api\/driver\/company-chat/);
+});
+
+test('live thread listens on chatMessages (readable today) and messages', () => {
+  assert.deepEqual(chatThreadDriverIds('D001'), ['D001']);
+  const paths = chatThreadDbPaths('860869', 'D001');
+  assert.ok(paths.includes('chatMessages/860869/D001'));
+  assert.ok(paths.includes('messages/860869/D001'));
+  const svc = readFileSync(join(root, 'lib/chatService.ts'), 'utf8');
+  assert.match(svc, /chatThreadDbPaths/);
+  assert.match(svc, /mergeChatMessageLists/);
 });

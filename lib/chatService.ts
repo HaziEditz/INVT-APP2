@@ -2,6 +2,7 @@ import { get, onValue, ref, type DataSnapshot } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { sendDriverMessage } from '@/lib/dispatchApi';
 import { chatLiveFingerprint, shouldAcceptLiveChatSnap } from '@/lib/chatLivePolicy';
+import { chatThreadDbPaths } from '@/lib/chatThreadPaths';
 import type { ChatMessage } from '@/types';
 
 export { chatLiveFingerprint, shouldAcceptLiveChatSnap } from '@/lib/chatLivePolicy';
@@ -79,23 +80,55 @@ export function parseChatHistoryVal(
     .sort((a, b) => a.timestamp - b.timestamp);
 }
 
-export async function loadChatHistory(companyId: string, driverId: string): Promise<ChatMessage[]> {
-  const snap = await get(ref(getDatabaseInstance(), `messages/${companyId}/${driverId}`));
-  return parseChatHistoryVal(snap.val() as Record<string, Record<string, unknown>> | null, driverId);
+export function mergeChatMessageLists(lists: ChatMessage[][]): ChatMessage[] {
+  const map = new Map<string, ChatMessage>();
+  for (const list of lists) {
+    for (const m of list) {
+      const key = `${m.sender}|${m.text}|${m.timestamp}`;
+      const prev = map.get(key);
+      if (!prev || m.timestamp >= prev.timestamp) map.set(key, m);
+    }
+  }
+  return [...map.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 
-/** Live thread: MessageInsert persists here. onValue fires when a new child is pushed. */
+export async function loadChatHistory(companyId: string, driverId: string): Promise<ChatMessage[]> {
+  const lists: ChatMessage[][] = [];
+  for (const path of chatThreadDbPaths(companyId, driverId)) {
+    try {
+      const snap = await get(ref(getDatabaseInstance(), path));
+      lists.push(parseChatHistoryVal(snap.val() as Record<string, Record<string, unknown>> | null, driverId));
+    } catch (err) {
+      console.warn('[chat] history', path, err);
+    }
+  }
+  return mergeChatMessageLists(lists);
+}
+
+/** Live thread: MessageInsert dual-writes chatMessages + messages. Merge both. */
 export function subscribeChatThread(
   companyId: string,
   driverId: string,
   onUpdate: (msgs: ChatMessage[]) => void,
 ): () => void {
-  const histRef = ref(getDatabaseInstance(), `messages/${companyId}/${driverId}`);
-  return onValue(histRef, (snap) => {
-    onUpdate(
-      parseChatHistoryVal(snap.val() as Record<string, Record<string, unknown>> | null, driverId),
-    );
-  });
+  const db = getDatabaseInstance();
+  const bags = new Map<string, ChatMessage[]>();
+  const unsubs = chatThreadDbPaths(companyId, driverId).map((path) =>
+    onValue(
+      ref(db, path),
+      (snap) => {
+        bags.set(
+          path,
+          parseChatHistoryVal(snap.val() as Record<string, Record<string, unknown>> | null, driverId),
+        );
+        onUpdate(mergeChatMessageLists([...bags.values()]));
+      },
+      (err) => {
+        console.warn('[chat] thread', path, err);
+      },
+    ),
+  );
+  return () => unsubs.forEach((u) => u());
 }
 
 export function subscribeChat(
