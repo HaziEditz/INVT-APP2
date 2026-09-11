@@ -7,7 +7,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { driverChatTabHref, isCompanyChatEnabled } from '../lib/companyChatPolicy.ts';
-import { chatThreadDbPaths, chatThreadDriverIds } from '../lib/chatThreadPaths.ts';
+import {
+  chatHistoryRowToMessage,
+  chatThreadDbPaths,
+  chatThreadDriverIds,
+  conversationSortMs,
+  isDispatcherSenderId,
+} from '../lib/chatThreadPaths.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -67,4 +73,53 @@ test('live thread listens on chatMessages (readable today) and messages', () => 
   const panel = readFileSync(join(root, 'components/ChatPanel.tsx'), 'utf8');
   assert.match(panel, /scrollToEnd/);
   assert.match(panel, /onContentSizeChange/);
+});
+
+test('conversation is a back-and-forth thread: driver right, dispatcher left, time order', () => {
+  assert.equal(isDispatcherSenderId('Dispatcher'), true);
+  assert.equal(isDispatcherSenderId('0'), true);
+  assert.equal(isDispatcherSenderId('D001'), false);
+
+  const hi = chatHistoryRowToMessage(
+    'a',
+    { senderId: 'D001', message: 'hi', date: '2026-09-11', time: '14:00', createdAt: 0 },
+    'T201',
+  );
+  const reply = chatHistoryRowToMessage(
+    'b',
+    {
+      senderId: 'Dispatcher',
+      senderName: 'Dispatcher',
+      message: 'hello',
+      date: '2026-09-11',
+      time: '14:01',
+      createdAt: Date.parse('2026-09-11T14:01:00'),
+    },
+    'T201',
+  );
+  assert.equal(hi?.sender, 'driver');
+  assert.equal(reply?.sender, 'dispatcher');
+  assert.ok(hi && reply && hi.timestamp < reply.timestamp);
+
+  const liveHi = {
+    createdAt: Date.parse('2026-09-11T14:00:30'),
+    Date: '2026-09-11',
+    Time: '14:00',
+    Id: 5,
+  };
+  const optimisticReply = { Date: '2026-09-11', Time: '14:01', Id: Date.now() };
+  assert.ok(conversationSortMs(liveHi) < conversationSortMs(optimisticReply));
+  const naiveFirst = [liveHi, optimisticReply].sort(
+    (a, b) => (a.createdAt || 0) - (b.createdAt || 0) || a.Id - b.Id,
+  )[0];
+  assert.equal(naiveFirst, optimisticReply);
+
+  const panel = readFileSync(join(root, 'components/ChatPanel.tsx'), 'utf8');
+  assert.match(panel, /styles\.rowMine/);
+  assert.match(panel, /styles\.rowTheirs/);
+  assert.match(panel, /alignItems: 'flex-end'/);
+  assert.match(panel, /alignItems: 'flex-start'/);
+  assert.match(panel, /width: '100%'/);
+  const svc = readFileSync(join(root, 'lib/chatService.ts'), 'utf8');
+  assert.match(svc, /chatHistoryRowToMessage/);
 });

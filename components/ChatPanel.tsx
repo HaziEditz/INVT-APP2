@@ -149,13 +149,11 @@ export function ChatPanel() {
           ) : null
         }
         renderItem={({ item }) => (
-          <View style={[styles.bubble, item.sender === 'driver' ? styles.mine : styles.theirs]}>
-            <Text style={styles.sender}>{item.sender === 'driver' ? 'You' : 'Dispatcher'}</Text>
-            <View style={styles.bubbleBody}>
+          <View style={[styles.row, item.sender === 'driver' ? styles.rowMine : styles.rowTheirs]}>
+            <View style={[styles.bubble, item.sender === 'driver' ? styles.mine : styles.theirs]}>
+              <Text style={styles.sender}>{item.sender === 'driver' ? 'You' : 'Dispatcher'}</Text>
               <Text style={styles.message}>{item.text}</Text>
-              <View style={styles.timestampRow}>
-                <Text style={styles.timestamp}>{formatChatTime(item.timestamp)}</Text>
-              </View>
+              <Text style={styles.timestamp}>{formatChatTime(item.timestamp)}</Text>
             </View>
           </View>
         )}
@@ -178,30 +176,23 @@ const styles = StyleSheet.create({
   list: { padding: 16 },
   loadingWrap: { padding: 24, alignItems: 'center' },
   empty: { color: Colors.textMuted, fontSize: 15, textAlign: 'center', paddingVertical: 32, lineHeight: 22 },
-  bubble: { maxWidth: '85%', borderRadius: 14, padding: 12, marginBottom: 8 },
+  row: { width: '100%', marginBottom: 8 },
+  rowMine: { alignItems: 'flex-end' },
+  rowTheirs: { alignItems: 'flex-start' },
+  bubble: { maxWidth: '85%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
   mine: {
-    alignSelf: 'flex-end',
     backgroundColor: Colors.accent + '33',
     borderWidth: 1,
     borderColor: Colors.accent,
   },
   theirs: {
-    alignSelf: 'flex-start',
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  sender: { color: Colors.textMuted, fontSize: 11, marginBottom: 4, fontWeight: '600' },
-  bubbleBody: { width: '100%' },
+  sender: { color: Colors.textMuted, fontSize: 11, marginBottom: 2, fontWeight: '600' },
   message: { color: Colors.text, fontSize: 15, lineHeight: 20 },
-  timestampRow: {
-    marginTop: 10,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
-    alignSelf: 'stretch',
-  },
-  timestamp: { color: Colors.textMuted, fontSize: 11, textAlign: 'right' },
+  timestamp: { color: Colors.textMuted, fontSize: 11, marginTop: 4 },
   composer: {
     flexDirection: 'row',
     paddingHorizontal: 12,

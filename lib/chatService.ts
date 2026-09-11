@@ -2,7 +2,7 @@ import { get, onValue, ref, type DataSnapshot } from 'firebase/database';
 import { getDatabaseInstance } from '@/lib/firebase';
 import { sendDriverMessage } from '@/lib/dispatchApi';
 import { chatLiveFingerprint, shouldAcceptLiveChatSnap } from '@/lib/chatLivePolicy';
-import { chatThreadDbPaths } from '@/lib/chatThreadPaths';
+import { chatHistoryRowToMessage, chatThreadDbPaths } from '@/lib/chatThreadPaths';
 import type { ChatMessage } from '@/types';
 
 export { chatLiveFingerprint, shouldAcceptLiveChatSnap } from '@/lib/chatLivePolicy';
@@ -56,17 +56,7 @@ export function chatPayloadToMessage(
 }
 
 function historyRowToMessage(key: string, row: Record<string, unknown>, driverId: string): ChatMessage | null {
-  const text = String(row.message ?? row.Message ?? '').trim();
-  if (!text) return null;
-  const senderId = String(row.senderId ?? row.SenderId ?? '');
-  const createdAt = parseInt(String(row.createdAt ?? ''), 10) || Date.now();
-  const isDriver = senderId === String(driverId) || senderId === driverId;
-  return {
-    id: `hist-${key}`,
-    sender: isDriver ? 'driver' : 'dispatcher',
-    text,
-    timestamp: createdAt,
-  };
+  return chatHistoryRowToMessage(key, row, driverId);
 }
 
 export function parseChatHistoryVal(
@@ -84,7 +74,7 @@ export function mergeChatMessageLists(lists: ChatMessage[][]): ChatMessage[] {
   const map = new Map<string, ChatMessage>();
   for (const list of lists) {
     for (const m of list) {
-      const key = `${m.sender}|${m.text}|${m.timestamp}`;
+      const key = `${m.sender}|${m.text}|${Math.floor(m.timestamp / 5000)}`;
       const prev = map.get(key);
       if (!prev || m.timestamp >= prev.timestamp) map.set(key, m);
     }
