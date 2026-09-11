@@ -39,6 +39,13 @@ export function ChatPanel() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const seenIds = useRef(new Set<string>());
+  const listRef = useRef<FlatList<ChatMessage>>(null);
+
+  const scrollToLatest = useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
 
   const mergeMessage = useCallback((msg: ChatMessage) => {
     const dedupeKey = `${msg.sender}:${msg.text}:${Math.floor(msg.timestamp / 5000)}`;
@@ -73,6 +80,7 @@ export function ChatPanel() {
         return next;
       });
       setLoading(false);
+      scrollToLatest(true);
     });
     const unsubLive = subscribeChat(
       driver.id,
@@ -88,7 +96,7 @@ export function ChatPanel() {
       unsubThread();
       unsubLive();
     };
-  }, [driver?.id, driver?.companyId, mergeMessage]);
+  }, [driver?.id, driver?.companyId, mergeMessage, scrollToLatest]);
 
   const send = async () => {
     const body = text.trim();
@@ -129,9 +137,12 @@ export function ChatPanel() {
         </View>
       ) : null}
       <FlatList
+        ref={listRef}
         data={messages}
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.list, { paddingBottom: 8, flexGrow: 1 }]}
+        onContentSizeChange={() => scrollToLatest(true)}
+        onLayout={() => scrollToLatest(false)}
         ListEmptyComponent={
           !loading ? (
             <Text style={styles.empty}>No messages yet. Send a note to dispatch when you need help.</Text>

@@ -12,8 +12,21 @@ export function chatThreadDriverIds(driverId: string): string[] {
   const raw = String(driverId || '').trim();
   if (!raw) return [];
   const ids = new Set<string>([raw]);
-  const normalized = normalizeForThread(raw);
-  if (normalized) ids.add(normalized);
+  const stripped = raw.replace(/[\s\-_.]/g, '');
+  const withLetter = stripped.match(/^([dD])(\d+)$/);
+  const digits = stripped.match(/^(\d+)$/);
+  if (withLetter) {
+    const n = parseInt(withLetter[2], 10);
+    ids.add('D' + String(n).padStart(3, '0'));
+    ids.add(String(n));
+  } else if (digits) {
+    const n = parseInt(digits[1], 10);
+    ids.add('D' + String(n).padStart(3, '0'));
+    ids.add(String(n));
+  } else {
+    const normalized = normalizeForThread(raw);
+    if (normalized) ids.add(normalized);
+  }
   return [...ids];
 }
 

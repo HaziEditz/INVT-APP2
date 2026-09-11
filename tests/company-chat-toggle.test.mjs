@@ -56,11 +56,15 @@ test('driver chat listeners and banners are skipped when chat is off', () => {
 });
 
 test('live thread listens on chatMessages (readable today) and messages', () => {
-  assert.deepEqual(chatThreadDriverIds('D001'), ['D001']);
+  assert.ok(chatThreadDriverIds('D001').includes('D001'));
+  assert.ok(chatThreadDriverIds('1').includes('D001'));
   const paths = chatThreadDbPaths('860869', 'D001');
   assert.ok(paths.includes('chatMessages/860869/D001'));
   assert.ok(paths.includes('messages/860869/D001'));
   const svc = readFileSync(join(root, 'lib/chatService.ts'), 'utf8');
   assert.match(svc, /chatThreadDbPaths/);
   assert.match(svc, /mergeChatMessageLists/);
+  const panel = readFileSync(join(root, 'components/ChatPanel.tsx'), 'utf8');
+  assert.match(panel, /scrollToEnd/);
+  assert.match(panel, /onContentSizeChange/);
 });
