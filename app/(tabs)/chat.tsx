@@ -1,19 +1,22 @@
 import { ChatPanel } from '@/components/ChatPanel';
 import { TabSosBar } from '@/components/TabSosBar';
 import { useDriver } from '@/context/DriverContext';
-import { useFocusEffect } from 'expo-router';
+import { Redirect, useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
 import { View } from 'react-native';
 
 export default function ChatTabScreen() {
-  const { markChatViewed, markChatTabBlurred } = useDriver();
+  const { markChatViewed, markChatTabBlurred, chatEnabled } = useDriver();
 
   useFocusEffect(
     useCallback(() => {
+      if (!chatEnabled) return;
       markChatViewed();
       return () => markChatTabBlurred();
-    }, [markChatViewed, markChatTabBlurred]),
+    }, [chatEnabled, markChatViewed, markChatTabBlurred]),
   );
+
+  if (!chatEnabled) return <Redirect href="/(tabs)" />;
 
   return (
     <View style={{ flex: 1 }}>

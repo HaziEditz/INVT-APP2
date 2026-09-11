@@ -9,16 +9,17 @@ function bannerTitle(banner: DriverInAppBannerState): string {
 }
 
 export function DriverInAppBanner() {
-  const { inAppBanner, dismissInAppBanner, openIncomingSosMap } = useDriver();
+  const { inAppBanner, dismissInAppBanner, openIncomingSosMap, chatEnabled } = useDriver();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   if (!inAppBanner) return null;
+  if (inAppBanner.kind === 'chat' && !chatEnabled) return null;
 
   const onOpen = () => {
     if (inAppBanner.kind === 'chat') {
       dismissInAppBanner();
-      router.push('/(tabs)/chat');
+      if (chatEnabled) router.push('/(tabs)/chat');
     } else {
       openIncomingSosMap();
       dismissInAppBanner();

@@ -62,6 +62,7 @@ import {
 import { playInAppNotificationSound } from '@/lib/notificationSound';
 import { subscribeChat } from '@/lib/chatService';
 import { shouldAlertIncomingDispatcherChat } from '@/lib/chatReadPolicy';
+import { isCompanyChatEnabled } from '@/lib/companyChatPolicy';
 import {
   subscribeDriverQueue,
   filterLiveDriverQueueOffers,
@@ -399,6 +400,7 @@ interface DriverContextValue {
   clearIncomingSosAlert: () => void;
   dismissIncomingSosAlert: () => void;
   chatUnreadCount: number;
+  chatEnabled: boolean;
   markChatViewed: () => void;
   markChatTabBlurred: () => void;
 }
@@ -896,6 +898,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [sosResponding, setSosResponding] = useState(false);
   const [incomingSosResponseCommitted, setIncomingSosResponseCommitted] = useState(false);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const [chatEnabled, setChatEnabled] = useState(true);
   const chatTabFocusedRef = useRef(false);
   const lastChatNotifyKeyRef = useRef('');
   const lastChatReadTsRef = useRef(0);
@@ -1365,6 +1368,31 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       .then(({ loadTmConfig }) => loadTmConfig(companyId))
       .catch((err) => console.warn('[Driver] prefetch tmConfig failed:', err));
   }, [driver?.companyId, driver?.uid], 'Driver-company');
+
+  useSafeEffect(() => {
+    if (!driver?.companyId || !isFirebaseReady) {
+      setChatEnabled(true);
+      return;
+    }
+    const companyId = driver.companyId;
+    const unsub = onValue(
+      ref(getDatabaseInstance(), `companySettings/${companyId}`),
+      (snap) => {
+        setChatEnabled(isCompanyChatEnabled(snap.val()));
+      },
+      (err) => {
+        console.warn('[Driver] company chat flag', err);
+        setChatEnabled(true);
+      },
+    );
+    return () => unsub();
+  }, [driver?.companyId], 'Driver-chat-enabled');
+
+  useSafeEffect(() => {
+    if (chatEnabled) return;
+    setChatUnreadCount(0);
+    setInAppBanner((prev) => (prev?.kind === 'chat' ? null : prev));
+  }, [chatEnabled], 'Driver-chat-disabled');
 
   const refreshJobHistory = async () => {
     if (!driver?.companyId || !driver.id) {
@@ -3084,7 +3112,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [shiftActive, canListenForOffers, driver?.id, driver?.companyId], 'Driver-notification');
 
   useSafeEffect(() => {
-    if (!shiftActive || !isFirebaseReady || !driver?.id) return;
+    if (!shiftActive || !isFirebaseReady || !driver?.id || !chatEnabled) return;
     let cancelled = false;
     let unsubChat: (() => void) | undefined;
     let unsubNotify: (() => void) | undefined;
@@ -3128,7 +3156,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       unsubNotify?.();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shiftActive, driver?.id, notifyDispatcherChat], 'Driver-notificationChat');
+  }, [shiftActive, driver?.id, chatEnabled, notifyDispatcherChat], 'Driver-notificationChat');
 
   useSafeEffect(() => {
     if (!shiftActive || !isFirebaseReady || !driver?.id) return;
@@ -6726,6 +6754,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         clearIncomingSosAlert,
         dismissIncomingSosAlert,
         chatUnreadCount,
+        chatEnabled,
         markChatViewed,
         markChatTabBlurred,
       }}
